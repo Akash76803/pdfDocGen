@@ -1,0 +1,24 @@
+{
+  "name": "@document-tool/core",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/contracts": "*",
+    "@document-tool/datasource-sdk": "*",
+    "@document-tool/mapping-engine": "*",
+    "@document-tool/calculation-engine": "*",
+    "@document-tool/renderer-sdk": "*",
+    "@document-tool/persistence": "*",
+    "@document-tool/datasource-excel": "*",
+    "@document-tool/datasource-csv": "*",
+    "@document-tool/grouping-engine": "*",
+    "@document-tool/template-engine": "*"
+  },
+  "type": "module"
+}

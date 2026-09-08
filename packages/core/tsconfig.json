@@ -1,0 +1,42 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src"
+  },
+  "include": [
+    "src/**/*"
+  ],
+  "references": [
+    {
+      "path": "../contracts"
+    },
+    {
+      "path": "../datasource-sdk"
+    },
+    {
+      "path": "../mapping-engine"
+    },
+    {
+      "path": "../grouping-engine"
+    },
+    {
+      "path": "../calculation-engine"
+    },
+    {
+      "path": "../renderer-sdk"
+    },
+    {
+      "path": "../persistence"
+    },
+    {
+      "path": "../datasource-excel"
+    },
+    {
+      "path": "../datasource-csv"
+    },
+    {
+      "path": "../template-engine"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+import { describe,expect,it } from 'vitest';
+import type { DocumentGroup,TemplateDefinition } from '@document-tool/contracts';
+import { TemplateEngine } from '../src/template-engine.js';
+const group:DocumentGroup={id:'g1',key:'INV001',header:{invoice:{number:'INV001'},customer:{name:'ABC'}},items:[{product:'A',qty:2},{product:'B',qty:1}],itemDetails:[],sourceRowIndexes:[2,3],warnings:[],valid:true};
+const template:TemplateDefinition={id:'t',name:'T',version:1,page:{size:'A4',orientation:'PORTRAIT',margins:{top:10,right:10,bottom:10,left:10}},header:{blocks:[{id:'h',type:'TEXT',text:'INVOICE'}]},body:{blocks:[{id:'f',type:'FIELD',label:'No',path:'invoice.number'},{id:'m',type:'FIELD',label:'Missing',path:'customer.phone',fallback:'N/A'},{id:'tb',type:'TABLE',sourcePath:'items',columns:[{id:'p',label:'Product',path:'product'},{id:'q',label:'Qty',path:'qty'}]}]},footer:{blocks:[{id:'ft',type:'TEXT',text:'Thanks'}]}};
+describe('TemplateEngine',()=>{
+ it('builds renderer-independent text, field and table blocks',()=>{const r=new TemplateEngine().buildRenderModel(template,group);expect(r.errors).toHaveLength(0);expect(r.model?.header?.[0]).toMatchObject({type:'TEXT',text:'INVOICE'});expect(r.model?.body?.[0]).toMatchObject({type:'FIELD',value:'INV001'});expect(r.model?.body?.[2]).toMatchObject({type:'TABLE',rows:[['A',2],['B',1]]});expect(r.model?.footer?.[0]).toMatchObject({type:'TEXT',text:'Thanks'});expect(r.model?.page?.size).toBe('A4');});
+ it('uses fallback for missing fields',()=>{const r=new TemplateEngine().buildRenderModel(template,group);expect(r.model?.body?.[1]).toMatchObject({type:'FIELD',value:'N/A'});expect(r.warnings.some(w=>w.code==='FIELD_VALUE_MISSING')).toBe(true);});
+ it('handles empty table',()=>{const r=new TemplateEngine().buildRenderModel(template,{...group,items:[]});expect(r.model?.body?.[2]).toMatchObject({type:'TABLE',rows:[],empty:true});});
+ it('reports non-array table source',()=>{const t={...template,body:{blocks:[{id:'tb',type:'TABLE' as const,sourcePath:'customer.name',columns:[{id:'c',label:'X',path:'x'}]}]}};const r=new TemplateEngine().buildRenderModel(t,group);expect(r.warnings.some(w=>w.code==='TABLE_SOURCE_NOT_ARRAY')).toBe(true);});
+});

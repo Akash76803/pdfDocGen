@@ -1,0 +1,16 @@
+{
+  "name": "@document-tool/grouping-engine",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/contracts": "*",
+    "@document-tool/mapping-engine": "*"
+  },
+  "type": "module"
+}

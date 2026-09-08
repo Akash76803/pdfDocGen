@@ -1,0 +1,1262 @@
+/* designer.css */
+.dg-designer-shell {
+  display: grid;
+  grid-template-rows: var(--designer-header-height) var(--designer-toolbar-height, 48px) minmax(0, 1fr) var(--designer-statusbar-height);
+  height: 100vh;
+  width: 100vw;
+  background-color: var(--color-workspace-bg);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-ui);
+  overflow: hidden;
+}
+
+.dg-designer-shell__header {
+  grid-row: 1;
+  background-color: var(--color-panel-bg);
+  border-bottom: 1px solid var(--color-border);
+  z-index: var(--z-sticky);
+}
+
+.dg-designer-shell__toolbar {
+  grid-row: 2;
+  background-color: var(--color-panel-bg);
+  border-bottom: 1px solid var(--color-border);
+  z-index: var(--z-sticky);
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+.dg-designer-shell__body {
+  grid-row: 3;
+  display: flex;
+  min-width: 0;
+  min-height: 0; /* Important for flex/grid nested overflow */
+  position: relative;
+}
+
+.dg-designer-shell__status {
+  grid-row: 4;
+  background-color: var(--color-panel-bg);
+  border-top: 1px solid var(--color-border);
+  z-index: var(--z-sticky);
+}
+
+/* Header */
+.dg-designer-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 var(--space-4);
+}
+
+.dg-designer-header__left {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 1;
+}
+
+.dg-designer-header__title {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-sm);
+  color: var(--color-text-primary);
+}
+
+.dg-designer-header__center {
+  display: flex;
+  justify-content: center;
+  flex: 1;
+}
+
+.dg-designer-header__right {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--space-2);
+  flex: 1;
+}
+
+/* Context Toolbar */
+.dg-designer-context-toolbar {
+  display: flex;
+  align-items: center;
+  height: 100%;
+  padding: 0 var(--space-4);
+  gap: var(--space-3);
+}
+
+.dg-designer-context-toolbar__group {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dg-designer-context-toolbar__separator {
+  width: 1px;
+  height: 24px;
+  background-color: var(--color-border);
+}
+
+.dg-designer-context-toolbar__label {
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+}
+
+/* Base styles for simple controls in the toolbar */
+.dg-designer-context-toolbar select,
+.dg-designer-context-toolbar input[type="number"],
+.dg-designer-context-toolbar input[type="color"] {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-control-bg);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-xs);
+}
+
+.dg-designer-context-toolbar input[type="color"] {
+  padding: 0 4px;
+  width: 40px;
+}
+
+.dg-toolbar-number {
+  width: 60px;
+}
+
+.dg-toolbar-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 28px;
+  padding: 0 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+
+.dg-toolbar-button:hover:not(:disabled) {
+  background-color: var(--color-control-hover);
+}
+
+.dg-toolbar-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.dg-toolbar-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-primary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  cursor: pointer;
+}
+
+.dg-toolbar-toggle:hover:not(:disabled) {
+  background-color: var(--color-control-hover);
+}
+
+.dg-toolbar-toggle.active {
+  background-color: var(--color-control-active);
+  color: var(--color-bg-base); /* Contrast if active is dark, adjust as needed */
+}
+
+/* Status Bar */
+.dg-designer-statusbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 var(--space-3);
+  font-size: var(--font-size-xs);
+  color: var(--color-text-secondary);
+}
+
+.dg-designer-statusbar__left,
+.dg-designer-statusbar__center,
+.dg-designer-statusbar__right {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+}
+
+.dg-designer-statusbar__right {
+  justify-content: flex-end;
+}
+
+/* Tool Rail */
+.dg-designer-main {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--color-workspace-bg);
+}
+
+.dg-designer-legacy-workspace {
+  display: grid;
+  grid-template-columns: minmax(520px, 1fr) auto;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Inspector Layout */
+.dg-designer-inspector-layout {
+  display: flex;
+  height: 100%;
+  border-left: 1px solid var(--color-border);
+  background-color: var(--color-panel-bg);
+}
+
+.dg-designer-inspector {
+  display: flex;
+  flex-direction: column;
+  width: var(--designer-inspector-width, 300px);
+  height: 100%;
+  border-right: 1px solid var(--color-border);
+}
+
+.dg-designer-inspector__content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dg-designer-inspector-rail {
+  display: flex;
+  flex-direction: column;
+  width: var(--designer-tool-rail-width, 56px);
+  height: 100%;
+  background-color: var(--color-panel-bg);
+  padding: var(--space-2) 0;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.dg-designer-inspector-rail__top,
+.dg-designer-inspector-rail__bottom {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dg-designer-inspector-rail__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.dg-designer-inspector-rail__item:hover {
+  background-color: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-designer-inspector-rail__item--active {
+  background-color: var(--color-control-active);
+  color: var(--color-bg-base);
+}
+
+/* Inspector Section */
+.dg-inspector-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dg-inspector-section__header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dg-inspector-section__icon {
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+}
+
+.dg-inspector-section__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.dg-inspector-section__body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+
+.dg-designer-tool-rail {
+  display: flex;
+  flex-direction: column;
+  width: var(--designer-tool-rail-width, 56px);
+  height: 100%;
+  background-color: var(--color-panel-bg);
+  border-right: 1px solid var(--color-border);
+  padding: var(--space-2) 0;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dg-designer-tool-rail__item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: all 0.1s ease;
+}
+
+.dg-designer-tool-rail__item:hover {
+  background-color: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-designer-tool-rail__item--active {
+  background-color: var(--color-control-active);
+  color: var(--color-bg-base);
+}
+
+/* Left Panel */
+.dg-designer-left-panel {
+  display: flex;
+  flex-direction: column;
+  width: var(--designer-left-panel-width, 280px);
+  height: 100%;
+  background-color: var(--color-panel-bg);
+  border-right: 1px solid var(--color-border);
+}
+
+.dg-designer-left-panel__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 48px;
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dg-designer-left-panel__title {
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-text-primary);
+  margin: 0;
+}
+
+.dg-designer-left-panel__collapse {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-sm);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+}
+
+.dg-designer-left-panel__collapse:hover {
+  background-color: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-designer-left-panel__content {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+/* Element Library */
+.dg-element-library {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.dg-element-library__search input {
+  width: 100%;
+  height: 32px;
+  padding: 0 var(--space-3);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background-color: var(--color-control-bg);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-sm);
+}
+
+.dg-element-library__section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.dg-element-library__section-title {
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-medium);
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin: 0;
+}
+
+.dg-element-library__grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+}
+
+.dg-element-library__item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: 72px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  cursor: pointer;
+}
+
+.dg-element-library__item:hover {
+  border-color: var(--color-border-strong);
+  background-color: var(--color-control-hover);
+}
+
+.dg-element-library__item span {
+  font-size: var(--font-size-xs);
+}
+
+/* 
+ * Layers Panel Legacy UI Integration
+ * Overrides for .card-layers-panel inside the new left rail 
+ */
+.dg-designer-left-panel__content .card-layers-panel {
+  flex: 1;
+  min-height: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  margin: 0;
+}
+
+.dg-designer-left-panel__content .card-panel-heading {
+  display: none;
+}
+
+.dg-designer-left-panel__content .card-layer-list {
+  flex: 1;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  padding: 0;
+  gap: var(--space-2);
+}
+
+.dg-designer-left-panel__content .card-layer-row {
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: 2px;
+  display: flex;
+  flex-direction: column;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
+}
+
+.dg-designer-left-panel__content .card-layer-row:hover {
+  background-color: var(--color-bg-base);
+  border-color: var(--color-border-strong);
+}
+
+.dg-designer-left-panel__content .card-layer-row.active {
+  background-color: var(--color-accent-subtle);
+  border-color: var(--color-accent);
+  box-shadow: inset 3px 0 0 var(--color-accent);
+}
+
+.dg-designer-left-panel__content .card-layer-main {
+  color: var(--color-text-primary);
+  min-height: 40px;
+  height: auto;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  border: none;
+  padding: 4px 8px;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+
+.dg-designer-left-panel__content .card-layer-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--color-text-muted);
+}
+
+.dg-designer-left-panel__content .card-layer-row.active .card-layer-icon {
+  color: var(--color-accent);
+}
+
+.dg-designer-left-panel__content .card-layer-content {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  min-width: 0;
+  gap: 2px;
+}
+
+.dg-designer-left-panel__content .card-layer-main input {
+  color: var(--color-text-primary);
+  height: 20px;
+  font-size: var(--font-size-sm);
+  background: transparent;
+  border: 1px solid transparent;
+  width: 100%;
+  padding: 0 4px;
+  border-radius: var(--radius-sm);
+}
+.dg-designer-left-panel__content .card-layer-main input:focus {
+  border-color: var(--color-accent);
+  background: var(--color-bg-base);
+}
+
+.dg-designer-left-panel__content .card-layer-group {
+  font-size: 10px;
+  color: var(--color-text-muted);
+  padding-left: 4px;
+}
+
+.dg-designer-left-panel__content .card-layer-mini {
+  display: flex;
+  padding: 0 8px 8px 36px;
+  gap: var(--space-2);
+}
+
+.dg-designer-left-panel__content .card-layer-mini button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+
+.dg-designer-left-panel__content .card-layer-mini button:hover {
+  background-color: var(--color-control-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border);
+}
+
+.dg-designer-left-panel__content .card-layer-actions button {
+  background-color: var(--color-surface);
+  color: var(--color-text-primary);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  margin-bottom: var(--space-2);
+}
+
+.dg-designer-left-panel__content .card-layer-actions button:hover:not(:disabled) {
+  background-color: var(--color-control-hover);
+}
+
+
+/* Phase 7.7 Fix 1 — compact, reliably scrollable side panels */
+.dg-designer-main {
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dg-designer-left-panel {
+  flex: 0 0 var(--designer-left-panel-width, 280px);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.dg-designer-left-panel__header {
+  flex: 0 0 48px;
+}
+
+.dg-designer-left-panel__content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-bottom: 72px;
+}
+
+.dg-designer-left-panel__content::-webkit-scrollbar,
+.dg-designer-inspector__content::-webkit-scrollbar {
+  width: 10px;
+}
+
+.dg-designer-left-panel__content::-webkit-scrollbar-thumb,
+.dg-designer-inspector__content::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 38%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+.dg-designer-inspector-layout {
+  flex: 0 0 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.dg-designer-inspector {
+  flex: 0 0 var(--designer-inspector-width, 300px);
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow: hidden;
+}
+
+.dg-designer-inspector__content {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  max-height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding-bottom: 88px;
+}
+
+.dg-designer-inspector-rail {
+  flex: 0 0 var(--designer-tool-rail-width, 56px);
+  min-height: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* Denser element palette: keep more shapes visible without sacrificing hit targets. */
+.dg-element-library {
+  min-height: max-content;
+  gap: var(--space-3);
+}
+
+.dg-element-library__grid {
+  gap: 6px;
+}
+
+.dg-element-library__item {
+  min-width: 0;
+  height: 62px;
+  padding: 5px 3px;
+  gap: 5px;
+}
+
+.dg-element-library__item span {
+  width: 100%;
+  padding: 0 2px;
+  text-align: center;
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+/* Inspector controls must never grow wider than the inspector or hide lower controls. */
+.dg-designer-inspector__content .card-property-sections,
+.dg-designer-inspector__content .card-property-details,
+.dg-designer-inspector__content .dg-inspector-section,
+.dg-designer-inspector__content .dg-inspector-section__body {
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.dg-designer-inspector__content .card-property-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.dg-designer-inspector__content input,
+.dg-designer-inspector__content select,
+.dg-designer-inspector__content textarea,
+.dg-designer-inspector__content button {
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.dg-designer-inspector__content textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  overflow-y: auto;
+}
+
+/* Keep the appearance/text inspector usable on short laptop windows. */
+@media (max-height: 760px) {
+  .dg-designer-left-panel__content,
+  .dg-designer-inspector__content {
+    padding-top: 8px;
+    padding-bottom: 64px;
+  }
+
+  .dg-element-library__item {
+    height: 58px;
+  }
+
+  .dg-inspector-section__body {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .dg-designer-left-panel {
+    flex-basis: 230px;
+    width: 230px;
+  }
+
+  .dg-designer-inspector {
+    flex-basis: 270px;
+    width: 270px;
+  }
+
+  .dg-designer-inspector-rail {
+    flex-basis: 44px;
+    width: 44px;
+  }
+}
+
+/* Phase 7.9 Fix 5 — dedicated scrollable Layers workspace + restored z-order toolbar */
+.dg-designer-left-panel--layers .dg-designer-left-panel__content {
+  overflow: hidden;
+  padding-bottom: var(--space-3);
+}
+
+.dg-designer-left-panel--layers .card-layers-panel {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.dg-designer-left-panel--layers .card-layer-toolbar {
+  flex: 0 0 auto;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  padding-bottom: 8px;
+  background: var(--color-panel-bg);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dg-designer-left-panel--layers .card-layer-actions {
+  padding: 0;
+  margin: 0 0 6px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.dg-designer-left-panel--layers .card-layer-actions button {
+  margin-bottom: 0;
+  min-width: 0;
+  min-height: 28px;
+}
+
+.dg-designer-left-panel--layers .card-layer-order-actions {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.dg-designer-left-panel--layers .card-layer-order-actions button {
+  min-width: 0;
+  min-height: 30px;
+  padding: 3px 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  background: var(--color-surface);
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.dg-designer-left-panel--layers .card-layer-order-actions button span {
+  margin-left: 2px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dg-designer-left-panel--layers .card-layer-order-actions button:hover:not(:disabled) {
+  background: var(--color-control-hover);
+  color: var(--color-text-primary);
+  border-color: var(--color-border-strong);
+}
+
+.dg-designer-left-panel--layers .card-layer-order-actions button:disabled {
+  opacity: .4;
+  cursor: default;
+}
+
+.dg-designer-left-panel--layers .card-layer-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 8px 2px 16px 0;
+}
+
+.dg-designer-left-panel--layers .card-layer-list::-webkit-scrollbar {
+  width: 9px;
+}
+
+.dg-designer-left-panel--layers .card-layer-list::-webkit-scrollbar-thumb {
+  background: color-mix(in srgb, var(--color-text-muted) 38%, transparent);
+  border: 2px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+@media (max-height: 760px) {
+  .dg-designer-left-panel--layers .card-layer-main {
+    min-height: 34px;
+  }
+  .dg-designer-left-panel--layers .card-layer-mini {
+    padding-bottom: 5px;
+  }
+  .dg-designer-left-panel--layers .card-layer-order-actions button {
+    min-height: 28px;
+  }
+}
+
+/* Phase 8.4 Fix2 — hierarchical group layers */
+.dg-designer-left-panel--layers .card-layer-actions {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.dg-designer-left-panel--layers .card-layer-group-container {
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+  overflow: hidden;
+  min-width: 0;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-container.active {
+  border-color: var(--accent-color);
+  box-shadow: inset 3px 0 0 var(--accent-color);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-header {
+  display: grid;
+  grid-template-columns: 24px 26px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  padding: 7px 7px 5px;
+  cursor: pointer;
+  background: color-mix(in srgb, var(--color-surface) 92%, var(--accent-color) 8%);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-container.active .card-layer-group-header {
+  background: color-mix(in srgb, var(--color-surface) 84%, var(--accent-color) 16%);
+}
+
+.dg-designer-left-panel--layers .card-layer-collapse,
+.dg-designer-left-panel--layers .card-layer-group-quick-actions button,
+.dg-designer-left-panel--layers .card-layer-group-order button {
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.dg-designer-left-panel--layers .card-layer-collapse {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+
+.dg-designer-left-panel--layers .card-layer-collapse:hover,
+.dg-designer-left-panel--layers .card-layer-group-quick-actions button:hover,
+.dg-designer-left-panel--layers .card-layer-group-order button:hover:not(:disabled) {
+  background: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: var(--accent-color);
+  background: color-mix(in srgb, var(--accent-color) 10%, transparent);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-title {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-title input {
+  width: 100%;
+  min-width: 0;
+  height: 25px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 2px 5px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-title input:hover,
+.dg-designer-left-panel--layers .card-layer-group-title input:focus {
+  border-color: var(--color-border-strong);
+  background: var(--color-panel-bg);
+  outline: none;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-title small {
+  padding-left: 5px;
+  color: var(--color-text-muted);
+  font-size: 9px;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-quick-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-quick-actions button {
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-order {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  padding: 0 7px 6px 61px;
+  background: color-mix(in srgb, var(--color-surface) 96%, var(--accent-color) 4%);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-order button {
+  height: 24px;
+  border: 1px solid var(--color-border);
+  border-radius: 5px;
+  background: var(--color-panel-bg);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-order button:disabled {
+  opacity: .35;
+  cursor: default;
+}
+
+.dg-designer-left-panel--layers .card-layer-group-children {
+  position: relative;
+  padding: 2px 7px 7px 22px;
+  background: var(--color-panel-bg);
+  border-top: 1px solid var(--color-border);
+}
+
+.dg-designer-left-panel--layers .card-layer-group-children::before {
+  content: '';
+  position: absolute;
+  left: 16px;
+  top: 0;
+  bottom: 12px;
+  border-left: 1px solid color-mix(in srgb, var(--color-text-muted) 35%, transparent);
+}
+
+.dg-designer-left-panel--layers .card-layer-child {
+  position: relative;
+  display: grid;
+  grid-template-columns: 16px 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 2px 3px 2px 0;
+}
+
+.dg-designer-left-panel--layers .card-layer-child-guide {
+  width: 14px;
+  height: 10px;
+  border-bottom: 1px solid color-mix(in srgb, var(--color-text-muted) 35%, transparent);
+}
+
+.dg-designer-left-panel--layers .card-layer-child input {
+  min-width: 0;
+  width: 100%;
+  height: 24px;
+  box-sizing: border-box;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  background: transparent;
+  color: var(--color-text-primary);
+  font-size: 10px;
+}
+
+.dg-designer-left-panel--layers .card-layer-child input:hover,
+.dg-designer-left-panel--layers .card-layer-child input:focus {
+  border-color: var(--color-border);
+  background: var(--color-surface);
+  outline: none;
+}
+
+.dg-designer-left-panel--layers .card-layer-child-state {
+  min-width: 18px;
+  display: inline-flex;
+  gap: 2px;
+  color: var(--color-text-muted);
+}
+
+/* Phase 8.5 Fix5 - compact path editing toolbar */
+.dg-designer-context-toolbar {
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: thin;
+  white-space: nowrap;
+  padding: 0 var(--space-3);
+  gap: var(--space-2);
+}
+
+.dg-designer-context-toolbar > * {
+  flex: 0 0 auto;
+}
+
+.dg-path-toolbar {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 8px;
+  height: 100%;
+}
+
+.dg-path-toolbar__section {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: 0 0 auto;
+}
+
+.dg-path-toolbar__section-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-secondary);
+  letter-spacing: .02em;
+  text-transform: uppercase;
+  margin-right: 2px;
+}
+
+.dg-path-toolbar__divider {
+  width: 1px;
+  height: 22px;
+  background: var(--color-border);
+  flex: 0 0 1px;
+}
+
+.dg-path-toolbar__segmented {
+  display: inline-flex;
+  align-items: center;
+  height: 26px;
+  padding: 2px;
+  gap: 2px;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  background: var(--color-bg-subtle);
+}
+
+.dg-path-toolbar__segmented button {
+  height: 20px;
+  min-width: 28px;
+  padding: 0 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.dg-path-toolbar__segmented button:hover {
+  background: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-path-toolbar__segmented button.active {
+  background: var(--color-accent, #2563eb);
+  color: #fff;
+}
+
+.dg-path-toolbar__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.dg-toolbar-button--compact {
+  height: 26px;
+  padding: 0 7px;
+  font-size: 10px;
+  border-color: var(--color-border);
+  background: var(--color-control-bg);
+}
+
+.dg-toolbar-button--compact:hover:not(:disabled) {
+  border-color: var(--color-border-strong);
+}
+
+.dg-toolbar-button--danger {
+  color: var(--danger-color, #c62828);
+}
+
+.dg-toolbar-button--primary-soft {
+  color: var(--color-accent, #2563eb);
+  border-color: color-mix(in srgb, var(--color-accent, #2563eb) 30%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent, #2563eb) 8%, transparent);
+  font-weight: 700;
+}
+
+.dg-designer-header__home {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 1100px) {
+  .dg-path-toolbar__section-label {
+    display: none;
+  }
+  .dg-path-toolbar {
+    gap: 6px;
+  }
+  .dg-path-toolbar__divider {
+    height: 20px;
+  }
+}
+
+/* Phase 9.4 UX1 — professional large-canvas workspace */
+.dg-designer-main{background:var(--color-workspace-bg)}
+.dg-designer-legacy-workspace{gap:0;grid-template-columns:minmax(0,1fr) auto}
+.card-canvas-column{border-radius:0;border-top:0;border-bottom:0;min-width:0}
+.card-canvas-toolbar{
+  min-height:38px!important;
+  height:38px;
+  padding:4px 8px!important;
+  flex-wrap:nowrap!important;
+  gap:8px!important;
+  overflow:hidden!important;
+  align-items:center!important;
+}
+.canvas-artboard-name{flex:0 0 auto!important;min-width:150px;max-width:240px;white-space:nowrap;overflow:hidden}
+.canvas-artboard-name strong,.canvas-artboard-name span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.canvas-zoom-controls{
+  flex:1 1 auto!important;
+  min-width:0!important;
+  flex-wrap:nowrap!important;
+  justify-content:flex-start!important;
+  overflow-x:auto!important;
+  overflow-y:hidden!important;
+  scrollbar-width:thin;
+  padding-bottom:1px;
+}
+.canvas-zoom-controls::-webkit-scrollbar{height:4px}
+.canvas-zoom-controls::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--color-text-muted) 28%,transparent);border-radius:999px}
+.canvas-zoom-controls button,.canvas-zoom-controls .card-toolbar-check,.canvas-zoom-controls .card-grid-size-control{min-height:28px!important;white-space:nowrap}
+.card-canvas-stage{padding:48px!important}
+.card-canvas-status{min-height:24px!important;padding:3px 8px!important}
+.card-record-navigator{min-height:26px!important;padding-block:2px!important}
+.card-canvas-viewport.pan-ready{cursor:grab!important}
+.card-canvas-viewport.pan-active{cursor:grabbing!important;user-select:none}
+
+/* Keep the canvas as the dominant surface; side rails remain available to reopen panels. */
+.dg-designer-left-panel{box-shadow:1px 0 0 var(--color-border)}
+.dg-designer-inspector-layout{box-shadow:-1px 0 0 var(--color-border)}
+
+@media(max-width:1180px){
+  .card-canvas-toolbar{height:38px!important;align-items:center!important}
+  .canvas-artboard-name{width:auto!important}
+  .canvas-zoom-controls{flex:1 1 auto!important;justify-content:flex-start!important}
+}

@@ -1,0 +1,13 @@
+
+/* TEXT6B-FONT2 — Professional Font Manager */
+.card-font-manager{display:flex;flex-direction:column;gap:9px}
+.card-font-chip-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:5px}
+.card-font-chip-row button{max-width:100%;padding:5px 8px;border:1px solid var(--border-color,#d1d5db);border-radius:999px;background:var(--bg-primary,#fff);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-font-chip-row button.active{outline:2px solid var(--accent-color,#2563eb);outline-offset:1px}
+.card-font-list{display:flex;flex-direction:column;gap:6px;max-height:260px;overflow:auto;padding-right:2px}
+.card-font-item{display:flex;align-items:stretch;gap:6px;border:1px solid var(--border-color,#d1d5db);border-radius:7px;background:var(--bg-primary,#fff);padding:5px}
+.card-font-item.active{outline:2px solid var(--accent-color,#2563eb);outline-offset:1px}
+.card-font-preview{flex:1;min-width:0;text-align:left;border:0;background:transparent;padding:5px 6px;display:flex;flex-direction:column;gap:2px}
+.card-font-preview strong{font-size:15px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-font-preview span{font-size:11px;color:var(--text-secondary,#6b7280);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-font-item .card-user-asset-actions{display:flex;align-items:center;gap:3px}

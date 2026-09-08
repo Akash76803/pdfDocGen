@@ -1,0 +1,4 @@
+import { describe,expect,it } from 'vitest';
+import { DEFAULT_CARTON_DIELINE_INPUT,buildCardRenderModel,generateCartonDieline } from '../src/index.js';
+
+describe('Phase 9.3 dieline export policy',()=>{it('excludes editor-only bleed, safe and annotation guides while retaining visible proof cut/crease lines',()=>{let n=0;const artboard=generateCartonDieline(DEFAULT_CARTON_DIELINE_INPUT,p=>`${p}-${++n}`).template.artboards[0]!,model=buildCardRenderModel(artboard,{format:'PDF',targetMode:'CURRENT',includeBleed:false,includeCropMarks:false,usePrintSettings:true});expect(model.elements.some(element=>element.metadata?.technicalLayer==='CUT')).toBe(true);expect(model.elements.some(element=>element.metadata?.technicalLayer==='CREASE')).toBe(true);expect(model.elements.some(element=>element.metadata?.nonPrintingGuide===true)).toBe(false);});});

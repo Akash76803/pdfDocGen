@@ -1,0 +1,75 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": [
+      "DOM",
+      "DOM.Iterable",
+      "ES2020"
+    ],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../../packages/contracts"
+    },
+    {
+      "path": "../../packages/datasource-sdk"
+    },
+    {
+      "path": "../../packages/datasource-excel"
+    },
+    {
+      "path": "../../packages/datasource-csv"
+    },
+    {
+      "path": "../../packages/mapping-engine"
+    },
+    {
+      "path": "../../packages/calculation-engine"
+    },
+    {
+      "path": "../../packages/grouping-engine"
+    },
+    {
+      "path": "../../packages/renderer-sdk"
+    },
+    {
+      "path": "../../packages/renderer-pdf"
+    },
+    {
+      "path": "../../packages/renderer-image"
+    },
+    {
+      "path": "../../packages/renderer-docx"
+    },
+    {
+      "path": "../../packages/core"
+    },
+    {
+      "path": "../../packages/persistence"
+    },
+    {
+      "path": "../../packages/validation"
+    },
+    {
+      "path": "../../packages/template-engine"
+    }
+  ]
+}

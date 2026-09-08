@@ -1,0 +1,59 @@
+{
+  "compilerOptions": {
+    "composite": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "files": [],
+  "references": [
+    {
+      "path": "packages/contracts"
+    },
+    {
+      "path": "packages/validation"
+    },
+    {
+      "path": "packages/datasource-sdk"
+    },
+    {
+      "path": "packages/datasource-excel"
+    },
+    {
+      "path": "packages/datasource-csv"
+    },
+    {
+      "path": "packages/template-engine"
+    },
+    {
+      "path": "packages/mapping-engine"
+    },
+    {
+      "path": "packages/grouping-engine"
+    },
+    {
+      "path": "packages/calculation-engine"
+    },
+    {
+      "path": "packages/renderer-sdk"
+    },
+    {
+      "path": "packages/renderer-pdf"
+    },
+    {
+      "path": "packages/renderer-image"
+    },
+    {
+      "path": "packages/renderer-docx"
+    },
+    {
+      "path": "packages/persistence"
+    },
+    {
+      "path": "packages/core"
+    },
+    {
+      "path": "apps/desktop"
+    }
+  ]
+}

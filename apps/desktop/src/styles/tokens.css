@@ -1,0 +1,97 @@
+/* tokens.css */
+:root {
+  /* COLORS */
+  /* These are mapped in themes.css */
+  /*
+  --color-bg-base
+  --color-bg-subtle
+  --color-workspace-bg
+  --color-panel-bg
+  --color-panel-bg-elevated
+  --color-control-bg
+  --color-control-hover
+  --color-control-active
+
+  --color-text-primary
+  --color-text-secondary
+  --color-text-muted
+  --color-text-disabled
+
+  --color-border
+  --color-border-strong
+
+  --color-accent
+  --color-accent-hover
+  --color-accent-soft
+  --color-focus-ring
+
+  --color-success
+  --color-warning
+  --color-danger
+  --color-info
+  */
+
+  /* TYPOGRAPHY */
+  --font-family-ui: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+
+  --font-size-xs: 11px;
+  --font-size-sm: 13px;
+  --font-size-md: 14px;
+  --font-size-lg: 16px;
+  --font-size-xl: 20px;
+
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* SPACING */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* RADII */
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: 12px;
+
+  /* SHADOWS */
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+  --shadow-md: 0 4px 6px -1px rgba(0,0,0,0.1), 0 2px 4px -1px rgba(0,0,0,0.06);
+  --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.1), 0 4px 6px -2px rgba(0,0,0,0.05);
+
+  /* CONTROL SIZES */
+  --control-height-sm: 24px;
+  --control-height-md: 32px;
+  --control-height-lg: 40px;
+
+  /* APP LAYOUT */
+  --app-nav-width: 64px;
+  --app-header-height: 48px;
+
+  /* FUTURE DESIGNER LAYOUT TOKENS */
+  --designer-tool-rail-width: 48px;
+  --designer-left-panel-width: 260px;
+  --designer-inspector-width: 300px;
+  --designer-header-height: 48px;
+  --designer-toolbar-height: 44px;
+  --designer-statusbar-height: 32px;
+
+  /* Z-INDEX */
+  --z-base: 1;
+  --z-sticky: 100;
+  --z-toolbar: 200;
+  --z-popover: 300;
+  --z-modal: 400;
+  --z-toast: 500;
+
+  /* MOTION */
+  --motion-fast: 100ms;
+  --motion-normal: 200ms;
+  --ease-standard: cubic-bezier(0.4, 0.0, 0.2, 1);
+}

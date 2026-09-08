@@ -1,0 +1,20 @@
+{
+  "name": "@document-tool/datasource-csv",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/contracts": "*",
+    "@document-tool/datasource-sdk": "*",
+    "papaparse": "^5.4.1"
+  },
+  "type": "module",
+  "devDependencies": {
+    "@types/papaparse": "^5.3.14"
+  }
+}

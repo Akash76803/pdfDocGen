@@ -1,0 +1,73 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "useDefineForClassFields": true,
+    "module": "NodeNext",
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "moduleResolution": "NodeNext",
+    "skipLibCheck": true,
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noImplicitReturns": true,
+    "noFallthroughCasesInSwitch": true,
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true,
+    "composite": true,
+    "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true,
+    "baseUrl": ".",
+    "paths": {
+      "@document-tool/contracts": [
+        "packages/contracts/src/index.ts"
+      ],
+      "@document-tool/validation": [
+        "packages/validation/src/index.ts"
+      ],
+      "@document-tool/datasource-sdk": [
+        "packages/datasource-sdk/src/index.ts"
+      ],
+      "@document-tool/datasource-excel": [
+        "packages/datasource-excel/src/index.ts"
+      ],
+      "@document-tool/datasource-csv": [
+        "packages/datasource-csv/src/index.ts"
+      ],
+      "@document-tool/template-engine": [
+        "packages/template-engine/src/index.ts"
+      ],
+      "@document-tool/mapping-engine": [
+        "packages/mapping-engine/src/index.ts"
+      ],
+      "@document-tool/calculation-engine": [
+        "packages/calculation-engine/src/index.ts"
+      ],
+      "@document-tool/renderer-sdk": [
+        "packages/renderer-sdk/src/index.ts"
+      ],
+      "@document-tool/renderer-pdf": [
+        "packages/renderer-pdf/src/index.ts"
+      ],
+      "@document-tool/renderer-image": [
+        "packages/renderer-image/src/index.ts"
+      ],
+      "@document-tool/renderer-docx": [
+        "packages/renderer-docx/src/index.ts"
+      ],
+      "@document-tool/persistence": [
+        "packages/persistence/src/index.ts"
+      ],
+      "@document-tool/core": [
+        "packages/core/src/index.ts"
+      ],
+      "@document-tool/grouping-engine": [
+        "packages/grouping-engine/src/index.ts"
+      ]
+    }
+  }
+}

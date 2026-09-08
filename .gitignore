@@ -1,0 +1,31 @@
+# Dependencies
+node_modules/
+
+# TypeScript and package build output
+dist/
+build/
+coverage/
+*.tsbuildinfo
+
+# Temporary and local runtime files
+tmp/
+temp/
+*.log
+*.local
+
+# Generated export and smoke-test output at the repository root
+/*.pdf
+/*.png
+/*.jpg
+/*.jpeg
+/*.zip
+
+# Editors and operating systems
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Rust / Tauri output
+apps/desktop/src-tauri/target/
+

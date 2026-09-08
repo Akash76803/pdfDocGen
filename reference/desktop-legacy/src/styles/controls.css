@@ -1,0 +1,188 @@
+/* controls.css */
+
+/* BUTTON BASE */
+.dg-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  height: var(--control-height-md);
+  padding: 0 var(--space-4);
+  border-radius: var(--radius-md);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  font-weight: var(--font-weight-medium);
+  border: 1px solid transparent;
+  cursor: pointer;
+  background-color: var(--color-control-bg);
+  color: var(--color-text-primary);
+  transition: background-color var(--motion-fast) var(--ease-standard), 
+              border-color var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard),
+              opacity var(--motion-fast) var(--ease-standard);
+}
+
+.dg-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* BUTTON VARIANTS */
+.dg-button--primary {
+  background-color: var(--color-accent);
+  color: #ffffff; /* Primary buttons usually need forced contrast text */
+}
+
+.dg-button--primary:hover {
+  background-color: var(--color-accent-hover);
+}
+
+.dg-button--primary:active {
+  background-color: var(--color-accent);
+}
+
+.dg-button--secondary {
+  background-color: transparent;
+  border-color: var(--color-border-strong);
+}
+
+.dg-button--secondary:hover {
+  background-color: var(--color-control-hover);
+}
+
+.dg-button--secondary:active {
+  background-color: var(--color-control-active);
+}
+
+.dg-button--ghost {
+  background-color: transparent;
+}
+
+.dg-button--ghost:hover {
+  background-color: var(--color-control-hover);
+}
+
+.dg-button--danger {
+  background-color: var(--color-danger);
+  color: #ffffff;
+}
+
+.dg-button--danger:hover {
+  opacity: 0.9;
+}
+
+/* BUTTON SIZES */
+.dg-button--sm {
+  height: var(--control-height-sm);
+  padding: 0 var(--space-2);
+  font-size: var(--font-size-sm);
+}
+
+.dg-button--lg {
+  height: var(--control-height-lg);
+  padding: 0 var(--space-6);
+}
+
+/* ICON BUTTON */
+.dg-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control-height-md);
+  height: var(--control-height-md);
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background-color: transparent;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  padding: 0;
+  transition: background-color var(--motion-fast) var(--ease-standard), 
+              color var(--motion-fast) var(--ease-standard);
+}
+
+.dg-icon-button:hover {
+  background-color: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-icon-button:active {
+  background-color: var(--color-control-active);
+}
+
+.dg-icon-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* INPUTS */
+.dg-input,
+.dg-textarea,
+.dg-select,
+.dg-search-input {
+  width: 100%;
+  height: var(--control-height-md);
+  padding: 0 var(--space-3);
+  background-color: var(--color-control-bg);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  color: var(--color-text-primary);
+  font-family: inherit;
+  font-size: var(--font-size-md);
+  transition: border-color var(--motion-fast) var(--ease-standard);
+}
+
+.dg-textarea {
+  height: auto;
+  min-height: 80px;
+  padding: var(--space-2) var(--space-3);
+  resize: vertical;
+}
+
+.dg-input::placeholder,
+.dg-textarea::placeholder,
+.dg-search-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.dg-input:focus,
+.dg-textarea:focus,
+.dg-select:focus,
+.dg-search-input:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 1px var(--color-accent);
+}
+
+.dg-input:disabled,
+.dg-textarea:disabled,
+.dg-select:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* CONTROL LABEL */
+.dg-control-label {
+  display: block;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+  font-weight: var(--font-weight-medium);
+  margin-bottom: var(--space-1);
+}
+
+/* CONTROL GROUP */
+.dg-control-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* DIVIDER */
+.dg-divider {
+  height: 1px;
+  width: 100%;
+  background-color: var(--color-border);
+  border: none;
+  margin: var(--space-4) 0;
+}

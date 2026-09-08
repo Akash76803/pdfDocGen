@@ -1,0 +1,27 @@
+{
+  "name": "document-builder-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Standalone local-first PDF/DOCX business document builder",
+  "engines": {
+    "node": ">=20 <21"
+  },
+  "scripts": {
+    "dev": "npm run dev -w @document-builder/desktop",
+    "build": "npm run build --workspaces --if-present",
+    "typecheck": "tsc -b --pretty false",
+    "test": "vitest run --exclude \"reference/**\" --exclude \"packages/persistence/test/phase6*.test.ts\" --exclude \"packages/persistence/test/phase7*.test.ts\" --exclude \"packages/renderer-pdf/test/phase650-card-pdf-export.test.ts\" --exclude \"packages/renderer-image/test/phase650-card-image-export.test.ts\"",
+    "tauri:dev": "npm run tauri dev -w @document-builder/desktop"
+  },
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "devDependencies": {
+    "@tauri-apps/cli": "^1.6.0",
+    "@testing-library/react": "^16.3.3",
+    "happy-dom": "^20.11.12",
+    "typescript": "^5.5.4",
+    "vitest": "^1.6.0"
+  }
+}

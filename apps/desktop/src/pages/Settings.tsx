@@ -1,0 +1,5 @@
+import { Moon, Sun } from 'lucide-react';
+import { PageHeader } from '../components/PageHeader.tsx';
+export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThemeChange: (theme: 'light' | 'dark') => void }) {
+  return <div className="page"><PageHeader eyebrow="Application" title="Settings" description="Configure the standalone Document Builder workspace." /><section className="panel settings-list"><div><span><strong>Appearance</strong><small>Choose a comfortable workspace theme.</small></span><button className="secondary" onClick={() => onThemeChange(theme === 'light' ? 'dark' : 'light')}>{theme === 'light' ? <Moon size={16}/> : <Sun size={16}/>}Switch to {theme === 'light' ? 'dark' : 'light'}</button></div><div><span><strong>Storage</strong><small>Templates and workspace data remain local-first in DB-1.</small></span><span className="status-pill">Local</span></div><div><span><strong>Desktop runtime</strong><small>Tauri remains on the extracted version; no runtime upgrade in DB-1.</small></span><span className="status-pill">Preserved</span></div></section></div>;
+}

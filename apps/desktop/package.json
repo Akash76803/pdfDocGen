@@ -1,0 +1,39 @@
+{
+  "name": "@document-builder/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/calculation-engine": "*",
+    "@document-tool/contracts": "*",
+    "@document-tool/core": "*",
+    "@document-tool/datasource-csv": "*",
+    "@document-tool/datasource-excel": "*",
+    "@document-tool/datasource-sdk": "*",
+    "@document-tool/mapping-engine": "*",
+    "@document-tool/persistence": "*",
+    "@document-tool/renderer-docx": "*",
+    "@document-tool/renderer-image": "*",
+    "@document-tool/renderer-pdf": "*",
+    "@document-tool/renderer-sdk": "*",
+    "@document-tool/template-engine": "*",
+    "@document-tool/validation": "*",
+    "@tauri-apps/api": "^1.6.0",
+    "lucide-react": "^0.400.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-qr-code": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.3",
+    "@types/react-dom": "^18.3.0",
+    "@vitejs/plugin-react": "^4.3.1",
+    "typescript": "^5.5.4",
+    "vite": "^5.4.0"
+  }
+}

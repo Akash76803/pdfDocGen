@@ -1,0 +1,151 @@
+/* app-shell.css */
+
+.dg-app-shell {
+  display: flex;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-family-ui);
+}
+
+.dg-app-nav {
+  position: sticky;
+  top: 0;
+  width: var(--app-nav-width);
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background-color: var(--color-panel-bg);
+  border-right: 1px solid var(--color-border);
+  z-index: var(--z-sticky);
+  transition: width var(--motion-normal) var(--ease-standard);
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+.dg-app-nav__header {
+  display: flex;
+  align-items: center;
+  height: var(--app-header-height);
+  padding: 0 var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.dg-app-nav__logo {
+  font-weight: var(--font-weight-bold);
+  font-size: var(--font-size-md);
+  color: var(--color-text-primary);
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+.dg-app-nav__menu {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2);
+  flex-grow: 1;
+}
+
+.dg-app-nav__item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--control-height-md);
+  padding: 0 var(--space-2);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-medium);
+  text-decoration: none;
+  cursor: pointer;
+  background: transparent;
+  border: none;
+  text-align: left;
+  transition: background-color var(--motion-fast) var(--ease-standard),
+              color var(--motion-fast) var(--ease-standard);
+  white-space: nowrap;
+}
+
+.dg-app-nav__item:hover {
+  background-color: var(--color-control-hover);
+  color: var(--color-text-primary);
+}
+
+.dg-app-nav__item--active {
+  background-color: var(--color-accent-soft);
+  color: var(--color-accent);
+}
+
+.dg-app-nav__footer {
+  padding: var(--space-2);
+  border-top: 1px solid var(--color-border);
+  flex-shrink: 0;
+}
+
+.dg-app-main {
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0; /* Prevents flex flex-grow overflow */
+  min-height: 0; /* Allows the content scroller to shrink inside the viewport */
+  height: 100vh;
+  overflow: hidden;
+}
+
+.dg-app-content {
+  flex-grow: 1;
+  min-height: 0;
+  padding: var(--space-6) var(--space-8);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+
+/* PageHeader Styles */
+.dg-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  margin-bottom: var(--space-6);
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dg-page-header__title-area {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.dg-page-header__title {
+  margin: 0;
+  font-size: var(--font-size-xl);
+  font-weight: var(--font-weight-bold);
+  color: var(--color-text-primary);
+}
+
+.dg-page-header__subtitle {
+  margin: 0;
+  font-size: var(--font-size-sm);
+  color: var(--color-text-secondary);
+}
+
+.dg-page-header__actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* Responsive Desktop */
+@media (min-width: 1100px) {
+  .dg-app-nav {
+    width: 240px; /* Expand nav on wider screens */
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "name": "@document-tool/datasource-excel",
+  "version": "1.0.0",
+  "private": true,
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/contracts": "*",
+    "@document-tool/datasource-sdk": "*",
+    "xlsx": "^0.18.5"
+  },
+  "type": "module"
+}
