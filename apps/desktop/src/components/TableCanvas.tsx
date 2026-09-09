@@ -1,17 +1,35 @@
 import { Barcode, Image, QrCode } from 'lucide-react';
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { NormalizedRecord } from '@document-tool/contracts';
-import { displayValue, type BuilderDataSource } from '../lib/dataSourceStore.ts';
+import { type BuilderDataSource } from '../lib/dataSourceStore.ts';
 import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
-import { dynamicRows, type TableCell, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
+import { dynamicRows, evaluateTableFormula, formatTableValue, smartColumnWidths, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
 
-export function TableCanvas({ table, record, source, documentSource, onChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; onChange: (table: TableDefinition) => void }) {
+export function TableCanvas({ table, record, source, documentSource, onChange, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; onChange: (table: TableDefinition) => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => onChange({ ...table, selectedCellId: cellId });
   const runtime = dynamicRows(table, record, source, documentSource);
+  const columnWidths = smartColumnWidths(table, runtime.map((row) => row.value));
+  const tableRef = useRef<HTMLTableElement | null>(null);
+
+  useLayoutEffect(() => {
+    const node = tableRef.current;
+    if (!node || !onHeightChange) return;
+    let last = 0;
+    const publish = () => {
+      const next = Math.max(32, Math.ceil(node.offsetHeight));
+      if (Math.abs(next - last) < 1) return;
+      last = next;
+      onHeightChange(next);
+    };
+    publish();
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+    observer?.observe(node);
+    return () => observer?.disconnect();
+  }, [onHeightChange, table.id, table.mode, table.columns.length, table.headerRows.length, table.bodyRows.length, table.customRows.length, table.rows.length, runtime.length]);
 
   return <div className="db-table-shell" style={{ '--table-border': table.borderColor, '--table-border-width': `${table.borderWidth}px` } as CSSProperties}>
-    <table className="db-table">
-      {table.columns.length > 0 && <colgroup>{table.columns.map((column) => <col key={column.id} style={{ width: column.width }}/>)}</colgroup>}
+    <table ref={tableRef} className="db-table">
+      {table.columns.length > 0 && <colgroup>{table.columns.map((column, index) => <col key={column.id} style={{ width: `${columnWidths[index] ?? (100 / table.columns.length)}%` }}/>)}</colgroup>}
       {table.headerRows.length > 0 && <thead>{table.headerRows.map((row) => <RenderRow key={row.id} row={row} table={table} onSelect={selectCell}/>)}</thead>}
       <tbody>
         {table.mode === 'custom' && table.rows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} onSelect={selectCell}/>) }
@@ -24,13 +42,22 @@ export function TableCanvas({ table, record, source, documentSource, onChange }:
 }
 
 function RenderRow({ row, table, runtimeValue, onSelect }: { row: TableRow; table: TableDefinition; runtimeValue?: unknown; onSelect: (cellId: string) => void }) {
-  return <tr style={{ height: row.autoHeight ? undefined : row.height }}>{row.cells.map((cell) => <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={table.selectedCellId === cell.id ? 'selected-db-cell' : ''} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} runtimeValue={runtimeValue}/></td>)}</tr>;
+  let visualColumn = 0;
+  return <tr style={{ height: row.autoHeight ? undefined : row.height }}>{row.cells.map((cell) => {
+    const column = table.columns[visualColumn];
+    visualColumn += Math.max(1, cell.colSpan);
+    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={table.selectedCellId === cell.id ? 'selected-db-cell' : ''} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} runtimeValue={runtimeValue}/></td>;
+  })}</tr>;
 }
 
-function CellValue({ cell, runtimeValue }: { cell: TableCell; runtimeValue?: unknown }) {
-  const raw = cell.binding ? valueAtPath(runtimeValue, cell.binding) : undefined;
-  const value = raw === undefined ? cell.content : displayValue(raw as never);
-  if (cell.type === 'image') return <TableCellImage cell={cell} boundValue={raw}/>;
+function CellValue({ cell, column, runtimeValue }: { cell: TableCell; column?: TableColumn; runtimeValue?: unknown }) {
+  const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
+  const boundRaw = cell.binding ? valueAtPath(runtimeValue, cell.binding) : undefined;
+  const raw = mode === 'formula' ? evaluateTableFormula(cell.formula, runtimeValue) : mode === 'binding' ? boundRaw : cell.content;
+  const dataType = cell.dataType ?? column?.dataType ?? 'text';
+  const format = { ...(column?.format ?? {}), ...(cell.format ?? {}) };
+  const value = formatTableValue(raw, dataType, format);
+  if (cell.type === 'image') return <TableCellImage cell={cell} boundValue={boundRaw}/>;
   if (cell.type === 'qr') return <span className="db-table-media-placeholder"><QrCode size={18}/>{value || 'QR'}</span>;
   if (cell.type === 'barcode') return <span className="db-table-media-placeholder"><Barcode size={22}/>{value || 'Barcode'}</span>;
   return <span>{value}</span>;

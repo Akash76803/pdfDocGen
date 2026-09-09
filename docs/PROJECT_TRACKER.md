@@ -139,3 +139,35 @@
 - Row Structure, Column Structure, and Selected Cell are visually grouped into dedicated cards.
 - Long technical IDs are collapsed by default.
 - Row/column actions use compact symbol buttons with consistent spacing and separate destructive styling.
+
+### DB-4.2 Fix3 — Dynamic Table Field Mapping
+- Status: Implemented / QA pending
+- Removed manual runtime-row concept from Dynamic Table creation.
+- Dynamic Table uses one header row + one data-driven body template.
+- Added per-column Header Label + Repeat Row Field mapping from imported Data Source fields.
+- Custom Table retains manual Rows × Columns.
+- Next QA: verify mapped labels/bindings, parent-group switching, save/reload, and DB-4.1/4.2 regression.
+
+## DB-4.2 Fix4 — Table Auto-Fit to Page
+- Status: Implemented / QA Pending
+- Dynamic and Custom table columns normalize to 100% of the table element width.
+- New tables start at page usable width with a 30 px inset on each side.
+- Horizontal table scrolling removed; cell content wraps.
+- Existing tables are backward-compatible because stored widths are interpreted as relative weights at render time.
+
+
+## DB-4.2 Fix5 — Natural Height + Smart Column Sizing
+**Status:** Implemented / manual QA pending. Removed internal vertical table scrolling; table element height follows rendered content. Added content-aware column width distribution while retaining 100% page-fit and manual width influence. Tests: DB4-T36/T37.
+
+## DB-4.2 Final Verification
+- **Status:** COMPLETED / VERIFIED.
+- **Verified:** row/column structure editor; Dynamic field-mapping create flow; data-driven body rows; responsive Properties inspector; span-safe structure changes; page-width auto-fit; natural-height tables; smart content-aware column sizing; persistence/regression.
+- **Final baseline:** DB-4.2 Fix5 Natural Height + Smart Columns.
+
+## DB-4.3A — Formula + Data Type / Formatting Foundation
+- **Purpose:** Start the calculation engine while adding reusable business-data display types.
+- **Scope:** Custom/Binding/Formula value modes; row-level arithmetic formula evaluation; Text/Number/Decimal/Currency/Percentage/Date/Date Time/Time/Checkbox data types; type-aware display controls; column defaults + cell overrides; dynamic-source type suggestion; persistence through the existing template schema.
+- **Status:** IMPLEMENTED / MANUAL QA PENDING.
+- **Automated/focused verification:** TS/TSX syntax transpilation PASS; focused formula/format model harness PASS. Full workspace typecheck is blocked by missing React/lucide typings in the current source environment; Vitest executable is not installed.
+- **Deliverable:** `Document-Builder-DB4-Phase3A-Formula-Data-Types.zip`.
+- **Next:** Manual DB-4.3A QA, then DB-4.3B Aggregations + Summary Rows.

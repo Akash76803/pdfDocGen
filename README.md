@@ -101,3 +101,21 @@ See `docs/DB4_2_ROW_COLUMN_STRUCTURE_EDITOR.md`.
 
 ### DB-4.2 Fix2
 Table Properties UX cleanup: Row Structure, Column Structure, and Selected Cell now use compact inspector cards, hidden-by-default technical IDs, and symbol-based structure actions to reduce crowding in the right panel.
+
+### DB-4.2 Fix3 — Dynamic Table Field Mapping
+Dynamic Table creation no longer asks users to define runtime row counts. A dynamic table is created from one imported Data Source with one fixed header row and one body-template row. Users configure each table column using a **Header Label** plus a **Repeat Row Field** selected from imported headers. Runtime body rows are generated only from matching imported records. Custom Table keeps the manual Rows × Columns workflow.
+
+### DB-4.2 Fix4 — Table Auto-Fit
+Dynamic and Custom tables now normalize persisted column widths to the available table width, preventing horizontal canvas scrolling. New tables start at the usable page width, while long cell content wraps instead of pushing columns beyond the page.
+
+### DB-4.2 Fix5 — Natural Height + Smart Column Sizing
+Tables no longer create an internal vertical scrollbar. The canvas table grows to its rendered row content, while table height is read-only Auto and resizing changes width only. Column distribution is now content-aware, so compact fields such as Quantity use less space than long description fields while all columns still fit the available table/page width.
+
+## DB-4.3A — Formula + Data Types
+DB-4.2 is manually verified complete. DB-4.3 now starts with row-level formulas and type-aware business formatting.
+
+For Text table cells, **Value Mode** can be Custom Value, Field Binding, or Formula. Formula mode supports row-relative arithmetic such as `Quantity * Rate - Discount` using `+ - * /` and parentheses.
+
+The table Column inspector now includes **Data & Format** defaults, while the Selected Cell inspector can override them. Available data types are Text, Number, Decimal, Currency, Percentage, Date, Date Time, Time, and Checkbox/Boolean. Formatting controls change according to the selected type (decimals, currency symbol/code, percentage interpretation, date/time pattern, checkbox labels, etc.). Imported raw values are not rewritten; formatting is display-only.
+
+Dynamic Table mapped columns also receive an initial suggested data type from the imported schema. Aggregations and configurable Subtotal/Tax/Grand Total rows continue in DB-4.3B.

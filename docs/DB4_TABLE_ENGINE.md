@@ -128,3 +128,52 @@ Table cells share one schema but expose type-specific editors. Text uses content
 
 ## Image cell fit
 Table image cells default to Cover so media fills the complete cell/merged-cell frame. Contain and Stretch remain supported.
+
+## DB-4.2 Fix3 clarification: Dynamic Table creation
+Dynamic Table does not ask for a runtime row count. It is defined by imported field mappings: each configured column has a Header Label and a Repeat Row Field. The engine creates one header row and one body-template row; body rows repeat from matching source records at runtime. Manual Rows × Columns applies only to Custom Table.
+
+### Auto-fit width rule (DB-4.2 Fix4)
+Table column widths are persisted as relative sizing weights and normalized to 100% at canvas render time. Tables do not horizontally scroll inside the document; long values wrap. This applies to both Dynamic and Custom modes.
+
+
+### DB-4.2 Fix5 — Natural height and smart widths
+Builder tables use natural content height instead of an internal vertical scroll container. Column percentages are computed from header/content samples plus user width hints, then normalized to 100% of table width. Compact numeric fields therefore use less width without reintroducing page overflow.
+
+## DB-4.3A — Formula + Data Type / Display Formatting Foundation
+
+DB-4.2 is closed and verified. DB-4.3 starts with row-level formula values and a reusable data-type/format contract.
+
+### Value modes
+Text cells now support three value modes:
+- **Custom value** — literal cell content.
+- **Field binding** — value from the current imported record/repeated row.
+- **Formula** — arithmetic expression evaluated against the current row, e.g. `Quantity * Rate - Discount`.
+
+Supported formula operators in 4.3A: `+`, `-`, `*`, `/`, unary +/- and parentheses. Invalid expressions, non-numeric referenced fields and divide-by-zero return an empty result rather than crashing the builder.
+
+### Data types
+Column defaults and text-cell overrides support:
+- Text
+- Number
+- Decimal
+- Currency
+- Percentage
+- Date
+- Date Time
+- Time
+- Checkbox / Boolean
+
+Dynamic Table mapped columns infer an initial display type from the imported schema (`number`, `boolean`, `date`, `datetime`) and remain user-editable.
+
+### Type-aware formatting
+- Number / Decimal: decimal precision and thousands separator.
+- Currency: decimals, thousands separator, currency code and symbol.
+- Percentage: decimals plus Fraction (`0.18 → 18%`) or Whole (`18 → 18%`) interpretation.
+- Date: DD/MM/YYYY, MM/DD/YYYY, YYYY-MM-DD, DD MMM YYYY.
+- Date Time / Time: 12-hour or 24-hour time.
+- Checkbox: checkbox glyphs or custom true/false labels.
+
+Raw imported data is preserved. Formatting is display-only and is stored independently from the binding/formula.
+
+### 4.3A boundary
+Aggregations such as SUM/AVG/COUNT and configurable Subtotal/Tax/Grand Total summary rows are intentionally deferred to DB-4.3B.

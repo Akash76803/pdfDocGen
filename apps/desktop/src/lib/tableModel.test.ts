@@ -159,3 +159,80 @@ it('DB-4.2 blocks column reorder while merged colSpan cells exist', () => {
   const moved = moveTableColumn(table, table.rows[0].cells[0].id, 1);
   expect(moved.columns.map((column) => column.id)).toEqual(ids);
 });
+
+it('DB-4.2 Fix3 creates dynamic columns from header labels and imported repeat fields', () => {
+  const table = createDynamicTable(2, 'Invoice Export', 1, { sourceId: 'invoice-flat', parentKey: 'InvoiceNo' }, [
+    { label: 'Product', field: 'ProductName' },
+    { label: 'Qty', field: 'Quantity' },
+  ]);
+  expect(table.headerRows).toHaveLength(1);
+  expect(table.bodyRows).toHaveLength(1);
+  expect(table.columns.map((column) => column.label)).toEqual(['Product', 'Qty']);
+  expect(table.headerRows[0].cells.map((cell) => cell.content)).toEqual(['Product', 'Qty']);
+  expect(table.bodyRows[0].cells.map((cell) => cell.binding)).toEqual(['ProductName', 'Quantity']);
+});
+
+describe('DB-4.2 Fix4 normalized table widths', () => {
+  it('normalizes arbitrary column widths to 100 percent', async () => {
+    const { normalizedColumnWidths } = await import('./tableModel.ts');
+    const table = createDynamicTable(3, 'items');
+    table.columns[0].width = 120;
+    table.columns[1].width = 240;
+    table.columns[2].width = 120;
+    const widths = normalizedColumnWidths(table.columns);
+    expect(widths.reduce((sum, value) => sum + value, 0)).toBeCloseTo(100, 8);
+    expect(widths[1]).toBeCloseTo(50, 8);
+  });
+
+  it('falls back safely for invalid saved widths', async () => {
+    const { normalizedColumnWidths } = await import('./tableModel.ts');
+    const table = createCustomTable(2, 1);
+    table.columns[0].width = 0;
+    table.columns[1].width = Number.NaN;
+    expect(normalizedColumnWidths(table.columns)).toEqual([50, 50]);
+  });
+});
+
+
+describe('DB-4.2 Fix5 smart table sizing', () => {
+  it('allocates less width to compact quantity values than long descriptions', async () => {
+    const { createDynamicTable, smartColumnWidths } = await import('./tableModel.ts');
+    const table = createDynamicTable(2, 'rows', 1, undefined, [
+      { label: 'Description', field: 'description' },
+      { label: 'Quantity', field: 'qty' },
+    ]);
+    const widths = smartColumnWidths(table, [
+      { description: 'TATA 1210D FRONT LEAVES WITH 70 4th AMI', qty: 2 },
+      { description: 'SUSP. SPR. B6Y00701/02 & B6Y02801/02', qty: 4 },
+    ]);
+    expect(widths).toHaveLength(2);
+    expect(widths[0]).toBeGreaterThan(widths[1]);
+    expect(Math.round(widths[0] + widths[1])).toBe(100);
+  });
+});
+
+describe('DB-4.3A formula and data type formatting', () => {
+  it('evaluates row-level arithmetic formulas from imported fields', async () => {
+    const { evaluateTableFormula } = await import('./tableModel.ts');
+    expect(evaluateTableFormula('Quantity * Rate - Discount', { Quantity: 2, Rate: 500, Discount: 50 })).toBe(950);
+    expect(evaluateTableFormula('(Quantity * Rate) / 2', { Quantity: 2, Rate: 500 })).toBe(500);
+    expect(evaluateTableFormula('Quantity / Zero', { Quantity: 2, Zero: 0 })).toBeNull();
+  });
+
+  it('formats decimal, currency, percentage, date and checkbox values', async () => {
+    const { formatTableValue } = await import('./tableModel.ts');
+    expect(formatTableValue(1250.5, 'decimal', { decimals: 2 })).toContain('1,250.50');
+    expect(formatTableValue(1250.5, 'currency', { decimals: 2, currencySymbol: '₹' })).toContain('₹1,250.50');
+    expect(formatTableValue(0.18, 'percentage', { decimals: 0, percentInputMode: 'fraction' })).toBe('18%');
+    expect(formatTableValue('2026-09-09', 'date', { dateFormat: 'dd/MM/yyyy' })).toBe('09/09/2026');
+    expect(formatTableValue(true, 'checkbox', { checkboxStyle: 'checkbox' })).toBe('☑');
+  });
+
+  it('stores inferred data types on dynamic mapped columns', () => {
+    const table = createDynamicTable(2, 'Invoice Export', 1, undefined, [
+      { label: 'Qty', field: 'Quantity', dataType: 'decimal' },
+      { label: 'Invoice Date', field: 'InvoiceDate', dataType: 'date' },
+    ]);
+    expect(table.columns.map((column) => column.dataType)).toEqual(['decimal', 'date']);
+  });
+});
