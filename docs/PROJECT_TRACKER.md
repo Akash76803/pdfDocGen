@@ -171,3 +171,106 @@
 - **Automated/focused verification:** TS/TSX syntax transpilation PASS; focused formula/format model harness PASS. Full workspace typecheck is blocked by missing React/lucide typings in the current source environment; Vitest executable is not installed.
 - **Deliverable:** `Document-Builder-DB4-Phase3A-Formula-Data-Types.zip`.
 - **Next:** Manual DB-4.3A QA, then DB-4.3B Aggregations + Summary Rows.
+
+### DB-4.3A Fix1 — Formula Value Type Selection
+- Status: Implemented / QA pending
+- Fix: Dynamic Table column inspector now exposes Body value type = Field binding / Formula / Custom value.
+- Formula setup no longer requires first locating/selecting the body-template cell; selecting either header or body cell for a column exposes the same column-level formula controls.
+- Header cells remain labels and show guidance instead of making Formula look unavailable without explanation.
+- Formula result Data Type/format remains independently editable.
+
+### DB-4.3A Fix2 — Formula field references and percentage arithmetic
+- Fixed blank formula output when imported numeric field names contain spaces.
+- Added bracket field-reference syntax and automatic safe field-chip insertion.
+- Percentage mapped columns now contribute fraction values to arithmetic according to Fraction/Whole input mode.
+- Example verified target: `Basic Value - (Basic Value * (TD + Special Product Discount))`.
+- Manual QA pending.
+
+## DB-4.3A Fix3 — Formula Field Dropdown
+- Status: Implemented / QA pending
+- Purpose: Remove crowded formula field chips and expose the complete imported schema during formula authoring.
+- Scope: Single field dropdown; all source fields; detected type labels; safe bracket reference insertion; Dynamic + cell-level formula editors.
+- Testing: TypeScript TSX transpile check PASS; manual UI QA pending.
+- Next: Validate DB4-T48, then continue DB-4.3A formula/data-type QA.
+
+## DB-4.3A Fix4 — Formula-to-Formula Column References
+- **Purpose:** Allow calculated columns to feed later calculated columns.
+- **Scope:** Formula Columns optgroup in Insert field; safe `[Column Label]` references; per-row dependency evaluation; self/circular guard.
+- **Status:** Implemented; manual QA pending.
+- **Next:** Verify chained Net/Tax/Grand Total formulas, then continue DB-4.3A closeout / DB-4.3B summaries.
+
+
+## DB-4.3A Fix5 — Date / Date Time / Time Formatting
+DB4-T43 date/time QA fix: document date/time formatting now preserves literal source wall-clock values, supports common DD/MM/YYYY and ISO inputs, handles legacy Excel serial values, and avoids timezone day/time shifts. See `docs/DB4_3A_FIX5_DATE_TIME_FORMATTING.md`.
+
+## DB-4P — Page Structure & Properties
+Status: **Implemented / Manual QA Pending**
+
+Implemented page presets/custom size, units, orientation, margins, bleed, safe area, appearance/guides, multi-page page ownership and page CRUD/reorder. Existing single-page local templates migrate to Page 1. New tables use current page content bounds. This phase is intentionally placed before DB-4.3B and DB-4.4 so summary and pagination work can depend on stable page geometry.
+
+## DB-4P Fix1 — Direct Table Column Resize
+Status: Implemented / QA Pending
+
+- Direct drag-resize from table header column dividers.
+- Adjacent column rebalances so table remains inside usable page width.
+- Manual width hints persist through template save/reload.
+- Column Structure: Fit Content / Equal Width / Reset Auto.
+- Dynamic + Custom tables share the same behavior.
+
+### DB-4.3B — Aggregations + Summary Rows
+- Status: Implemented / QA Pending
+- Added summary cell modes: Custom / Aggregate / Formula.
+- Added SUM, COUNT, AVG, MIN, MAX over the active Parent / Document group.
+- Aggregate source can be an imported field or Dynamic Table formula column.
+- Added named summary chaining, e.g. Subtotal → Tax Amount → Grand Total.
+- Existing DB-4.3A Data Type / formatting applies to summary outputs.
+- Next QA: aggregation correctness, parent switching, chaining, formatting, persistence.
+
+
+### DB-4.3B Fix1 — Summary Row Full Cell Grid
+**Status:** Implemented / QA Pending
+
+- New summary rows inherit the current table column count as their base cell grid.
+- Default label is first cell; default aggregate result is last cell.
+- Existing `colSpan` / `rowSpan` controls provide merge-style layout customization.
+- No separate summary-cell insertion UI is required.
+
+## DB-4.3B Final Verification
+- **Status:** COMPLETED / VERIFIED.
+- **Verified:** summary full-cell grid; SUM/COUNT/AVG/MIN/MAX; imported-field and formula-column aggregation; aggregate formulas; chained summaries; document-group recalculation; formatting; spans; persistence; invalid-formula safety.
+- **Final baseline:** DB-4.3B Fix1 Summary Row Full Cell Grid.
+
+## DB-5A — Editor History / Undo-Redo Foundation
+- **Purpose:** Add one shared reversible edit history across the Template Builder.
+- **Scope:** toolbar Undo/Redo; Ctrl/Cmd+Z, Ctrl/Cmd+Y, Ctrl/Cmd+Shift+Z; page/element/table/formula/format/binding history; direct column-resize history; single-step drag/resize gesture coalescing; redo invalidation after a new edit; bounded 100-entry history; fresh history after reload.
+- **Status:** IMPLEMENTED / MANUAL QA PENDING.
+- **Focused verification:** `TemplateBuilder.tsx` and `TableCanvas.tsx` TSX transpile/syntax check PASS. Full workspace typecheck remains blocked by pre-existing missing dependencies and stale build references in this extracted source environment.
+- **Deliverable:** `Document-Builder-DB5A-Editor-History-Undo-Redo.zip`.
+- **Next:** Manual DB5A-T01 through DB5A-T10 QA; then continue pagination/export hardening.
+
+### DB-4.4 Phase 1 — Pagination + Multi-page Overflow — Implemented / QA Pending
+- Dynamic table overflow planner uses page content height.
+- Continuation preview fragments with repeated headers.
+- Summary block keep-together behavior.
+- Manual page-break-before row foundation.
+- Pagination settings exposed in table Properties.
+- Next: manual QA, then persistent continuation-page materialization / renderer parity.
+
+### DB-4.4 Fix1 — Document ID Preview Picker — Implemented / QA Pending
+- Dynamic Field preview now derives its label from the active Dynamic Table Parent / Document ID.
+- Single key example: `Invoice No: INV-001`.
+- Composite keys render as a readable combined identity.
+- Duplicate flat-source rows for the same parent/document key collapse into one document option.
+- Existing `activeRecordIndex` compatibility is preserved by selecting the first row of the chosen document group.
+- Fallback remains `Record #N` when no document key is configured.
+
+## DB-4.4 Phase 2 — Virtual Multi-Page Sheet Preview
+- Status: Implemented / QA pending
+- Purpose: Render Phase 1 table overflow as proper full document sheets instead of one long stacked table canvas.
+- Scope: full virtual page surfaces, continuation at top usable margin, distinct first/continuation capacities, repeat-header compatibility, summary keep-together compatibility, page-size/margin integration, builder-only continuation labels.
+- Persistence boundary: continuation sheets are derived preview pages, not persistent BuilderPage records yet.
+- Next: manual QA, then DB-4.4 page-plan hardening / persistent continuation strategy before DB-4.5 renderer parity.
+
+## DB-4.4 Phase 2 Fix1 — Overflow Page Navigator
+- Automatic continuation pages are now represented in the Pages navigator with an Auto badge and canvas focus navigation.
+- Derived continuation sheets remain non-persistent and cannot be independently reordered/deleted.

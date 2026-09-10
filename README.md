@@ -119,3 +119,55 @@ For Text table cells, **Value Mode** can be Custom Value, Field Binding, or Form
 The table Column inspector now includes **Data & Format** defaults, while the Selected Cell inspector can override them. Available data types are Text, Number, Decimal, Currency, Percentage, Date, Date Time, Time, and Checkbox/Boolean. Formatting controls change according to the selected type (decimals, currency symbol/code, percentage interpretation, date/time pattern, checkbox labels, etc.). Imported raw values are not rewritten; formatting is display-only.
 
 Dynamic Table mapped columns also receive an initial suggested data type from the imported schema. Aggregations and configurable Subtotal/Tax/Grand Total rows continue in DB-4.3B.
+
+### DB-4.3A Fix1
+Dynamic Table formula configuration is now available at column level via **Column Structure → Data & Format → Body value type**. Users can switch a dynamic column between Field binding, Formula, and Custom value even when the header cell is selected, while keeping result Data Type/format independent.
+
+### DB-4.3A Fix2
+Formula expressions now support imported field names with spaces and percentage-aware arithmetic. Use `[Field Name]` for an explicit safe reference; formula field chips insert this form automatically when needed.
+
+### DB-4.3A Fix3
+Formula field insertion now uses a single **Insert field** dropdown instead of crowded field chips. The dropdown lists every field from the active table Data Source (not only the first numeric fields), shows the detected field type, and inserts safe formula references such as `[Basic Value]` automatically for field names containing spaces.
+
+### DB-4.3A Fix4 — Formula-column references
+Formula editors can now insert other Dynamic Table formula columns from the same grouped dropdown as imported fields. Chained calculations are evaluated per repeated row; self/circular references stay blank safely.
+
+
+## DB-4.3A Fix5 — Date / Date Time / Time Formatting
+DB4-T43 date/time QA fix: document date/time formatting now preserves literal source wall-clock values, supports common DD/MM/YYYY and ISO inputs, handles legacy Excel serial values, and avoids timezone day/time shifts. See `docs/DB4_3A_FIX5_DATE_TIME_FORMATTING.md`.
+
+## DB-4P — Page Structure & Properties
+Before DB-4.3B, the builder now has a dedicated page geometry foundation: multiple standard/custom page sizes, orientation, mm/cm/in units, margins, bleed, safe area, background/border/guides, plus basic multi-page add/duplicate/reorder/delete. Each page owns its elements and properties. Existing single-page saved templates migrate to Page 1. See `docs/DB4P_PAGE_STRUCTURE_PROPERTIES.md`.
+
+### DB-4P Fix1 — Direct table column resize
+Table header dividers can now be dragged directly on the canvas to control relative column widths while preserving full page-width fit. Column Structure also includes Fit Content, Equal Width and Reset Auto actions. Manual sizing persists; untouched/reset columns continue using smart content-aware sizing.
+
+### DB-4P Fix2 — Page interaction corrections
+- Margins are independent by default; Linked is now opt-in.
+- Multi-page add/switch/duplicate/reorder/delete controls are visible directly in Page Properties.
+- Existing and new tables are kept inside the current usable page width when margins/page geometry change.
+
+## DB-4.3B — Aggregations + Summary Rows
+Dynamic Table summary rows now support Custom, Aggregate, and Formula modes. Aggregates include SUM/COUNT/AVG/MIN/MAX over the currently selected document group, including formula-column results. Named summary values can feed later formulas (Subtotal → Tax → Grand Total). See `docs/DB4_3B_AGGREGATIONS_SUMMARY_ROWS.md`.
+
+
+## DB-4.3B Fix1 — Summary Row Full Cell Grid
+- New Dynamic Table summary rows now start with exactly one base cell per current table column.
+- No separate Add Cell flow is needed; users customize summary layout with existing `colSpan` / `rowSpan`.
+- First cell defaults to `Subtotal`; last cell defaults to Aggregate/SUM + Currency, while middle cells remain editable.
+- Existing saved summary rows remain backward compatible.
+
+## DB-5A — Editor History / Undo-Redo Foundation
+The Template Builder now includes shared Undo/Redo history with toolbar actions and Ctrl/Cmd+Z, Ctrl/Cmd+Y, and Ctrl/Cmd+Shift+Z shortcuts. Page, element, table, formula, formatting, and binding edits are captured through a bounded snapshot history. Drag/resize gestures—including direct table-column resizing—are coalesced into one undo step. Pure selection, zoom, panel UI, and measured auto-height changes do not pollute history. See `docs/DB5A_EDITOR_HISTORY_UNDO_REDO.md`.
+
+## DB-4.4 Phase 1 — Pagination + Multi-page Overflow
+Dynamic tables now have deterministic page-overflow planning in the builder: repeated rows are chunked by usable page height, header rows can repeat on continuation fragments, summary blocks stay together, and manual row page-break markers are supported. See `docs/DB4_4_PAGINATION_MULTI_PAGE_OVERFLOW.md`.
+
+### DB-4.4 Fix1 — Document ID Preview Picker
+Template Builder → Dynamic Field now shows business document identities instead of technical row numbers whenever the active page has a Dynamic Table with Parent / Document ID configured. Repeated rows for the same document are collapsed into one option; composite parent keys are shown as readable combined labels. Without a configured document key, the picker falls back to `Record #N`.
+
+### DB-4.4 Phase 2 — Virtual Multi-Page Preview
+Dynamic Table overflow now previews on separate full-size document sheets. Page 1 preserves the designed table position; continuation sheets start at the top content margin and use the full continuation-page capacity. Continuation labels are builder-only. Persistent continuation `BuilderPage` materialization remains a later pagination step.
+
+### DB-4.4 Phase 2 Fix1
+Automatic overflow continuation sheets now appear in the Pages navigator as Auto pages and can be clicked to focus their corresponding virtual sheet.

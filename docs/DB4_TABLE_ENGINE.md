@@ -177,3 +177,9 @@ Raw imported data is preserved. Formatting is display-only and is stored indepen
 
 ### 4.3A boundary
 Aggregations such as SUM/AVG/COUNT and configurable Subtotal/Tax/Grand Total summary rows are intentionally deferred to DB-4.3B.
+
+### DB-4.3A Fix4 — formula-column dependencies
+Dynamic formula columns can reference other formula columns by label (for example `[Net Value]`). Runtime evaluation resolves dependency chains per repeated row with self/circular-reference protection.
+
+## DB-4.3B Summary calculations
+Dynamic custom rows can now act as calculation rows. Summary cells support Custom, Aggregate (SUM/COUNT/AVG/MIN/MAX), or Formula mode. Aggregation is scoped to the active Parent / Document group and includes resolved formula-column values. Named summary values are exposed to later summary formulas for chained totals.

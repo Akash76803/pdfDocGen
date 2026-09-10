@@ -49,3 +49,19 @@ Formula parse/evaluation failures render empty rather than executing arbitrary J
 
 ## Deferred to DB-4.3B
 SUM/AVG/COUNT/MIN/MAX, Subtotal, Tax, Discount and Grand Total summary-row formula configuration.
+
+## DB-4.3A Fix1 — Dynamic formula value-type selection
+
+Dynamic Table formulas can now be configured directly from **Column Structure → Data & Format → Body value type**. This removes the confusing dependency on selecting the body-template cell first. For a selected dynamic column, the body value type supports **Field binding**, **Formula**, and **Custom value**. Formula expressions are applied to every repeated runtime row for that column. Header cells remain label-only and now display guidance pointing users to the column-level body value controls. Result **Data type** and format remain independently selectable so a formula can render as Number, Decimal, Currency, Percentage, Date/Date Time/Time, or Checkbox where appropriate.
+
+## DB-4.3A Fix2 — spaced field names + percentage formula semantics
+- Formula references now support imported field names containing spaces. Existing expressions can use the readable raw field name when it exactly matches a record key, and the explicit safe syntax `[Basic Value]` / `[Special Product Discount]` is supported.
+- Formula field chips automatically insert bracket syntax for field names that are not simple identifiers.
+- Percentage-mapped fields are normalized for arithmetic: fraction mode keeps values such as `0.05`; whole mode converts `5` to `0.05`; literal strings such as `5%` are converted to `0.05`.
+- Currency/decimal/number fields are converted to numeric values for arithmetic while display formatting remains independent.
+
+Example:
+`[Basic Value] - ([Basic Value] * (TD + [Special Product Discount]))`
+
+## DB-4.3A Fix4 — Formula-to-Formula Column References
+The Formula **Insert field** dropdown now includes a **Formula Columns** group in addition to Imported Fields. Selecting a formula column inserts a safe label reference such as `[Net Value]`. Per-row dependency passes resolve chained calculated columns; direct self-reference and circular chains remain blank safely.

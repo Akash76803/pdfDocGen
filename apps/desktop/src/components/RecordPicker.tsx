@@ -3,17 +3,23 @@ import { ChevronDown } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 
+type RecordPickerOption = {
+  value: number;
+  label: string;
+};
+
 type RecordPickerProps = {
   count: number;
   value: number;
   onChange: (index: number) => void;
   compactLabel?: string;
   disabled?: boolean;
+  options?: RecordPickerOption[];
 };
 
 const initialVisibleCount = (count: number) => Math.min(PAGE_SIZE, Math.max(0, count));
 
-export function RecordPicker({ count, value, onChange, compactLabel = 'Record', disabled = false }: RecordPickerProps) {
+export function RecordPicker({ count, value, onChange, compactLabel = 'Record', disabled = false, options }: RecordPickerProps) {
   const [open, setOpen] = useState(false);
   const [visibleCount, setVisibleCount] = useState(() => initialVisibleCount(count));
   const rootRef = useRef<HTMLDivElement>(null);
@@ -38,51 +44,61 @@ export function RecordPicker({ count, value, onChange, compactLabel = 'Record', 
     };
   }, [open]);
 
+  const itemCount = options?.length ?? count;
+
+  useEffect(() => {
+    setVisibleCount(initialVisibleCount(itemCount));
+  }, [itemCount]);
+
   const loadNextPage = () => {
-    setVisibleCount((current) => Math.min(count, current + PAGE_SIZE));
+    setVisibleCount((current) => Math.min(itemCount, current + PAGE_SIZE));
   };
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
     const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (remaining <= 36 && visibleCount < count) loadNextPage();
+    if (remaining <= 36 && visibleCount < itemCount) loadNextPage();
   };
 
-  const safeValue = count > 0 ? Math.min(Math.max(0, value), count - 1) : 0;
-  const visibleIndexes = Array.from({ length: Math.min(visibleCount, count) }, (_, index) => index);
+  const fallbackValue = count > 0 ? Math.min(Math.max(0, value), count - 1) : 0;
+  const selectedOption = options?.find((option) => option.value === value) ?? options?.[0];
+  const triggerLabel = itemCount === 0 ? 'No records' : selectedOption?.label ?? `${compactLabel} #${fallbackValue + 1}`;
+  const visibleOptions: RecordPickerOption[] = options
+    ? options.slice(0, Math.min(visibleCount, options.length))
+    : Array.from({ length: Math.min(visibleCount, count) }, (_, index) => ({ value: index, label: `Record #${index + 1}` }));
 
   return (
     <div className="lazy-record-picker" ref={rootRef}>
       <button
         type="button"
         className="lazy-record-picker-trigger"
-        disabled={disabled || count === 0}
+        disabled={disabled || itemCount === 0}
         aria-haspopup="listbox"
         aria-expanded={open}
         onClick={() => setOpen((current) => !current)}
       >
-        <span>{count === 0 ? 'No records' : `${compactLabel} #${safeValue + 1}`}</span>
+        <span>{triggerLabel}</span>
         <ChevronDown size={14} />
       </button>
-      {open && count > 0 && (
+      {open && itemCount > 0 && (
         <div className="lazy-record-picker-menu" role="listbox" onScroll={handleScroll}>
-          {visibleIndexes.map((index) => (
+          {visibleOptions.map((option) => (
             <button
               type="button"
               role="option"
-              aria-selected={index === safeValue}
-              className={index === safeValue ? 'lazy-record-option active' : 'lazy-record-option'}
-              key={index}
+              aria-selected={option.value === value}
+              className={option.value === value ? 'lazy-record-option active' : 'lazy-record-option'}
+              key={`${option.value}-${option.label}`}
               onClick={() => {
-                onChange(index);
+                onChange(option.value);
                 setOpen(false);
               }}
             >
-              Record #{index + 1}
+              {option.label}
             </button>
           ))}
-          {visibleCount < count && (
-            <div className="lazy-record-load-note">Scroll for next {Math.min(PAGE_SIZE, count - visibleCount)} records…</div>
+          {visibleCount < itemCount && (
+            <div className="lazy-record-load-note">Scroll for next {Math.min(PAGE_SIZE, itemCount - visibleCount)} documents…</div>
           )}
         </div>
       )}

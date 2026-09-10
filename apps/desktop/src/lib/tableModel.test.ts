@@ -236,3 +236,72 @@ describe('DB-4.3A formula and data type formatting', () => {
     expect(table.columns.map((column) => column.dataType)).toEqual(['decimal', 'date']);
   });
 });
+
+
+describe('DB-4.3A Fix4 formula-column references', () => {
+  it('exposes other formula columns but excludes the current formula column', async () => {
+    const { createDynamicTable, formulaColumnReferences } = await import('./tableModel.ts');
+    const table = createDynamicTable(3, 'rows', 1, undefined, [
+      { label: 'Basic Value', field: 'Basic Value', dataType: 'currency' },
+      { label: 'Net Value', field: 'Net Value', dataType: 'currency' },
+      { label: 'Tax Amount', field: 'Tax Amount', dataType: 'currency' },
+    ]);
+    const body = table.bodyRows[0];
+    body.cells[1].valueMode = 'formula'; body.cells[1].formula = '[Basic Value] * 0.9';
+    body.cells[2].valueMode = 'formula'; body.cells[2].formula = '[Net Value] * 0.18';
+    const refs = formulaColumnReferences(table, table.columns[2].id);
+    expect(refs.map((ref) => ref.label)).toEqual(['Net Value']);
+    expect(refs[0].reference).toBe('[Net Value]');
+  });
+
+  it('evaluates chained formula columns in dependency order', async () => {
+    const { createDynamicTable, evaluateTableFormulaColumns } = await import('./tableModel.ts');
+    const table = createDynamicTable(3, 'rows', 1, undefined, [
+      { label: 'Basic Value', field: 'Basic Value', dataType: 'currency' },
+      { label: 'Net Value', field: 'net', dataType: 'currency' },
+      { label: 'Tax Amount', field: 'tax', dataType: 'currency' },
+    ]);
+    const body = table.bodyRows[0];
+    body.cells[1].valueMode = 'formula'; body.cells[1].binding = undefined; body.cells[1].formula = '[Basic Value] * 0.9';
+    body.cells[2].valueMode = 'formula'; body.cells[2].binding = undefined; body.cells[2].formula = '[Net Value] * 0.18';
+    const result = evaluateTableFormulaColumns(table, { 'Basic Value': 1000 });
+    expect(result[table.columns[1].id]).toBe(900);
+    expect(result[table.columns[2].id]).toBe(162);
+  });
+
+  it('leaves circular formula-column dependencies unresolved', async () => {
+    const { createDynamicTable, evaluateTableFormulaColumns } = await import('./tableModel.ts');
+    const table = createDynamicTable(2, 'rows', 1, undefined, [
+      { label: 'A', field: 'a', dataType: 'decimal' },
+      { label: 'B', field: 'b', dataType: 'decimal' },
+    ]);
+    const body = table.bodyRows[0];
+    body.cells[0].valueMode = 'formula'; body.cells[0].binding = undefined; body.cells[0].formula = 'B + 1';
+    body.cells[1].valueMode = 'formula'; body.cells[1].binding = undefined; body.cells[1].formula = 'A + 1';
+    expect(evaluateTableFormulaColumns(table, {})).toEqual({ [table.columns[0].id]: null, [table.columns[1].id]: null });
+  });
+});
+
+
+describe('DB-4.3B Fix1 summary row cell structure', () => {
+  it('creates one default summary cell per current table column', () => {
+    const table = addCustomSummaryRow(createDynamicTable(5, 'items', 1));
+    expect(table.customRows).toHaveLength(1);
+    const summary = table.customRows[0];
+    expect(summary.cells).toHaveLength(5);
+    expect(summary.cells.map((cell) => cell.colSpan)).toEqual([1, 1, 1, 1, 1]);
+    expect(summary.cells[0].content).toBe('Subtotal');
+    expect(summary.cells[4].summaryMode).toBe('aggregate');
+    expect(summary.cells[4].summaryName).toBe('Subtotal');
+  });
+
+  it('lets users merge summary label cells afterwards using colSpan', () => {
+    let table = addCustomSummaryRow(createDynamicTable(5, 'items', 1));
+    const summary = table.customRows[0];
+    table = updateTableCell(table, summary.cells[0].id, { colSpan: 4, content: 'Grand Total' });
+    const updated = table.customRows[0];
+    expect(updated.cells).toHaveLength(5);
+    expect(updated.cells[0].colSpan).toBe(4);
+    expect(updated.cells[0].content).toBe('Grand Total');
+  });
+});

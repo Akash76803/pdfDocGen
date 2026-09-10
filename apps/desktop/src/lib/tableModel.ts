@@ -6,6 +6,8 @@ export type TableCellType = 'text' | 'image' | 'qr' | 'barcode';
 export type TableRowKind = 'header' | 'body' | 'custom';
 export type TableAlign = 'left' | 'center' | 'right';
 export type TableValueMode = 'custom' | 'binding' | 'formula';
+export type TableAggregateOperation = 'sum' | 'count' | 'avg' | 'min' | 'max';
+export type TableSummaryMode = 'custom' | 'aggregate' | 'formula';
 export type TableDataType = 'text' | 'number' | 'decimal' | 'currency' | 'percentage' | 'date' | 'datetime' | 'time' | 'checkbox';
 export type TableDataFormat = {
   decimals?: number;
@@ -38,6 +40,11 @@ export type TableCell = {
   binding?: string;
   formula?: string;
   valueMode?: TableValueMode;
+  /** DB-4.3B: summary-row calculation configuration. */
+  summaryMode?: TableSummaryMode;
+  aggregate?: { operation: TableAggregateOperation; field: string };
+  summaryFormula?: string;
+  summaryName?: string;
   dataType?: TableDataType;
   format?: TableDataFormat;
   imageSource?: string;
@@ -55,6 +62,8 @@ export type TableRow = {
   autoHeight: boolean;
   repeatOnEveryPage: boolean;
   keepTogether: boolean;
+  /** DB-4.4: optional manual page break before this design row. */
+  pageBreakBefore?: boolean;
   cells: TableCell[];
 };
 
@@ -70,6 +79,8 @@ export type TableColumn = {
   align: TableAlign;
   dataType?: TableDataType;
   format?: TableDataFormat;
+  /** DB-4P Fix1: user-controlled width hint. When true, smart sizing respects this column more strongly. */
+  manualWidth?: boolean;
 };
 
 export type TableDefinition = {
@@ -93,9 +104,11 @@ export type TableDefinition = {
     childForeignKey?: string;
   };
   pagination: {
+    enabled?: boolean;
     repeatHeader: boolean;
     allowRowSplit: boolean;
     keepRowsTogether: boolean;
+    keepSummaryTogether?: boolean;
   };
   borderWidth: number;
   borderColor: string;
@@ -141,7 +154,7 @@ export function createCustomTable(columnCount: number, rowCount: number): TableD
   return {
     id: crypto.randomUUID(), name: 'Custom Table', mode: 'custom', columns,
     headerRows: [], bodyRows: [], customRows: [], rows,
-    pagination: { repeatHeader: false, allowRowSplit: false, keepRowsTogether: true },
+    pagination: { enabled: true, repeatHeader: false, allowRowSplit: false, keepRowsTogether: true, keepSummaryTogether: true },
     borderWidth: 1, borderColor: '#cfd6df', defaultPadding: 5,
   };
 }
@@ -180,23 +193,32 @@ export function createDynamicTable(columnCount: number, repeatSource: string, he
       parentSourceId: binding?.parentSourceId,
       childForeignKey: binding?.childForeignKey,
     },
-    pagination: { repeatHeader: true, allowRowSplit: false, keepRowsTogether: true },
+    pagination: { enabled: true, repeatHeader: true, allowRowSplit: false, keepRowsTogether: true, keepSummaryTogether: true },
     borderWidth: 1, borderColor: '#cfd6df', defaultPadding: 5,
   };
 }
 
 export function addCustomSummaryRow(table: TableDefinition): TableDefinition {
+  // DB-4.3B Fix1: a new summary row always starts with the same visual cell count
+  // as the current table columns. Users can then merge the label area with colSpan.
+  // This keeps the summary row aligned with table structure and means column add/delete
+  // operations can continue to update it through the shared span-aware row helpers.
   const row = createRow('custom', table.columns.length);
-  if (row.cells.length > 1) {
-    row.cells[0].content = 'Total';
-    row.cells[0].style.bold = true;
-    row.cells[0].colSpan = Math.max(1, row.cells.length - 1);
-    row.cells = [row.cells[0], row.cells[row.cells.length - 1]];
-    row.cells[1].content = '0.00';
-    row.cells[1].style.bold = true;
-    row.cells[1].style.align = 'right';
+  if (row.cells.length > 0) {
+    const labelCell = row.cells[0];
+    labelCell.content = 'Subtotal';
+    labelCell.style.bold = true;
+
+    const valueCell = row.cells[row.cells.length - 1];
+    valueCell.content = '';
+    valueCell.summaryMode = 'aggregate';
+    valueCell.aggregate = { operation: 'sum', field: '' };
+    valueCell.summaryName = 'Subtotal';
+    valueCell.dataType = 'currency';
+    valueCell.style.bold = true;
+    valueCell.style.align = 'right';
   }
-  return { ...table, customRows: [...table.customRows, row], selectedCellId: row.cells[0]?.id };
+  return { ...table, customRows: [...table.customRows, row], selectedCellId: row.cells[row.cells.length - 1]?.id ?? row.cells[0]?.id };
 }
 
 export function updateTableCell(table: TableDefinition, cellId: string, patch: Partial<TableCell>): TableDefinition {
@@ -407,6 +429,21 @@ export function updateTableColumn(table: TableDefinition, columnId: string, patc
   return { ...table, columns: table.columns.map((column) => column.id === columnId ? { ...column, ...patch, format: patch.format ? { ...(column.format ?? {}), ...patch.format } : column.format } : column) };
 }
 
+/** DB-4P Fix1: set a direct/manual width hint while keeping page auto-fit. */
+export function setTableColumnManualWidth(table: TableDefinition, columnId: string, width: number): TableDefinition {
+  return updateTableColumn(table, columnId, { width: Math.max(24, Math.min(1000, width)), manualWidth: true });
+}
+
+/** Return a table to content-aware automatic sizing. */
+export function resetTableColumnAutoWidth(table: TableDefinition, columnId?: string): TableDefinition {
+  return { ...table, columns: table.columns.map((column) => (!columnId || column.id === columnId) ? { ...column, manualWidth: false } : column) };
+}
+
+/** Give all columns equal manual weights without changing the table's total width. */
+export function equalizeTableColumnWidths(table: TableDefinition): TableDefinition {
+  return { ...table, columns: table.columns.map((column) => ({ ...column, width: 120, manualWidth: true })) };
+}
+
 
 export function normalizedColumnWidths(columns: TableColumn[]): number[] {
   if (columns.length === 0) return [];
@@ -466,7 +503,7 @@ export function smartColumnWidths(table: TableDefinition, runtimeValues: unknown
       : Math.max(60, Math.min(220, 26 + maxChars * 6.4));
     const manualHint = Math.max(40, Math.min(240, Number.isFinite(column.width) ? column.width : 120));
     const minHint = Math.max(36, Math.min(160, Number.isFinite(column.minWidth) ? column.minWidth : 40));
-    return Math.max(minHint, contentWidth * 0.8 + manualHint * 0.2);
+    return Math.max(minHint, column.manualWidth ? manualHint : (contentWidth * 0.8 + manualHint * 0.2));
   });
 
   const total = scores.reduce((sum, value) => sum + value, 0) || scores.length;
@@ -520,23 +557,102 @@ function numericValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function dateValue(value: unknown): Date | null {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
-  if (typeof value !== 'string' && typeof value !== 'number') return null;
-  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
-    const [year, month, day] = value.trim().split('-').map(Number);
-    const local = new Date(year, month - 1, day);
-    return Number.isNaN(local.getTime()) ? null : local;
-  }
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? null : parsed;
+type ParsedDateParts = {
+  year: number;
+  month: number;
+  day: number;
+  hour: number;
+  minute: number;
+  second: number;
+  millisecond: number;
+};
+
+function validDateParts(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const check = new Date(Date.UTC(year, month - 1, day));
+  return check.getUTCFullYear() === year && check.getUTCMonth() === month - 1 && check.getUTCDate() === day;
 }
 
-function dateParts(date: Date, format: TableDataFormat): string {
-  const dd = String(date.getDate()).padStart(2, '0');
-  const mm = String(date.getMonth() + 1).padStart(2, '0');
-  const yyyy = String(date.getFullYear());
-  const mon = date.toLocaleString('en-US', { month: 'short' });
+function fromExcelSerial(serial: number): ParsedDateParts | null {
+  if (!Number.isFinite(serial) || serial < 0 || serial > 2958465) return null;
+  // Excel's 1900 date system is represented reliably by using 1899-12-30 as day zero.
+  const wholeDays = Math.floor(serial);
+  const fraction = serial - wholeDays;
+  const millis = Math.round(fraction * 86400000);
+  const date = new Date(Date.UTC(1899, 11, 30) + wholeDays * 86400000 + millis);
+  if (Number.isNaN(date.getTime())) return null;
+  return {
+    year: date.getUTCFullYear(), month: date.getUTCMonth() + 1, day: date.getUTCDate(),
+    hour: date.getUTCHours(), minute: date.getUTCMinutes(), second: date.getUTCSeconds(), millisecond: date.getUTCMilliseconds(),
+  };
+}
+
+function dateValue(value: unknown): ParsedDateParts | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) {
+    return {
+      year: value.getFullYear(), month: value.getMonth() + 1, day: value.getDate(),
+      hour: value.getHours(), minute: value.getMinutes(), second: value.getSeconds(), millisecond: value.getMilliseconds(),
+    };
+  }
+  if (typeof value === 'number') return fromExcelSerial(value);
+  if (typeof value !== 'string') return null;
+
+  const text = value.trim();
+  if (!text) return null;
+
+  // Preserve the source's literal wall-clock components instead of converting timezone offsets.
+  // This is important for document fields such as invoice dates/times and for Excel-normalized ISO values.
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T ](\d{1,2}):(\d{2})(?::(\d{2})(?:\.(\d{1,3}))?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/);
+  if (iso) {
+    const year = Number(iso[1]); const month = Number(iso[2]); const day = Number(iso[3]);
+    if (!validDateParts(year, month, day)) return null;
+    return {
+      year, month, day,
+      hour: Number(iso[4] ?? 0), minute: Number(iso[5] ?? 0), second: Number(iso[6] ?? 0),
+      millisecond: Number(String(iso[7] ?? '').padEnd(3, '0') || 0),
+    };
+  }
+
+  const slashDate = text.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ T](\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?)?$/i);
+  if (slashDate) {
+    const first = Number(slashDate[1]); const second = Number(slashDate[2]); const year = Number(slashDate[3]);
+    // Prefer DD/MM/YYYY for ambiguous document data; unambiguous US-style dates still parse correctly.
+    let day = first; let month = second;
+    if (first <= 12 && second > 12) { month = first; day = second; }
+    if (!validDateParts(year, month, day)) return null;
+    let hour = Number(slashDate[4] ?? 0);
+    const minute = Number(slashDate[5] ?? 0); const secondPart = Number(slashDate[6] ?? 0);
+    const ampm = slashDate[7]?.toUpperCase();
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+    return { year, month, day, hour, minute, second: secondPart, millisecond: 0 };
+  }
+
+  const timeOnly = text.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)?$/i);
+  if (timeOnly) {
+    let hour = Number(timeOnly[1]); const minute = Number(timeOnly[2]); const second = Number(timeOnly[3] ?? 0);
+    const ampm = timeOnly[4]?.toUpperCase();
+    if (ampm === 'PM' && hour < 12) hour += 12;
+    if (ampm === 'AM' && hour === 12) hour = 0;
+    return { year: 1970, month: 1, day: 1, hour, minute, second, millisecond: 0 };
+  }
+
+  if (/^\d+(?:\.\d+)?$/.test(text)) return fromExcelSerial(Number(text));
+
+  const parsed = new Date(text);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return {
+    year: parsed.getFullYear(), month: parsed.getMonth() + 1, day: parsed.getDate(),
+    hour: parsed.getHours(), minute: parsed.getMinutes(), second: parsed.getSeconds(), millisecond: parsed.getMilliseconds(),
+  };
+}
+
+function dateParts(date: ParsedDateParts, format: TableDataFormat): string {
+  const dd = String(date.day).padStart(2, '0');
+  const mm = String(date.month).padStart(2, '0');
+  const yyyy = String(date.year);
+  const mon = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][date.month - 1] ?? '';
   switch (format.dateFormat ?? 'dd/MM/yyyy') {
     case 'MM/dd/yyyy': return `${mm}/${dd}/${yyyy}`;
     case 'yyyy-MM-dd': return `${yyyy}-${mm}-${dd}`;
@@ -545,14 +661,14 @@ function dateParts(date: Date, format: TableDataFormat): string {
   }
 }
 
-function timeParts(date: Date, format: TableDataFormat): string {
+function timeParts(date: ParsedDateParts, format: TableDataFormat): string {
   if ((format.timeFormat ?? '12h') === '24h') {
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+    return `${String(date.hour).padStart(2, '0')}:${String(date.minute).padStart(2, '0')}`;
   }
-  let hour = date.getHours();
+  let hour = date.hour;
   const suffix = hour >= 12 ? 'PM' : 'AM';
   hour = hour % 12 || 12;
-  return `${String(hour).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')} ${suffix}`;
+  return `${String(hour).padStart(2, '0')}:${String(date.minute).padStart(2, '0')} ${suffix}`;
 }
 
 export function formatTableValue(value: unknown, dataType: TableDataType = 'text', format: TableDataFormat = {}): string {
@@ -588,12 +704,25 @@ export function formatTableValue(value: unknown, dataType: TableDataType = 'text
 
 type FormulaToken = { type: 'number' | 'identifier' | 'operator' | 'paren'; value: string };
 
-function tokenizeFormula(expression: string): FormulaToken[] {
+export type FormulaEvaluationOptions = { percentageFields?: Record<string, { inputMode?: 'fraction' | 'whole' }> };
+
+function tokenizeFormula(expression: string, knownFields: string[] = []): FormulaToken[] {
   const tokens: FormulaToken[] = [];
   let index = 0;
   while (index < expression.length) {
     const char = expression[index];
     if (/\s/.test(char)) { index += 1; continue; }
+    if (char === '[') {
+      const end = expression.indexOf(']', index + 1);
+      if (end < 0) throw new Error('Missing closing ] in formula field reference');
+      const field = expression.slice(index + 1, end).trim();
+      if (!field) throw new Error('Empty formula field reference');
+      tokens.push({ type: 'identifier', value: field }); index = end + 1; continue;
+    }
+    const knownField = knownFields.find((field) => expression.slice(index, index + field.length) === field);
+    if (knownField) {
+      tokens.push({ type: 'identifier', value: knownField }); index += knownField.length; continue;
+    }
     if (/[0-9.]/.test(char)) {
       let end = index + 1;
       while (end < expression.length && /[0-9.]/.test(expression[end])) end += 1;
@@ -611,10 +740,97 @@ function tokenizeFormula(expression: string): FormulaToken[] {
   return tokens;
 }
 
-export function evaluateTableFormula(expression: string | undefined, record: unknown): number | null {
+
+export type TableFormulaColumnReference = { columnId: string; label: string; dataType: TableDataType; reference: string };
+
+export function formulaColumnReferences(table: TableDefinition, currentColumnId?: string): TableFormulaColumnReference[] {
+  if (table.mode !== 'dynamic') return [];
+  const body = table.bodyRows[0];
+  if (!body) return [];
+  const refs: TableFormulaColumnReference[] = [];
+  let visualColumn = 0;
+  for (const cell of body.cells) {
+    const column = table.columns[visualColumn];
+    visualColumn += Math.max(1, cell.colSpan);
+    if (!column || column.id === currentColumnId) continue;
+    const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
+    if (mode !== 'formula') continue;
+    const label = column.label?.trim() || column.key?.trim() || `Column ${refs.length + 1}`;
+    refs.push({ columnId: column.id, label, dataType: cell.dataType ?? column.dataType ?? 'number', reference: /^[A-Za-z_$][A-Za-z0-9_.$]*$/.test(label) ? label : `[${label}]` });
+  }
+  return refs;
+}
+
+function formulaReferenceNames(expression: string | undefined): Set<string> {
+  const refs = new Set<string>();
+  if (!expression) return refs;
+  for (const match of expression.matchAll(/\[([^\]]+)\]/g)) {
+    const name = match[1]?.trim(); if (name) refs.add(name);
+  }
+  const scrubbed = expression.replace(/\[[^\]]+\]/g, ' ');
+  for (const match of scrubbed.matchAll(/[A-Za-z_$][A-Za-z0-9_.$]*/g)) refs.add(match[0]);
+  return refs;
+}
+
+/**
+ * Resolve Dynamic Table formula columns for one runtime row.
+ * Results are keyed by stable column id. Formula-column labels/keys are exposed to
+ * later formulas, so `[Net Value] + [Tax Amount]` can chain safely. Evaluation uses
+ * bounded dependency passes; unresolved self/circular references stay null.
+ */
+export function evaluateTableFormulaColumns(table: TableDefinition, record: unknown): Record<string, number | null> {
+  if (table.mode !== 'dynamic' || !record || typeof record !== 'object') return {};
+  const body = table.bodyRows[0];
+  if (!body) return {};
+
+  const context: Record<string, unknown> = { ...(record as Record<string, unknown>) };
+  const percentageFields: Record<string, { inputMode?: 'fraction' | 'whole' }> = {};
+  const specs: Array<{ column: TableColumn; cell: TableCell; label: string }> = [];
+  let visualColumn = 0;
+  for (const cell of body.cells) {
+    const column = table.columns[visualColumn];
+    visualColumn += Math.max(1, cell.colSpan);
+    if (!column) continue;
+    const type = cell.dataType ?? column.dataType;
+    if (cell.binding && type === 'percentage') percentageFields[cell.binding] = { inputMode: cell.format?.percentInputMode ?? column.format?.percentInputMode ?? 'fraction' };
+    const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
+    if (mode === 'formula') {
+      const label = column.label?.trim() || column.key?.trim() || column.id;
+      specs.push({ column, cell, label });
+      if (type === 'percentage') {
+        const pct = { inputMode: cell.format?.percentInputMode ?? column.format?.percentInputMode ?? 'fraction' } as const;
+        percentageFields[label] = pct;
+        if (column.key) percentageFields[column.key] = pct;
+      }
+    }
+  }
+
+  const results: Record<string, number | null> = Object.fromEntries(specs.map(({ column }) => [column.id, null]));
+  const unresolved = new Set(specs.map(({ column }) => column.id));
+  for (let pass = 0; pass < specs.length && unresolved.size > 0; pass += 1) {
+    let progressed = false;
+    for (const spec of specs) {
+      if (!unresolved.has(spec.column.id)) continue;
+      const refs = formulaReferenceNames(spec.cell.formula);
+      if (refs.has(spec.label) || (!!spec.column.key && refs.has(spec.column.key))) continue;
+      const result = evaluateTableFormula(spec.cell.formula, context, { percentageFields });
+      if (result == null) continue;
+      results[spec.column.id] = result;
+      context[spec.label] = result;
+      if (spec.column.key) context[spec.column.key] = result;
+      unresolved.delete(spec.column.id);
+      progressed = true;
+    }
+    if (!progressed) break;
+  }
+  return results;
+}
+
+export function evaluateTableFormula(expression: string | undefined, record: unknown, options: FormulaEvaluationOptions = {}): number | null {
   if (!expression?.trim()) return null;
   try {
-    const tokens = tokenizeFormula(expression);
+    const knownFields = record && typeof record === 'object' ? Object.keys(record as Record<string, unknown>).sort((a, b) => b.length - a.length) : [];
+    const tokens = tokenizeFormula(expression, knownFields);
     let cursor = 0;
     const parseFactor = (): number => {
       const token = tokens[cursor++];
@@ -632,8 +848,14 @@ export function evaluateTableFormula(expression: string | undefined, record: unk
         const parsed = Number(token.value); if (!Number.isFinite(parsed)) throw new Error('Invalid number'); return parsed;
       }
       if (token.type === 'identifier') {
-        const parsed = numericValue(valueAtPath(record, token.value));
+        const sourceValue = valueAtPath(record, token.value);
+        const parsed = numericValue(sourceValue);
         if (parsed == null) throw new Error(`Field ${token.value} is not numeric`);
+        const percentage = options.percentageFields?.[token.value];
+        if (percentage) {
+          if (typeof sourceValue === 'string' && sourceValue.includes('%')) return parsed / 100;
+          return percentage.inputMode === 'whole' ? parsed / 100 : parsed;
+        }
         return parsed;
       }
       throw new Error('Invalid formula');
@@ -663,6 +885,99 @@ export function evaluateTableFormula(expression: string | undefined, record: unk
   } catch {
     return null;
   }
+}
+
+
+export type TableSummaryResult = { byCellId: Record<string, unknown>; byName: Record<string, number> };
+
+function formulaColumnContext(table: TableDefinition, record: unknown): Record<string, unknown> {
+  const context: Record<string, unknown> = record && typeof record === 'object' ? { ...(record as Record<string, unknown>) } : {};
+  const results = evaluateTableFormulaColumns(table, record);
+  const body = table.bodyRows[0];
+  if (!body) return context;
+  let visualColumn = 0;
+  for (const cell of body.cells) {
+    const column = table.columns[visualColumn];
+    visualColumn += Math.max(1, cell.colSpan);
+    if (!column) continue;
+    const result = results[column.id];
+    if (result == null) continue;
+    const label = column.label?.trim() || column.key?.trim();
+    if (label) context[label] = result;
+    if (column.key) context[column.key] = result;
+  }
+  return context;
+}
+
+function aggregateValues(rows: Array<Record<string, unknown>>, field: string, operation: TableAggregateOperation): number {
+  const values = rows.map((row) => valueAtPath(row, field)).filter((value) => value !== undefined && value !== null && value !== '');
+  if (operation === 'count') return values.length;
+  const nums = values.map(numericValue).filter((value): value is number => value != null && Number.isFinite(value));
+  if (operation === 'sum') return nums.reduce((sum, value) => sum + value, 0);
+  if (operation === 'avg') return nums.length ? nums.reduce((sum, value) => sum + value, 0) / nums.length : 0;
+  if (operation === 'min') return nums.length ? Math.min(...nums) : 0;
+  return nums.length ? Math.max(...nums) : 0;
+}
+
+function replaceAggregateCalls(expression: string, rows: Array<Record<string, unknown>>): string {
+  return expression.replace(/\b(SUM|COUNT|AVG|MIN|MAX)\s*\(\s*(?:\[([^\]]+)\]|([A-Za-z_$][A-Za-z0-9_.$]*))\s*\)/gi, (_full, op, bracketField, bareField) => {
+    const field = String(bracketField || bareField || '').trim();
+    const value = aggregateValues(rows, field, String(op).toLowerCase() as TableAggregateOperation);
+    return String(value);
+  });
+}
+
+/**
+ * DB-4.3B summary engine. Runtime records are first enriched with resolved formula-column
+ * values, so SUM([Net Value]) and similar aggregates work naturally. Summary rows resolve
+ * top-to-bottom, exposing named results to later rows (e.g. [Subtotal] + [Tax Amount]).
+ */
+export function evaluateTableSummaryRows(table: TableDefinition, runtimeRecords: unknown[]): TableSummaryResult {
+  const rows = runtimeRecords.map((record) => formulaColumnContext(table, record));
+  const byCellId: Record<string, unknown> = {};
+  const byName: Record<string, number> = {};
+
+  for (const row of table.customRows) {
+    for (const cell of row.cells) {
+      const mode = cell.summaryMode ?? 'custom';
+      if (mode === 'aggregate') {
+        const operation = cell.aggregate?.operation ?? 'sum';
+        const field = cell.aggregate?.field?.trim() ?? '';
+        if (!field) { byCellId[cell.id] = null; continue; }
+        const value = aggregateValues(rows, field, operation);
+        byCellId[cell.id] = value;
+        const name = cell.summaryName?.trim();
+        if (name) byName[name] = value;
+        continue;
+      }
+      if (mode === 'formula') {
+        const expression = replaceAggregateCalls(cell.summaryFormula ?? '', rows);
+        const value = evaluateTableFormula(expression, byName);
+        byCellId[cell.id] = value;
+        const name = cell.summaryName?.trim();
+        if (name && value != null) byName[name] = value;
+      }
+    }
+  }
+  return { byCellId, byName };
+}
+
+export function summaryFieldOptions(table: TableDefinition, source?: BuilderDataSource | null): Array<{ value: string; label: string; kind: 'field' | 'formula' }> {
+  const options: Array<{ value: string; label: string; kind: 'field' | 'formula' }> = [];
+  for (const field of source?.fields ?? []) options.push({ value: field.name, label: field.label || field.name, kind: 'field' });
+  for (const formula of formulaColumnReferences(table)) options.push({ value: formula.label, label: formula.label, kind: 'formula' });
+  return options;
+}
+
+export function summaryValueReferences(table: TableDefinition, currentCellId?: string): Array<{ name: string; reference: string }> {
+  const refs: Array<{ name: string; reference: string }> = [];
+  for (const row of table.customRows) for (const cell of row.cells) {
+    if (cell.id === currentCellId) continue;
+    const name = cell.summaryName?.trim();
+    if (!name || (cell.summaryMode !== 'aggregate' && cell.summaryMode !== 'formula')) continue;
+    refs.push({ name, reference: /^[A-Za-z_$][A-Za-z0-9_.$]*$/.test(name) ? name : `[${name}]` });
+  }
+  return refs;
 }
 
 export function recommendedRowKey(fields: FieldDefinition[]): string {
@@ -739,4 +1054,70 @@ export function dynamicRows(
     const configured = compositeKey(item, rowKeys);
     return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: item };
   });
+}
+
+
+// DB-4.4 Phase 1: deterministic pagination planner used by the builder preview and later renderers.
+export type TablePaginationRuntimeRow = { key: string; value: NormalizedRecord };
+export type TablePaginationPage = {
+  index: number;
+  runtimeRows: TablePaginationRuntimeRow[];
+  includeHeader: boolean;
+  includeSummary: boolean;
+  manualBreakBefore?: boolean;
+};
+
+function rowEstimatedHeight(row: TableRow): number {
+  return Math.max(18, row.autoHeight ? row.height : row.height);
+}
+
+export function paginateDynamicTable(
+  table: TableDefinition,
+  runtimeRows: TablePaginationRuntimeRow[],
+  availableHeightPx: number,
+  continuationHeightPx: number = availableHeightPx,
+): TablePaginationPage[] {
+  if (table.mode !== 'dynamic') return [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }];
+  if (table.pagination?.enabled === false || availableHeightPx <= 0) {
+    return [{ index: 0, runtimeRows, includeHeader: true, includeSummary: true }];
+  }
+
+  const repeatHeader = table.pagination?.repeatHeader !== false;
+  const headerRows = table.headerRows.filter((row) => repeatHeader ? row.repeatOnEveryPage !== false : true);
+  const firstHeaderHeight = table.headerRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
+  const repeatHeaderHeight = headerRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
+  const bodyHeight = Math.max(18, table.bodyRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0));
+  const summaryHeight = table.customRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
+  const manualBodyBreak = table.bodyRows.some((row) => row.pageBreakBefore);
+  const pages: TablePaginationPage[] = [];
+  let current: TablePaginationPage = { index: 0, runtimeRows: [], includeHeader: true, includeSummary: false };
+  let used = firstHeaderHeight;
+  let currentCapacity = availableHeightPx;
+
+  const commit = (manualBreakBefore = false) => {
+    pages.push(current);
+    current = { index: pages.length, runtimeRows: [], includeHeader: repeatHeader, includeSummary: false, manualBreakBefore };
+    used = repeatHeader ? repeatHeaderHeight : 0;
+    currentCapacity = Math.max(40, continuationHeightPx);
+  };
+
+  for (let i = 0; i < runtimeRows.length; i += 1) {
+    if (manualBodyBreak && current.runtimeRows.length > 0) commit(true);
+    const rowHeight = bodyHeight;
+    const wouldOverflow = current.runtimeRows.length > 0 && used + rowHeight > currentCapacity;
+    if (wouldOverflow) commit(false);
+    current.runtimeRows.push(runtimeRows[i]);
+    used += rowHeight;
+  }
+
+  if (table.customRows.length > 0) {
+    const manualSummaryBreak = table.customRows.some((row) => row.pageBreakBefore);
+    const keepSummaryTogether = table.pagination?.keepSummaryTogether !== false;
+    const summaryWouldOverflow = used + summaryHeight > currentCapacity;
+    if ((manualSummaryBreak || (keepSummaryTogether && summaryWouldOverflow)) && current.runtimeRows.length > 0) commit(manualSummaryBreak);
+    current.includeSummary = true;
+  }
+
+  if (pages.length === 0 || current.runtimeRows.length > 0 || current.includeSummary || runtimeRows.length === 0) pages.push(current);
+  return pages.map((page, index) => ({ ...page, index }));
 }
