@@ -171,3 +171,53 @@ Dynamic Table overflow now previews on separate full-size document sheets. Page 
 
 ### DB-4.4 Phase 2 Fix1
 Automatic overflow continuation sheets now appear in the Pages navigator as Auto pages and can be clicked to focus their corresponding virtual sheet.
+
+
+### DB-4H — Header / Footer Zones (2026-09-10)
+Header/Footer page bands, repeat rules, zone element assignment, page numbering tokens, and Header/Footer-aware continuation content bounds are now implemented. See `docs/DB4H_HEADER_FOOTER_ZONES.md`.
+
+### DB-4H Fix1 — Header/Footer zone assignment hardening
+Header/Footer assignment now auto-enables the selected zone, fits and constrains elements inside the band, and exposes the active band's repeat rule directly while the element is selected. This addresses DB4H-T04/T05/T06 manual QA failures.
+
+### DB-4H Fix2 — Header/Footer Content Containers
+Header/Footer now act as reusable element containers. Text, Image, Shape, QR, Barcode, Signature and Divider can be inserted directly into either band and repeat together according to the band's repeat rule. Child properties and dynamic bindings remain intact; continuation copies are derived/read-only.
+
+### DB-4H Fix3 — Global Header / Footer Master
+Header/Footer are now document-level master regions with dedicated inspector tabs. Their full element compositions repeat across separate Builder Pages and automatic overflow continuation pages according to a single global repeat policy. Page-number tokens use the complete output-page sequence.
+
+### DB-4H Fix4 — Global Master Positioning + Mixed Static/Dynamic Content
+Header/Footer master children can now be dragged/resized from any projected output page; edits synchronize back to the one global master. Quick Left/Center/Right and Top/Middle/Bottom placement controls are available for band elements. Text-based Content editors now support mixed static text and dynamic tokens such as `Invoice No: {{InvoiceNo}}` and `Page {{pageNumber}} of {{totalPages}}`; the same token editor is reused across normal text, Header/Footer content, Shape text, QR/Barcode text, and custom table/summary text.
+
+### DB-4H Fix5 — Mixed token visibility + typography
+Mixed static/dynamic content now resolves multiple field tokens robustly, including legacy triple-brace cases, and shows a resolved preview. Text-bearing elements support font family/size, bold, italic, underline, line height, color and alignment through the Formatting inspector.
+
+### DB-4H Fix6 — Body Positioning + Smart Placement
+Body elements now have usable-area Left/Center/Right and Top/Middle/Bottom positioning controls. New Body content uses collision-aware Smart Insert instead of stacking at the same coordinates, while manual overlap remains possible after insertion. Body drag/resize and numeric geometry are constrained to Header/Footer-aware content bounds.
+
+### DB-4H Fix7 — Manual Overlap + Layering
+Body content can now be intentionally placed over existing blocks without becoming trapped behind them. Selected elements stay interactable while dragging across tables/images/shapes, and Properties includes persistent layer-order controls.
+
+### DB-4H Fix8 — Relative Block Placement + Gap Controls
+Body elements can now be positioned relative to another Body block. Select a reference block and use Place Above / Place Below with a physical gap in mm, Align Left / Center / Right, or Match Reference Width. This is especially useful for placing a static/details table immediately above or below a text block before a line-item table. Manual free drag and intentional overlap remain available after relative placement.
+
+## DB-4B — Body Flow / Reflow Layout Engine
+Body content now supports **Flow Block** and **Floating** layout modes. New Body elements default to Flow Block, so a growing Text/Table pushes later flow blocks down instead of overlapping them. Flow blocks support before/after spacing, horizontal alignment, full/custom width and Move Up/Down ordering. Floating preserves the free-position design workflow for watermarks, stamps and intentional overlap. Existing saved templates migrate as Floating to preserve layout fidelity. See `docs/DB4B_BODY_FLOW_REFLOW_LAYOUT_ENGINE.md`.
+
+### DB-4B Row/Block Flow Engine (authoritative Body layout)
+
+The Body is now a document-flow layout by default. New content starts at the usable Body top and appends in rows. Rich Text and Tables are auto-height; when an earlier block grows, all following rows shift automatically. New blocks default to 100% width, can be resized by percentage, can share a horizontal row, and support row alignment/gaps and reordering. Flow owns X/Y; use Floating only for deliberate overlays. This replaces the earlier experimental smart-placement/relative-placement Body workflow.
+
+### DB-4.4 Phase 3 — Pagination Hardening / Materialization (2026-09-11)
+Dynamic-table pagination now uses compact auto-height row estimates derived from cell typography instead of the old fixed 30/32px design handles, reducing false blank space before the footer. Page plans now expose deterministic page IDs, exact row ranges, header/summary flags, and used/unused height for renderer parity. See `docs/DB4_4_PHASE3_PAGINATION_HARDENING_MATERIALIZATION.md`.
+
+### DB-4.4 Phase 3 Fix2 — Cross-page Body Flow
+Body Flow now respects the complete paginated span of Dynamic Tables. Content added after a multi-page table is materialized after the table's final continuation fragment (or on the next page when required) instead of appearing in the first-page Footer area.
+
+### DB-4.4 Phase 3 Fix3 — Complete Row Boundary
+Dynamic-table pagination now estimates auto-height rows from each runtime record and the actual table width, including likely text wrapping. A row that cannot fit completely before the Footer hard boundary is moved intact to the next continuation page instead of being clipped. See `docs/DB4_4_PHASE3_FIX3_COMPLETE_ROW_BOUNDARY.md`.
+
+### DB-4G — Grouped Summary Table
+The Table creation dialog now includes **Grouped Summary** for imported-data aggregation. First filter rows to the active Parent / Document, then Group By fields such as HSN/category/warehouse and map output columns to Group value, SUM, COUNT, AVG, MIN, MAX, FIRST or LAST. A GST summary such as `HSN | Total GST | Taxable | CGST | SGST | IGST | Total` can therefore produce one row per HSN with numeric totals summed from its related line items. See `docs/DB4G_GROUPED_SUMMARY_TABLE.md`.
+
+### DB-4G Fix1 — Grouped Formula + Unified Create/Edit
+Grouped Summary tables can now calculate output columns after aggregation (for example `Total GST = [CGST] + [SGST] + [IGST]` and `Total = [Taxable] + [Total GST]`). Existing grouped tables can be reopened from Properties using the same configuration UI as Create, with their current grouping/mappings/formulas prefilled.

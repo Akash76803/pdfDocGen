@@ -4,13 +4,14 @@ import type { NormalizedRecord } from '@document-tool/contracts';
 import { type BuilderDataSource } from '../lib/dataSourceStore.ts';
 import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
 import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, smartColumnWidths, paginateDynamicTable, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
+import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.ts';
 
-export function TableCanvas({ table, record, source, documentSource, availableHeight, continuationAvailableHeight, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; availableHeight?: number; continuationAvailableHeight?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
+export function TableCanvas({ table, record, source, documentSource, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => (onSelectionChange ?? onChange)({ ...table, selectedCellId: cellId });
   const runtime = dynamicRows(table, record, source, documentSource);
   const columnWidths = smartColumnWidths(table, runtime.map((row) => row.value));
   const summaryResults = table.mode === 'dynamic' ? evaluateTableSummaryRows(table, runtime.map((row) => row.value)) : { byCellId: {}, byName: {} };
-  const paginationPages = table.mode === 'dynamic' ? paginateDynamicTable(table, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999)) : [];
+  const paginationPages = table.mode === 'dynamic' ? paginateDynamicTable(table, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
   const renderedPages = fragmentIndex === undefined ? paginationPages : paginationPages.filter((page) => page.index === fragmentIndex);
   const tableRef = useRef<HTMLTableElement | null>(null);
 
@@ -74,15 +75,21 @@ export function TableCanvas({ table, record, source, documentSource, availableHe
   return <div className="db-table-shell" style={{ '--table-border': table.borderColor, '--table-border-width': `${table.borderWidth}px` } as CSSProperties}>
     {table.mode === 'dynamic' && paginationPages.length > 1 && !virtualPageMode ? <div className="db-pagination-status">{paginationPages.length} pages · automatic overflow</div> : null}
     {(table.mode === 'dynamic' ? renderedPages : [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }]).map((page, renderedIndex) => { const pageIndex = page.index; return <div className="db-table-page-fragment" key={`fragment-${page.index}`}>
+    {pageIndex === 0 && table.selectedCellId && table.columns.length > 1 && <div className="db-column-ruler" aria-label="Column resize ruler">
+      {columnWidths.map((width, index) => <div key={table.columns[index]?.id ?? index} className="db-column-ruler-segment" style={{ width: `${width}%` }}>
+        <span>{Math.round(width)}%</span>
+        {index < table.columns.length - 1 && <button type="button" className="db-column-ruler-handle" title={`Resize column ${index + 1} / ${index + 2}`} onPointerDown={(e) => startColumnResize(e as unknown as ReactPointerEvent<HTMLSpanElement>, index)} aria-label={`Resize column ${index + 1}`}/>}
+      </div>)}
+    </div>}
     {!virtualPageMode && renderedIndex > 0 && <div className="db-page-break-marker"><span>Page break</span><small>Continuation {pageIndex + 1}</small></div>}
     <table ref={pageIndex === 0 ? tableRef : undefined} className="db-table">
       {table.columns.length > 0 && <colgroup>{table.columns.map((column, index) => <col key={column.id} style={{ width: `${columnWidths[index] ?? (100 / table.columns.length)}%` }}/>)}</colgroup>}
-      {table.headerRows.length > 0 && page.includeHeader && <thead>{table.headerRows.filter((row) => pageIndex === 0 || !table.pagination.repeatHeader || row.repeatOnEveryPage !== false).map((row) => <RenderRow key={row.id} row={row} table={table} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}</thead>}
+      {table.headerRows.length > 0 && page.includeHeader && <thead>{table.headerRows.filter((row) => pageIndex === 0 || !table.pagination.repeatHeader || row.repeatOnEveryPage !== false).map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}</thead>}
       <tbody>
         {table.mode === 'custom' && table.rows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} onSelect={selectCell}/>) }
         {table.mode === 'dynamic' && runtime.length === 0 && <tr><td className="db-table-empty" colSpan={Math.max(1, table.columns.length)}>{table.binding?.parentKey || table.binding?.parentKeys?.length ? <>No rows match the selected document ID in <b>{table.binding?.repeatSource || 'source'}</b></> : <>No line items for <b>{table.binding?.repeatSource || 'items'}</b></>}</td></tr>}
         {table.mode === 'dynamic' && page.runtimeRows.flatMap((runtimeRow) => { const formulaResults = evaluateTableFormulaColumns(table, runtimeRow.value); return table.bodyRows.map((template) => <RenderRow key={`${runtimeRow.key}:${template.id}`} row={template} table={table} runtimeValue={runtimeRow.value} formulaResults={formulaResults} onSelect={selectCell}/>); })}
-        {table.mode === 'dynamic' && page.includeSummary && table.customRows.map((row) => <RenderRow key={row.id} row={row} table={table} summaryResults={summaryResults.byCellId} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}
+        {table.mode === 'dynamic' && page.includeSummary && table.customRows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} summaryResults={summaryResults.byCellId} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}
       </tbody>
     </table>
     </div>})}
@@ -102,6 +109,7 @@ function RenderRow({ row, table, runtimeValue, formulaResults, summaryResults, o
 
 function CellValue({ cell, column, table, runtimeValue, formulaResults, summaryValue }: { cell: TableCell; column?: TableColumn; table: TableDefinition; runtimeValue?: unknown; formulaResults?: Record<string, number | null>; summaryValue?: unknown }) {
   const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
+  const useMixedTemplate = templateHasTokens(cell.content);
   const boundRaw = cell.binding ? valueAtPath(runtimeValue, cell.binding) : undefined;
   const percentageFields: Record<string, { inputMode?: 'fraction' | 'whole' }> = {};
   const designRows = table.mode === 'dynamic' ? table.bodyRows : table.rows;
@@ -117,7 +125,7 @@ function CellValue({ cell, column, table, runtimeValue, formulaResults, summaryV
       }
     }
   }
-  const raw = cell.summaryMode === 'aggregate' || cell.summaryMode === 'formula' ? summaryValue : mode === 'formula' ? (column && formulaResults && Object.prototype.hasOwnProperty.call(formulaResults, column.id) ? formulaResults[column.id] : evaluateTableFormula(cell.formula, runtimeValue, { percentageFields })) : mode === 'binding' ? boundRaw : cell.content;
+  const raw = cell.summaryMode === 'aggregate' || cell.summaryMode === 'formula' ? summaryValue : mode === 'formula' ? (column && formulaResults && Object.prototype.hasOwnProperty.call(formulaResults, column.id) ? formulaResults[column.id] : evaluateTableFormula(cell.formula, runtimeValue, { percentageFields })) : mode === 'binding' && !useMixedTemplate ? boundRaw : resolveTemplateTokens(cell.content, (field) => valueAtPath(runtimeValue, field), { preserveUnknown: runtimeValue == null });
   const dataType = cell.dataType ?? column?.dataType ?? 'text';
   const format = { ...(column?.format ?? {}), ...(cell.format ?? {}) };
   const value = formatTableValue(raw, dataType, format);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, createCustomTable, createDynamicTable, dynamicRows, recommendedRowKey, updateTableCell } from './tableModel.ts';
+import { addCustomSummaryRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableSummaryRows, recommendedRowKey, updateTableCell } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -304,4 +304,229 @@ describe('DB-4.3B Fix1 summary row cell structure', () => {
     expect(updated.cells[0].colSpan).toBe(4);
     expect(updated.cells[0].content).toBe('Grand Total');
   });
+});
+
+describe('DB-4.4 Phase 3 pagination hardening', () => {
+  it('packs compact auto-height rows using rendered typography instead of 30px design handles', async () => {
+    const { paginateDynamicTable } = await import('./tableModel.ts');
+    const table = createDynamicTable(4, 'items', 1);
+    // Default 11px font + 5px padding estimates to ~25px, so a 300px body should fit
+    // materially more rows than the old fixed 30px planner and avoid a large footer gap.
+    const rows = Array.from({ length: 20 }, (_, index) => ({ key: `row-${index + 1}`, value: { id: index + 1 } as never }));
+    const pages = paginateDynamicTable(table, rows, 300, 300);
+    expect(pages.length).toBeGreaterThan(1);
+    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(10);
+    expect(pages[0].unusedHeightPx).toBeLessThan(30);
+  });
+
+  it('keeps a hard footer-boundary reserve for body rows and summary', async () => {
+    const { paginateDynamicTable, addCustomSummaryRow } = await import('./tableModel.ts');
+    const table = addCustomSummaryRow(createDynamicTable(4, 'items', 1));
+    table.pagination.keepSummaryTogether = true;
+    const rows = Array.from({ length: 24 }, (_, index) => ({ key: `row-${index + 1}`, value: { id: index + 1 } as never }));
+    const pages = paginateDynamicTable(table, rows, 300, 300);
+    expect(pages.length).toBeGreaterThan(1);
+    for (const page of pages) {
+      expect(page.usedHeightPx).toBeLessThanOrEqual(page.availableHeightPx);
+    }
+    expect(pages.at(-1)?.includeSummary).toBe(true);
+  });
+
+
+  it('moves a wrapped runtime row intact to the next page instead of clipping it', async () => {
+    const { paginateDynamicTable, createDynamicTable } = await import('./tableModel.ts');
+    let table = createDynamicTable(3, 'items', 1, undefined, [
+      { label: 'Product Description', field: 'description' },
+      { label: 'SKU', field: 'sku' },
+      { label: 'Qty', field: 'qty' },
+    ]);
+    // Make description dominant so the last record wraps to multiple lines.
+    table.columns = table.columns.map((column, index) => ({ ...column, width: index === 0 ? 220 : 70, manualWidth: true }));
+    const rows = [
+      ...Array.from({ length: 7 }, (_, index) => ({ key: `short-${index}`, value: { description: `Short item ${index}`, sku: 'X', qty: 1 } as never })),
+      { key: 'wrapped-last', value: { description: 'FML TRAVELLER NEW T00 686 324 2511 - AUXILIARY-AL AMI EXTRA LONG DESCRIPTION THAT WRAPS', sku: '1531231', qty: 2 } as never },
+    ];
+    const pages = paginateDynamicTable(table, rows, 170, 170, 420);
+    const wrappedPage = pages.find((page) => page.runtimeRows.some((row) => row.key === 'wrapped-last'));
+    expect(wrappedPage).toBeDefined();
+    expect(wrappedPage!.usedHeightPx).toBeLessThanOrEqual(wrappedPage!.availableHeightPx);
+    expect(pages.flatMap((page) => page.runtimeRows).map((row) => row.key)).toEqual(rows.map((row) => row.key));
+  });
+
+  it('materializes deterministic row ranges and page identities', async () => {
+    const { paginateDynamicTable } = await import('./tableModel.ts');
+    const table = createDynamicTable(3, 'items', 1);
+    const rows = Array.from({ length: 16 }, (_, index) => ({ key: `LI-${index + 1}`, value: { line: index + 1 } as never }));
+    const a = paginateDynamicTable(table, rows, 180, 220);
+    const b = paginateDynamicTable(table, rows, 180, 220);
+    expect(a.map((page) => page.id)).toEqual(b.map((page) => page.id));
+    expect(a[0].startRow).toBe(0);
+    for (let i = 1; i < a.length; i += 1) {
+      if (a[i].runtimeRows.length) expect(a[i].startRow).toBe(a[i - 1].endRow + 1);
+    }
+  });
+
+  it('keeps summary together without discarding usable row space on previous pages', async () => {
+    const { paginateDynamicTable, addCustomSummaryRow } = await import('./tableModel.ts');
+    const table = addCustomSummaryRow(createDynamicTable(4, 'items', 1));
+    table.pagination.keepSummaryTogether = true;
+    const rows = Array.from({ length: 14 }, (_, index) => ({ key: `row-${index}`, value: { id: index } as never }));
+    const pages = paginateDynamicTable(table, rows, 220, 220);
+    expect(pages.at(-1)?.includeSummary).toBe(true);
+    expect(pages.slice(0, -1).every((page) => page.includeSummary === false)).toBe(true);
+    expect(pages.flatMap((page) => page.runtimeRows)).toHaveLength(rows.length);
+  });
+});
+
+
+describe('DB-4G grouped summary table', () => {
+  it('groups the active document by HSN and sums configured numeric fields', () => {
+    const source = {
+      id: 'invoice-data', name: 'Invoice Data', sourceType: 'csv', warnings: [], importedAt: '2026-09-12T00:00:00Z',
+      fields: [],
+      records: [
+        { InvoiceNo: 'INV-001', HSN: '73181500', Taxable: 10000, CGST: 900, SGST: 900, IGST: 0, TotalGST: 1800, Total: 11800 },
+        { InvoiceNo: 'INV-001', HSN: '73181500', Taxable: 5000, CGST: 450, SGST: 450, IGST: 0, TotalGST: 900, Total: 5900 },
+        { InvoiceNo: 'INV-001', HSN: '73201020', Taxable: 8000, CGST: 720, SGST: 720, IGST: 0, TotalGST: 1440, Total: 9440 },
+        { InvoiceNo: 'INV-002', HSN: '73181500', Taxable: 999999, CGST: 1, SGST: 1, IGST: 1, TotalGST: 3, Total: 1000002 },
+      ],
+    } as never;
+    const table = createGroupedSummaryTable('Invoice Data', ['HSN'], [
+      { label: 'HSN', field: 'HSN', operation: 'group', dataType: 'text' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum', dataType: 'currency' },
+      { label: 'CGST', field: 'CGST', operation: 'sum', dataType: 'currency' },
+      { label: 'SGST', field: 'SGST', operation: 'sum', dataType: 'currency' },
+      { label: 'IGST', field: 'IGST', operation: 'sum', dataType: 'currency' },
+      { label: 'Total GST', field: 'TotalGST', operation: 'sum', dataType: 'currency' },
+      { label: 'Total', field: 'Total', operation: 'sum', dataType: 'currency' },
+    ], { sourceId: 'invoice-data', parentKey: 'InvoiceNo', parentKeys: ['InvoiceNo'] });
+
+    const runtime = dynamicRows(table, { InvoiceNo: 'INV-001' } as never, source);
+    expect(runtime).toHaveLength(2);
+    const first = runtime[0].value as Record<string, unknown>;
+    const second = runtime[1].value as Record<string, unknown>;
+    expect(first.__grouped_0).toBe('73181500');
+    expect(first.__grouped_1).toBe(15000);
+    expect(first.__grouped_2).toBe(1350);
+    expect(first.__grouped_3).toBe(1350);
+    expect(first.__grouped_4).toBe(0);
+    expect(first.__grouped_5).toBe(2700);
+    expect(first.__grouped_6).toBe(17700);
+    expect(second.__grouped_0).toBe('73201020');
+    expect(second.__grouped_1).toBe(8000);
+  });
+
+  it('supports composite group keys plus count/avg/min/max/first/last', () => {
+    const source = {
+      id: 's', name: 'S', sourceType: 'json', warnings: [], importedAt: '', fields: [],
+      records: [
+        { Doc: 'D1', HSN: 'A', Rate: 18, Value: 10, Label: 'first' },
+        { Doc: 'D1', HSN: 'A', Rate: 18, Value: 30, Label: 'last' },
+        { Doc: 'D1', HSN: 'A', Rate: 5, Value: 100, Label: 'other' },
+      ],
+    } as never;
+    const table = createGroupedSummaryTable('S', ['HSN', 'Rate'], [
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Rate', field: 'Rate', operation: 'group' },
+      { label: 'Count', field: 'Value', operation: 'count' },
+      { label: 'Avg', field: 'Value', operation: 'avg' },
+      { label: 'Min', field: 'Value', operation: 'min' },
+      { label: 'Max', field: 'Value', operation: 'max' },
+      { label: 'First', field: 'Label', operation: 'first' },
+      { label: 'Last', field: 'Label', operation: 'last' },
+    ], { sourceId: 's', parentKey: 'Doc', parentKeys: ['Doc'] });
+    const runtime = dynamicRows(table, { Doc: 'D1' } as never, source);
+    expect(runtime).toHaveLength(2);
+    const group18 = runtime.find((row) => (row.value as Record<string, unknown>).__grouped_1 === 18)!.value as Record<string, unknown>;
+    expect(group18.__grouped_2).toBe(2);
+    expect(group18.__grouped_3).toBe(20);
+    expect(group18.__grouped_4).toBe(10);
+    expect(group18.__grouped_5).toBe(30);
+    expect(group18.__grouped_6).toBe('first');
+    expect(group18.__grouped_7).toBe('last');
+  });
+
+  it('evaluates chained Grouped Summary formula columns after aggregates and leaves circular formulas blank', () => {
+    const source = {
+      id: 'gst', name: 'GST', sourceType: 'csv', warnings: [], importedAt: '', fields: [],
+      records: [
+        { Doc: 'D1', HSN: 'A', Taxable: 100, CGST: 9, SGST: 9, IGST: 0 },
+        { Doc: 'D1', HSN: 'A', Taxable: 50, CGST: 4.5, SGST: 4.5, IGST: 0 },
+      ],
+    } as never;
+    const table = createGroupedSummaryTable('GST', ['HSN'], [
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum' },
+      { label: 'CGST', field: 'CGST', operation: 'sum' },
+      { label: 'SGST', field: 'SGST', operation: 'sum' },
+      { label: 'IGST', field: 'IGST', operation: 'sum' },
+      { label: 'Total GST', field: '', operation: 'formula', formula: '[CGST] + [SGST] + [IGST]' },
+      { label: 'Total', field: '', operation: 'formula', formula: '[Taxable] + [Total GST]' },
+      { label: 'Loop', field: '', operation: 'formula', formula: '[Loop] + 1' },
+    ], { sourceId: 'gst', parentKey: 'Doc', parentKeys: ['Doc'] });
+    const runtime = dynamicRows(table, { Doc: 'D1' } as never, source);
+    const row = runtime[0].value as Record<string, unknown>;
+    expect(row.__grouped_1).toBe(150);
+    expect(row.__grouped_2).toBe(13.5);
+    expect(row.__grouped_3).toBe(13.5);
+    expect(row.__grouped_5).toBe(27);
+    expect(row.__grouped_6).toBe(177);
+    expect(row.__grouped_7).toBeNull();
+  });
+
+  it('calculates one final total row from grouped output rows, including grouped Formula columns', () => {
+    const source = {
+      id: 'gst2', name: 'GST2', sourceType: 'csv', warnings: [], importedAt: '', fields: [],
+      records: [
+        { Doc: 'D1', HSN: 'A', Taxable: 100, CGST: 9, SGST: 9, IGST: 0 },
+        { Doc: 'D1', HSN: 'A', Taxable: 50, CGST: 4.5, SGST: 4.5, IGST: 0 },
+        { Doc: 'D1', HSN: 'B', Taxable: 200, CGST: 18, SGST: 18, IGST: 0 },
+      ],
+    } as never;
+    let table = createGroupedSummaryTable('GST2', ['HSN'], [
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum' },
+      { label: 'CGST', field: 'CGST', operation: 'sum' },
+      { label: 'SGST', field: 'SGST', operation: 'sum' },
+      { label: 'IGST', field: 'IGST', operation: 'sum' },
+      { label: 'Total GST', field: '', operation: 'formula', formula: '[CGST] + [SGST] + [IGST]' },
+      { label: 'Total', field: '', operation: 'formula', formula: '[Taxable] + [Total GST]' },
+    ], { sourceId: 'gst2', parentKey: 'Doc', parentKeys: ['Doc'] });
+    table = applyGroupedFinalSummary(table, {
+      enabled: true,
+      columns: [
+        { operation: 'label', text: 'TOTAL' },
+        { operation: 'sum' }, { operation: 'sum' }, { operation: 'sum' }, { operation: 'sum' },
+        { operation: 'sum' },
+        { operation: 'formula', formula: '[Taxable] + [Total GST]' },
+      ],
+    });
+    const runtime = dynamicRows(table, { Doc: 'D1' } as never, source);
+    const summary = evaluateTableSummaryRows(table, runtime.map((row) => row.value));
+    const row = table.customRows[0];
+    expect(row.cells[0].content).toBe('TOTAL');
+    expect(summary.byCellId[row.cells[1].id]).toBe(350);
+    expect(summary.byCellId[row.cells[5].id]).toBe(63);
+    expect(summary.byCellId[row.cells[6].id]).toBe(413);
+  });
+
+  it('reconfigures a Grouped Summary while preserving visual table identity and widths', () => {
+    const original = createGroupedSummaryTable('S', ['HSN'], [
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum' },
+    ], { sourceId: 's', parentKey: 'Doc', parentKeys: ['Doc'] });
+    original.columns[0].width = 222;
+    original.columns[0].manualWidth = true;
+    const updated = reconfigureGroupedSummaryTable(original, 'S', ['HSN'], [
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum' },
+      { label: 'Total GST', field: '', operation: 'formula', formula: '[Taxable] * 0.18' },
+    ], { sourceId: 's', parentKey: 'Doc', parentKeys: ['Doc'] });
+    expect(updated.id).toBe(original.id);
+    expect(updated.columns[0].id).toBe(original.columns[0].id);
+    expect(updated.columns[0].width).toBe(222);
+    expect(updated.columns[0].manualWidth).toBe(true);
+    expect(updated.binding?.grouping?.columns[2].operation).toBe('formula');
+  });
+
 });

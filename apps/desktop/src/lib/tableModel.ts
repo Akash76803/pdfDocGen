@@ -68,6 +68,30 @@ export type TableRow = {
 };
 
 export type DynamicColumnMapping = { label: string; field: string; dataType?: TableDataType };
+export type GroupedAggregateOperation = 'group' | 'sum' | 'count' | 'avg' | 'min' | 'max' | 'first' | 'last' | 'formula';
+export type GroupedColumnMapping = {
+  label: string;
+  field: string;
+  operation: GroupedAggregateOperation;
+  /** DB-4G Fix1: formula is evaluated after group/aggregate columns for each grouped output row. */
+  formula?: string;
+  dataType?: TableDataType;
+};
+export type GroupedTableConfig = {
+  groupBy: string[];
+  columns: Array<GroupedColumnMapping & { outputKey: string }>;
+};
+
+export type GroupedFinalSummaryOperation = 'blank' | 'label' | 'sum' | 'count' | 'avg' | 'min' | 'max' | 'formula';
+export type GroupedFinalSummaryColumn = {
+  operation: GroupedFinalSummaryOperation;
+  text?: string;
+  formula?: string;
+};
+export type GroupedFinalSummaryConfig = {
+  enabled: boolean;
+  columns: GroupedFinalSummaryColumn[];
+};
 
 export type TableColumn = {
   id: string;
@@ -102,6 +126,8 @@ export type TableDefinition = {
     // Legacy DB-4.1 Fix3 relationship fields are retained for backward compatibility only.
     parentSourceId?: string;
     childForeignKey?: string;
+    /** Grouped Summary Table: group the active document rows, then emit one aggregate row per group. */
+    grouping?: GroupedTableConfig;
   };
   pagination: {
     enabled?: boolean;
@@ -196,6 +222,186 @@ export function createDynamicTable(columnCount: number, repeatSource: string, he
     pagination: { enabled: true, repeatHeader: true, allowRowSplit: false, keepRowsTogether: true, keepSummaryTogether: true },
     borderWidth: 1, borderColor: '#cfd6df', defaultPadding: 5,
   };
+}
+
+/**
+ * Grouped Summary Table (DB-4G): a data-driven table backed by the same flat source
+ * as Dynamic Table, but its runtime rows are grouped and aggregated before rendering.
+ * It intentionally stays mode='dynamic' so pagination, formatting, formulas, summaries,
+ * Body Flow and renderer parity continue to use the proven Dynamic Table path.
+ */
+export function createGroupedSummaryTable(
+  repeatSource: string,
+  groupBy: string[],
+  mappings: GroupedColumnMapping[],
+  binding?: { sourceId?: string; parentKey?: string; parentKeys?: string[] },
+): TableDefinition {
+  const validGroupBy = groupBy.filter(Boolean);
+  const validMappings = mappings.filter((item) => item.operation && (item.operation === 'formula' ? item.formula?.trim() : item.field));
+  const normalizedMappings = validMappings.map((mapping, index) => ({
+    ...mapping,
+    outputKey: `__grouped_${index}`,
+  }));
+  const dynamicMappings: DynamicColumnMapping[] = normalizedMappings.map((mapping) => ({
+    label: mapping.label.trim() || mapping.field,
+    field: mapping.outputKey,
+    dataType: mapping.dataType ?? (mapping.operation === 'group' || mapping.operation === 'first' || mapping.operation === 'last' ? 'text' : 'decimal'),
+  }));
+  const table = createDynamicTable(dynamicMappings.length, repeatSource, 1, {
+    sourceId: binding?.sourceId,
+    parentKey: binding?.parentKey,
+    parentKeys: binding?.parentKeys,
+    rowKey: validGroupBy[0],
+    rowKeys: validGroupBy,
+  }, dynamicMappings);
+  return {
+    ...table,
+    name: 'Grouped Summary Table',
+    binding: {
+      ...table.binding!,
+      grouping: { groupBy: validGroupBy, columns: normalizedMappings },
+    },
+  };
+}
+
+/**
+ * Reconfigure an existing Grouped Summary Table without throwing away the table's
+ * visual identity. Create/Edit share one configuration UI, while widths, formatting,
+ * pagination and table-level styling are retained by column index where possible.
+ */
+export function reconfigureGroupedSummaryTable(
+  existing: TableDefinition,
+  repeatSource: string,
+  groupBy: string[],
+  mappings: GroupedColumnMapping[],
+  binding?: { sourceId?: string; parentKey?: string; parentKeys?: string[] },
+): TableDefinition {
+  const next = createGroupedSummaryTable(repeatSource, groupBy, mappings, binding);
+  const columns = next.columns.map((column, index) => {
+    const old = existing.columns[index];
+    if (!old) return column;
+    return {
+      ...column,
+      id: old.id,
+      width: old.width,
+      minWidth: old.minWidth,
+      maxWidth: old.maxWidth,
+      align: old.align,
+      format: old.format,
+      manualWidth: old.manualWidth,
+    };
+  });
+  const headerRows = next.headerRows.map((row, rowIndex) => ({
+    ...row,
+    id: existing.headerRows[rowIndex]?.id ?? row.id,
+    cells: row.cells.map((cell, index) => {
+      const old = existing.headerRows[rowIndex]?.cells[index];
+      return old ? { ...cell, id: old.id, style: { ...old.style }, rowSpan: old.rowSpan, colSpan: old.colSpan } : cell;
+    }),
+  }));
+  const bodyRows = next.bodyRows.map((row, rowIndex) => ({
+    ...row,
+    id: existing.bodyRows[rowIndex]?.id ?? row.id,
+    cells: row.cells.map((cell, index) => {
+      const old = existing.bodyRows[rowIndex]?.cells[index];
+      return old ? { ...cell, id: old.id, style: { ...old.style }, rowSpan: old.rowSpan, colSpan: old.colSpan, format: old.format } : cell;
+    }),
+  }));
+  return {
+    ...next,
+    id: existing.id,
+    name: existing.name,
+    columns,
+    headerRows,
+    bodyRows,
+    customRows: existing.customRows,
+    pagination: { ...existing.pagination },
+    borderWidth: existing.borderWidth,
+    borderColor: existing.borderColor,
+    defaultPadding: existing.defaultPadding,
+    selectedCellId: existing.selectedCellId,
+  };
+}
+
+export function isGroupedSummaryTable(table: TableDefinition | undefined): boolean {
+  return Boolean(table?.binding?.grouping?.groupBy?.length && table.binding.grouping.columns?.length);
+}
+
+/**
+ * DB-4G Fix2: final total row configuration for Grouped Summary tables. The final
+ * row aggregates the already-grouped runtime output, never the raw line items.
+ */
+export function defaultGroupedFinalSummaryConfig(mappings: GroupedColumnMapping[]): GroupedFinalSummaryConfig {
+  return {
+    enabled: true,
+    columns: mappings.map((mapping, index) => {
+      if (index === 0) return { operation: 'label', text: 'TOTAL' };
+      if (mapping.operation === 'group' || mapping.operation === 'first' || mapping.operation === 'last') return { operation: 'blank' };
+      return { operation: 'sum' };
+    }),
+  };
+}
+
+export function groupedFinalSummaryConfigFromTable(table: TableDefinition): GroupedFinalSummaryConfig {
+  const grouping = table.binding?.grouping;
+  if (!grouping || table.customRows.length === 0) return defaultGroupedFinalSummaryConfig(grouping?.columns ?? []);
+  const row = table.customRows[0];
+  const columns = grouping.columns.map((mapping, index): GroupedFinalSummaryColumn => {
+    const cell = row.cells[index];
+    if (!cell) return { operation: 'blank' };
+    if (cell.summaryMode === 'formula') return { operation: 'formula', formula: cell.summaryFormula ?? '' };
+    if (cell.summaryMode === 'aggregate') {
+      const operation = cell.aggregate?.operation ?? 'sum';
+      return { operation };
+    }
+    if (cell.content) return { operation: 'label', text: cell.content };
+    return { operation: 'blank' };
+  });
+  return { enabled: true, columns };
+}
+
+export function applyGroupedFinalSummary(table: TableDefinition, config: GroupedFinalSummaryConfig): TableDefinition {
+  const grouping = table.binding?.grouping;
+  if (!grouping || !config.enabled) return { ...table, customRows: [] };
+  const row = createRow('custom', table.columns.length);
+  row.keepTogether = true;
+  row.cells = row.cells.map((cell, index) => {
+    const mapping = grouping.columns[index];
+    const column = table.columns[index];
+    const setting = config.columns[index] ?? { operation: 'blank' as const };
+    const next: TableCell = {
+      ...cell,
+      content: '',
+      binding: undefined,
+      valueMode: 'custom',
+      summaryMode: 'custom',
+      aggregate: undefined,
+      summaryFormula: undefined,
+      summaryName: undefined,
+      dataType: column?.dataType ?? mapping?.dataType ?? 'decimal',
+      format: column?.format ? { ...column.format } : undefined,
+      style: { ...cell.style, bold: true, align: index === 0 ? 'left' : 'right', background: '#f7f9fc' },
+    };
+    if (setting.operation === 'label') {
+      next.content = setting.text?.trim() || (index === 0 ? 'TOTAL' : '');
+      next.dataType = 'text';
+      return next;
+    }
+    if (setting.operation === 'formula') {
+      next.summaryMode = 'formula';
+      next.summaryFormula = setting.formula ?? '';
+      next.summaryName = mapping?.label?.trim() || column?.label?.trim() || `Summary ${index + 1}`;
+      return next;
+    }
+    if (['sum', 'count', 'avg', 'min', 'max'].includes(setting.operation)) {
+      next.summaryMode = 'aggregate';
+      next.aggregate = { operation: setting.operation as TableAggregateOperation, field: mapping?.outputKey ?? column?.key ?? '' };
+      next.summaryName = mapping?.label?.trim() || column?.label?.trim() || `Summary ${index + 1}`;
+      return next;
+    }
+    return next;
+  });
+  return { ...table, customRows: [row], pagination: { ...table.pagination, keepSummaryTogether: true }, selectedCellId: table.selectedCellId };
 }
 
 export function addCustomSummaryRow(table: TableDefinition): TableDefinition {
@@ -1028,8 +1234,8 @@ export function dynamicRows(
 
   let filtered = raw;
 
-  // DB-4.1 Fix4 primary model: parent/document and child/row identity can come from the SAME flat source.
-  // Example: InvoiceNo identifies one document; LineItemNo (or InvoiceNo+LineItemNo) identifies each repeated row.
+  // Primary flat-source model: restrict both Detail and Grouped Summary tables to the
+  // currently selected Parent / Document before any grouping or aggregation happens.
   const parentKeys = configuredKeys(table.binding.parentKey, table.binding.parentKeys);
   if (parentKeys.length > 0 && source && record) {
     const selectedParentKey = compositeKey(record, parentKeys);
@@ -1049,6 +1255,11 @@ export function dynamicRows(
     }
   }
 
+  const grouping = table.binding.grouping;
+  if (grouping?.groupBy?.length && grouping.columns?.length) {
+    return groupedRuntimeRows(table, filtered, grouping);
+  }
+
   const rowKeys = configuredKeys(table.binding.rowKey, table.binding.rowKeys);
   return filtered.map((item, index) => {
     const configured = compositeKey(item, rowKeys);
@@ -1056,19 +1267,162 @@ export function dynamicRows(
   });
 }
 
+function groupedRuntimeRows(table: TableDefinition, rows: unknown[], grouping: GroupedTableConfig): Array<{ key: string; value: NormalizedRecord }> {
+  const buckets = new Map<string, unknown[]>();
+  const order: string[] = [];
+  for (const row of rows) {
+    const key = compositeKey(row, grouping.groupBy);
+    if (key == null) continue;
+    if (!buckets.has(key)) { buckets.set(key, []); order.push(key); }
+    buckets.get(key)!.push(row);
+  }
 
-// DB-4.4 Phase 1: deterministic pagination planner used by the builder preview and later renderers.
+  return order.map((groupKey) => {
+    const items = buckets.get(groupKey) ?? [];
+    const value: NormalizedRecord = {};
+    const context: Record<string, unknown> = {};
+    const formulaColumns: typeof grouping.columns = [];
+    grouping.columns.forEach((column) => {
+      if (column.operation === 'formula') {
+        formulaColumns.push(column);
+        value[column.outputKey] = null;
+        return;
+      }
+      const result = groupedColumnValue(items, column.field, column.operation);
+      value[column.outputKey] = result as NormalizedValue;
+      const label = column.label?.trim();
+      if (label) context[label] = result;
+      if (column.field) context[column.field] = result;
+    });
+    // Keep the original group fields accessible for mixed tokens/formulas and diagnostics.
+    const first = items[0];
+    for (const field of grouping.groupBy) {
+      const fieldValue = valueAtPath(first, field);
+      if (fieldValue !== undefined) {
+        value[field] = fieldValue as NormalizedValue;
+        context[field] = fieldValue;
+      }
+    }
+
+    // DB-4G Fix1: aggregate/group values resolve first, then formulas resolve in bounded
+    // dependency passes. This supports chained grouped formulas while self/circular
+    // references remain null instead of destabilising the runtime row.
+    const unresolved = new Set(formulaColumns.map((column) => column.outputKey));
+    for (let pass = 0; pass < formulaColumns.length && unresolved.size > 0; pass += 1) {
+      let progressed = false;
+      for (const column of formulaColumns) {
+        if (!unresolved.has(column.outputKey)) continue;
+        const label = column.label?.trim() || column.outputKey;
+        const refs = formulaReferenceNames(column.formula);
+        if (refs.has(label) || refs.has(column.outputKey)) continue;
+        const result = evaluateTableFormula(column.formula, context);
+        if (result == null) continue;
+        value[column.outputKey] = result as NormalizedValue;
+        context[label] = result;
+        if (column.field) context[column.field] = result;
+        unresolved.delete(column.outputKey);
+        progressed = true;
+      }
+      if (!progressed) break;
+    }
+    return { key: `${table.id}::group::${groupKey}`, value };
+  });
+}
+
+function groupedColumnValue(rows: unknown[], field: string, operation: GroupedAggregateOperation): unknown {
+  if (operation === 'formula') return null;
+  const values = rows.map((row) => valueAtPath(row, field)).filter((value) => value !== undefined && value !== null && value !== '');
+  if (operation === 'group' || operation === 'first') return values[0] ?? '';
+  if (operation === 'last') return values.length ? values[values.length - 1] : '';
+  if (operation === 'count') return values.length;
+  const numeric = values.map(numericValue).filter((value): value is number => value != null && Number.isFinite(value));
+  if (operation === 'sum') return numeric.reduce((sum, value) => sum + value, 0);
+  if (operation === 'avg') return numeric.length ? numeric.reduce((sum, value) => sum + value, 0) / numeric.length : 0;
+  if (operation === 'min') return numeric.length ? Math.min(...numeric) : 0;
+  if (operation === 'max') return numeric.length ? Math.max(...numeric) : 0;
+  return '';
+}
+
+
+// DB-4.4 Phase 3: deterministic pagination planner / materialized table page plan.
+// The planner deliberately works in pixels because the builder preview already resolves
+// physical page geometry to px. PDF/DOCX renderers can consume the same row ranges later.
 export type TablePaginationRuntimeRow = { key: string; value: NormalizedRecord };
 export type TablePaginationPage = {
   index: number;
+  /** Stable identity for preview/export reconciliation. */
+  id: string;
   runtimeRows: TablePaginationRuntimeRow[];
+  /** Inclusive zero-based runtime row range. -1/-1 means no body rows on this page. */
+  startRow: number;
+  endRow: number;
   includeHeader: boolean;
   includeSummary: boolean;
   manualBreakBefore?: boolean;
+  availableHeightPx: number;
+  usedHeightPx: number;
+  unusedHeightPx: number;
 };
 
+/**
+ * Auto-height rows previously used the design-time 30/32px handle height for pagination,
+ * while the browser often renders a compact one-line row closer to 22-26px. Across a long
+ * invoice that accumulated into a large false blank area before the footer. Estimate the
+ * actual one-line CSS height from cell typography/padding, while fixed-height rows continue
+ * to use their explicit height.
+ */
 function rowEstimatedHeight(row: TableRow): number {
-  return Math.max(18, row.autoHeight ? row.height : row.height);
+  if (!row.autoHeight) return Math.max(18, row.height);
+  let estimated = 18;
+  for (const cell of row.cells) {
+    const fontSize = Math.max(6, cell.style.fontSize || 11);
+    const padding = Math.max(0, cell.style.padding ?? 0);
+    // CSS .db-table td uses line-height:1.25 and a 1px-ish collapsed border.
+    estimated = Math.max(estimated, Math.ceil(fontSize * 1.25 + padding * 2 + 2));
+  }
+  return estimated;
+}
+
+
+/** DB-4.4 Phase 3 Fix3: estimate the rendered height of a repeated runtime row.
+ * Auto-height rows can wrap differently for every record (for example a long
+ * Product Description). Pagination must therefore reserve the height of the
+ * actual runtime value, not only the one-line design template.
+ */
+function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableWidthPx = 760): number {
+  const widths = smartColumnWidths(table, [runtimeValue]);
+  let total = 0;
+  for (const row of table.bodyRows) {
+    if (!row.autoHeight) { total += Math.max(18, row.height); continue; }
+    let visualColumn = 0;
+    let rowHeight = rowEstimatedHeight(row);
+    for (const cell of row.cells) {
+      const span = Math.max(1, cell.colSpan);
+      const widthPercent = widths.slice(visualColumn, visualColumn + span).reduce((sum, value) => sum + value, 0);
+      visualColumn += span;
+      const cellWidthPx = Math.max(24, tableWidthPx * widthPercent / 100);
+      const fontSize = Math.max(6, cell.style.fontSize || 11);
+      const padding = Math.max(0, cell.style.padding ?? 0);
+      const raw = cell.binding ? valueAtPath(runtimeValue, cell.binding) : cell.content;
+      const text = compactValueText(raw);
+      // Browser text width varies by font. 0.56em is a conservative average for
+      // invoice/body text and keeps the last complete row out of the Footer.
+      const usableWidth = Math.max(8, cellWidthPx - padding * 2 - 2);
+      const charsPerLine = Math.max(1, Math.floor(usableWidth / Math.max(3.5, fontSize * 0.56)));
+      const explicitLines = String(text || '').split(/\r?\n/);
+      const lineCount = explicitLines.reduce((sum, line) => sum + Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine)), 0);
+      const estimated = Math.ceil(lineCount * fontSize * 1.25 + padding * 2 + 3);
+      rowHeight = Math.max(rowHeight, estimated);
+    }
+    total += rowHeight;
+  }
+  return Math.max(18, total);
+}
+
+function paginationPageId(table: TableDefinition, index: number, rows: TablePaginationRuntimeRow[]) {
+  const first = rows[0]?.key ?? 'empty';
+  const last = rows[rows.length - 1]?.key ?? first;
+  return `${table.id}::page-${index + 1}::${first}::${last}`;
 }
 
 export function paginateDynamicTable(
@@ -1076,48 +1430,108 @@ export function paginateDynamicTable(
   runtimeRows: TablePaginationRuntimeRow[],
   availableHeightPx: number,
   continuationHeightPx: number = availableHeightPx,
+  tableWidthPx: number = 760,
 ): TablePaginationPage[] {
-  if (table.mode !== 'dynamic') return [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }];
-  if (table.pagination?.enabled === false || availableHeightPx <= 0) {
-    return [{ index: 0, runtimeRows, includeHeader: true, includeSummary: true }];
-  }
-
-  const repeatHeader = table.pagination?.repeatHeader !== false;
-  const headerRows = table.headerRows.filter((row) => repeatHeader ? row.repeatOnEveryPage !== false : true);
-  const firstHeaderHeight = table.headerRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
-  const repeatHeaderHeight = headerRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
-  const bodyHeight = Math.max(18, table.bodyRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0));
-  const summaryHeight = table.customRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
-  const manualBodyBreak = table.bodyRows.some((row) => row.pageBreakBefore);
-  const pages: TablePaginationPage[] = [];
-  let current: TablePaginationPage = { index: 0, runtimeRows: [], includeHeader: true, includeSummary: false };
-  let used = firstHeaderHeight;
-  let currentCapacity = availableHeightPx;
-
-  const commit = (manualBreakBefore = false) => {
-    pages.push(current);
-    current = { index: pages.length, runtimeRows: [], includeHeader: repeatHeader, includeSummary: false, manualBreakBefore };
-    used = repeatHeader ? repeatHeaderHeight : 0;
-    currentCapacity = Math.max(40, continuationHeightPx);
+  const makeSinglePage = (): TablePaginationPage => {
+    const available = Math.max(0, availableHeightPx);
+    const used = table.headerRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0)
+      + runtimeRows.length * Math.max(18, table.bodyRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0))
+      + table.customRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
+    return {
+      index: 0, id: paginationPageId(table, 0, runtimeRows), runtimeRows,
+      startRow: runtimeRows.length ? 0 : -1, endRow: runtimeRows.length ? runtimeRows.length - 1 : -1,
+      includeHeader: true, includeSummary: true,
+      availableHeightPx: available, usedHeightPx: used, unusedHeightPx: Math.max(0, available - used),
+    };
   };
 
+  if (table.mode !== 'dynamic') return [makeSinglePage()];
+  if (table.pagination?.enabled === false || availableHeightPx <= 0) return [makeSinglePage()];
+
+  const repeatHeader = table.pagination?.repeatHeader !== false;
+  const repeatedHeaderRows = table.headerRows.filter((row) => row.repeatOnEveryPage !== false);
+  const firstHeaderHeight = table.headerRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
+  const repeatHeaderHeight = repeatHeader ? repeatedHeaderRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0) : 0;
+  const defaultBodyHeight = Math.max(18, table.bodyRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0));
+  const summaryHeight = table.customRows.reduce((sum, row) => sum + rowEstimatedHeight(row), 0);
+  const manualBodyBreakBefore = table.bodyRows.some((row) => row.pageBreakBefore);
+  const pages: TablePaginationPage[] = [];
+
+  let currentRows: TablePaginationRuntimeRow[] = [];
+  let currentStart = 0;
+  let used = firstHeaderHeight;
+  // Keep a small hard boundary reserve so collapsed borders/sub-pixel layout never enter the footer band.
+  const PAGE_BOTTOM_GUARD_PX = 6;
+  let capacity = Math.max(40, availableHeightPx - PAGE_BOTTOM_GUARD_PX);
+  let currentIncludeHeader = true;
+  let currentManualBreak = false;
+
+  const commit = (includeSummary = false) => {
+    const index = pages.length;
+    const startRow = currentRows.length ? currentStart : -1;
+    const endRow = currentRows.length ? currentStart + currentRows.length - 1 : -1;
+    const usedHeightPx = used + (includeSummary ? summaryHeight : 0);
+    pages.push({
+      index,
+      id: paginationPageId(table, index, currentRows),
+      runtimeRows: currentRows,
+      startRow,
+      endRow,
+      includeHeader: currentIncludeHeader,
+      includeSummary,
+      manualBreakBefore: currentManualBreak || undefined,
+      availableHeightPx: capacity,
+      usedHeightPx,
+      unusedHeightPx: Math.max(0, capacity - usedHeightPx),
+    });
+    currentRows = [];
+    currentStart = endRow + 1;
+    currentIncludeHeader = repeatHeader;
+    currentManualBreak = false;
+    used = repeatHeaderHeight;
+    capacity = Math.max(40, continuationHeightPx - PAGE_BOTTOM_GUARD_PX);
+  };
+
+  // A design-body page break is a break before the repeated body template, not "before every
+  // runtime record". Apply it once before the first runtime row when the table already consumed
+  // header space on page one; subsequent runtime rows pack normally.
+  if (manualBodyBreakBefore && runtimeRows.length > 0 && firstHeaderHeight > 0) {
+    currentManualBreak = true;
+  }
+
   for (let i = 0; i < runtimeRows.length; i += 1) {
-    if (manualBodyBreak && current.runtimeRows.length > 0) commit(true);
-    const rowHeight = bodyHeight;
-    const wouldOverflow = current.runtimeRows.length > 0 && used + rowHeight > currentCapacity;
-    if (wouldOverflow) commit(false);
-    current.runtimeRows.push(runtimeRows[i]);
-    used += rowHeight;
+    const runtimeRow = runtimeRows[i];
+    const bodyHeight = table.bodyRows.some((row) => row.autoHeight)
+      ? runtimeBodyHeight(table, runtimeRow.value, tableWidthPx)
+      : defaultBodyHeight;
+    // Every complete runtime row must fit before the hard Body/Footer boundary.
+    // Wrapped rows are measured from their runtime content, so a two-line Product
+    // Description is moved intact instead of being clipped at the page edge.
+    const wouldOverflow = used + bodyHeight > capacity;
+    if (wouldOverflow && currentRows.length > 0) commit(false);
+    if (currentRows.length === 0) currentStart = i;
+    currentRows.push(runtimeRow);
+    used += bodyHeight;
   }
 
   if (table.customRows.length > 0) {
     const manualSummaryBreak = table.customRows.some((row) => row.pageBreakBefore);
     const keepSummaryTogether = table.pagination?.keepSummaryTogether !== false;
-    const summaryWouldOverflow = used + summaryHeight > currentCapacity;
-    if ((manualSummaryBreak || (keepSummaryTogether && summaryWouldOverflow)) && current.runtimeRows.length > 0) commit(manualSummaryBreak);
-    current.includeSummary = true;
+    const summaryWouldOverflow = used + summaryHeight > capacity;
+    if ((manualSummaryBreak || (keepSummaryTogether && summaryWouldOverflow)) && currentRows.length > 0) {
+      commit(false);
+      currentManualBreak = manualSummaryBreak;
+    }
+    // Summary-only final pages are allowed when the summary is explicitly kept together.
+    commit(true);
+  } else if (currentRows.length > 0 || pages.length === 0) {
+    commit(false);
   }
 
-  if (pages.length === 0 || current.runtimeRows.length > 0 || current.includeSummary || runtimeRows.length === 0) pages.push(current);
-  return pages.map((page, index) => ({ ...page, index }));
+  // Re-index/id after all commits so IDs remain deterministic even for summary-only pages.
+  return pages.map((page, index) => ({
+    ...page,
+    index,
+    id: paginationPageId(table, index, page.runtimeRows),
+  }));
 }

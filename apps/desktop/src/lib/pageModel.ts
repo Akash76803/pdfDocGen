@@ -1,8 +1,10 @@
 export type PagePreset = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | 'Tabloid' | 'Executive' | 'Custom';
 export type PageOrientation = 'Portrait' | 'Landscape';
 export type PageUnit = 'mm' | 'cm' | 'in';
+export type PageRepeatMode = 'every' | 'first' | 'exceptFirst';
 
 export type EdgeValues = { top: number; right: number; bottom: number; left: number };
+export type PageBandSettings = { enabled: boolean; heightMm: number; gapMm: number; repeat: PageRepeatMode };
 
 export type PageSettings = {
   preset: PagePreset;
@@ -17,6 +19,8 @@ export type PageSettings = {
   borderColor: string;
   borderWidth: number;
   showGuides: boolean;
+  header: PageBandSettings;
+  footer: PageBandSettings;
 };
 
 export const PAGE_PRESETS: Record<Exclude<PagePreset, 'Custom'>, { widthMm: number; heightMm: number }> = {
@@ -35,6 +39,21 @@ export function defaultPageSettings(): PageSettings {
     marginsMm: { top: 15, right: 15, bottom: 15, left: 15 },
     bleedMm: { top: 0, right: 0, bottom: 0, left: 0 }, safeAreaMm: 5,
     background: '#ffffff', borderColor: '#d2d8e0', borderWidth: 1, showGuides: true,
+    header: { enabled: false, heightMm: 20, gapMm: 5, repeat: 'every' },
+    footer: { enabled: false, heightMm: 15, gapMm: 5, repeat: 'every' },
+  };
+}
+
+export function normalizePageSettings(input?: Partial<PageSettings> | null): PageSettings {
+  const defaults = defaultPageSettings();
+  if (!input) return defaults;
+  return {
+    ...defaults,
+    ...input,
+    marginsMm: { ...defaults.marginsMm, ...(input.marginsMm ?? {}) },
+    bleedMm: { ...defaults.bleedMm, ...(input.bleedMm ?? {}) },
+    header: { ...defaults.header, ...(input.header ?? {}) },
+    footer: { ...defaults.footer, ...(input.footer ?? {}) },
   };
 }
 
@@ -58,11 +77,41 @@ export function pagePixelSize(settings: PageSettings) {
   return { width: Math.round(mmToPx(size.widthMm)), height: Math.round(mmToPx(size.heightMm)) };
 }
 
-export function contentBoundsPx(settings: PageSettings) {
+export function horizontalContentBoundsPx(settings: PageSettings) {
   const page = pagePixelSize(settings);
   return {
-    x: mmToPx(settings.marginsMm.left), y: mmToPx(settings.marginsMm.top),
+    x: mmToPx(settings.marginsMm.left),
     width: Math.max(40, page.width - mmToPx(settings.marginsMm.left + settings.marginsMm.right)),
-    height: Math.max(40, page.height - mmToPx(settings.marginsMm.top + settings.marginsMm.bottom)),
   };
+}
+
+export function headerBoundsPx(settings: PageSettings) {
+  const horizontal = horizontalContentBoundsPx(settings);
+  return { ...horizontal, y: mmToPx(settings.marginsMm.top), height: settings.header.enabled ? Math.max(0, mmToPx(settings.header.heightMm)) : 0 };
+}
+
+export function footerBoundsPx(settings: PageSettings) {
+  const page = pagePixelSize(settings);
+  const horizontal = horizontalContentBoundsPx(settings);
+  const height = settings.footer.enabled ? Math.max(0, mmToPx(settings.footer.heightMm)) : 0;
+  return { ...horizontal, y: page.height - mmToPx(settings.marginsMm.bottom) - height, height };
+}
+
+export function contentBoundsPx(settings: PageSettings) {
+  const page = pagePixelSize(settings);
+  const headerOffset = settings.header.enabled ? mmToPx(settings.header.heightMm + settings.header.gapMm) : 0;
+  const footerOffset = settings.footer.enabled ? mmToPx(settings.footer.heightMm + settings.footer.gapMm) : 0;
+  const y = mmToPx(settings.marginsMm.top) + headerOffset;
+  const bottom = page.height - mmToPx(settings.marginsMm.bottom) - footerOffset;
+  return {
+    x: mmToPx(settings.marginsMm.left), y,
+    width: Math.max(40, page.width - mmToPx(settings.marginsMm.left + settings.marginsMm.right)),
+    height: Math.max(40, bottom - y),
+  };
+}
+
+export function repeatModeShows(mode: PageRepeatMode, virtualPageIndex: number) {
+  if (mode === 'first') return virtualPageIndex === 0;
+  if (mode === 'exceptFirst') return virtualPageIndex > 0;
+  return true;
 }

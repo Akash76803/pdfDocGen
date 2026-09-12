@@ -274,3 +274,120 @@ Status: Implemented / QA Pending
 ## DB-4.4 Phase 2 Fix1 — Overflow Page Navigator
 - Automatic continuation pages are now represented in the Pages navigator with an Auto badge and canvas focus navigation.
 - Derived continuation sheets remain non-persistent and cannot be independently reordered/deleted.
+
+
+## DB-4H — Header / Footer Zones — IMPLEMENTED / QA PENDING
+Introduces dedicated Header/Footer bands before DB-4.4 Phase 3. Pagination content bounds now reserve header/footer height + gaps; repeated band elements and `{{pageNumber}}` / `{{totalPages}}` tokens are supported.
+
+### DB-4H Fix1 — Header/Footer repeat + region assignment
+Status: Implemented / Retest required.
+Manual QA reported DB4H-T04, T05 and T06 failing. Fix1 makes Header/Footer zone assignment explicit and self-contained: selecting a zone auto-enables it, places/fits the element within the band, constrains band drag/resize, and surfaces the zone repeat mode in the selected-element Properties card. T04/T05/T06 require retest.
+
+### DB-4H Fix2 — Header/Footer Content Containers
+Status: Implemented / QA pending
+- Header/Footer upgraded to reusable content containers.
+- Elements panel can insert directly into Body/Header/Footer.
+- All Header/Footer child elements repeat with the region repeat rule.
+- Region children preserve content properties/dynamic bindings and are constrained/reflowed inside the band.
+- Repeated continuation copies are read-only projections.
+- Tables remain Body-only.
+
+## DB-4H Fix3 — Global Header / Footer Master
+**Status:** Implemented / QA pending
+
+Header/Footer were promoted from page-local continuation behavior to document-level master regions. Dedicated Header/Footer inspector tabs control global enable/height/gap/repeat settings. Master content projects to all manual Builder Pages and overflow continuation pages; repeat policies are evaluated against the complete output page sequence. Page-number tokens use global output page numbering. Manual QA is pending before DB-4H closure.
+
+## DB-4H Fix4 — Global Master Positioning + Mixed Static/Dynamic Content
+**Status:** Implemented / QA pending
+
+- Global Header/Footer projections are editable from any page, but still update one shared master rather than creating independent copies.
+- Added quick zone placement: Left / Center / Right and Top / Middle / Bottom.
+- Added shared `{{FieldName}}` token resolution for static + dynamic text composition.
+- Added field-token insertion UI to document elements and custom table/summary text content.
+- `{{pageNumber}}` / `{{totalPages}}` remain supported in the same template syntax.
+- Shape text now renders when content is supplied.
+- Full workspace typecheck remains blocked by missing extracted-environment dependencies; focused TS/TSX transpile checks pass.
+- Next: manual QA of master positioning and mixed-token behavior, then close DB-4H before DB-4.4 Phase 3.
+
+## DB-4H Fix5 — Multi-token Visibility + Content Typography
+
+- Fixed unresolved multi-field mixed content, including imported field names with pre-existing braces.
+- Added live resolved preview and stable caret behavior for repeated field insertion.
+- Added shared element typography: family, size, bold, italic, underline, line height, color and alignment.
+- Typography applies to both static and dynamic portions of the same content block.
+
+## DB-4H Fix6 — Body Positioning + Smart Placement
+**Status:** Implemented / QA pending
+
+Added Body alignment controls (Left/Center/Right + Top/Middle/Bottom), Header/Footer-aware Body bounds, collision-aware Smart Insert for new content, table free-slot insertion, and Body drag/resize boundary protection. Manual overlap remains available after insertion.
+
+## DB-4H Fix7 — Manual Overlap + Layering
+Implemented explicit z-order controls for Body/Header/Footer elements. Smart Insert avoids accidental overlap only during creation; manual overlap is allowed. Selected elements remain interactable above overlapping content while editing, and users can persist desired stacking with Bring Front/Forward/Backward/Send Back.
+
+## DB-4B — Body Flow / Reflow Layout Engine
+**Status:** Implemented / QA pending
+
+- New Body content defaults to Flow Block rather than absolute placement.
+- Flow blocks stack top-to-bottom inside Header/Footer-aware content bounds.
+- Dynamic/custom table height changes push every later Flow Block down automatically.
+- Flow controls: Gap Before/After (mm), Left/Center/Right alignment, Full/Custom width, Move Up/Down.
+- Floating mode preserves X/Y placement, layering and intentional overlap.
+- Dragging a Flow Block converts it to Floating for explicit free placement.
+- Existing templates migrate as Floating to avoid layout regressions.
+- Next: manual DB4B QA, then DB-4.4 Phase 3 uses the same measured flow stack for cross-page block materialization.
+
+## DB-4B Row/Block Flow Engine — Authoritative Body Layout (2026-09-11)
+
+Status: **Implemented / manual QA pending**.
+
+This scope supersedes today's experimental Body placement patches (DB-4H Fix6/Fix7/Fix8) and the initial DB-4B single-stack flow semantics. Body now defaults to deterministic top-to-bottom Row/Block Flow: first block at usable Body top, each new block in a new 100%-width row, auto-height Rich Text/Table reflow, Move Up/Down, percentage widths, multiple blocks per horizontal row, tallest-block row height, row alignment/gaps and an explicit Floating escape hatch. Existing absolute templates remain safe as Floating; experimental flow blocks without row ids normalize to independent rows. Next: verify DB4B-RF01..RF13, then DB-4.4 Phase 3 pagination/flow materialization.
+
+## DB-4.4 Phase 3 — Pagination Hardening / Materialization (2026-09-11)
+**Status:** Implemented / manual QA pending.
+
+- Reworked dynamic-table pagination to reduce premature page breaks and the large blank gap reported above the Footer.
+- Auto-height rows now use a typography/padding-based rendered-height estimate instead of the old fixed 30/32px design handle height.
+- Page 1 consumes only the remaining Header/Footer-aware body space from the table's rendered Y; continuation pages use full body height.
+- Materialized page plan now includes stable page identity, exact runtime row ranges, header/summary flags and available/used/unused height.
+- Repeat-header and keep-summary-together rules are centralized in the planner.
+- Runtime rows are never silently dropped; oversized-row planning avoids empty-page loops.
+- Manual body-break behavior no longer creates a break before every repeated runtime record.
+- Dedicated regression focus: minimize unused first-page body space before a continuation page while preserving Footer clearance.
+- Next: manual DB44-P3 QA on real invoice data, then extend the same materialized page plan to arbitrary DB-4B flow rows/blocks and DB-4.5 PDF/DOCX parity.
+
+## 2026-09-11 — DB-4.4 Phase 3 Fix2: Cross-page Body Flow Materialization
+- Fixed Body Flow elements being placed after a Dynamic Table's first-page fragment instead of after its complete paginated output.
+- Added output-page-aware flow materialization; downstream blocks now start after the final table fragment.
+- Footer remains a hard boundary: if the following block cannot fit, it moves to the next output page Body start.
+- Virtual page count now includes downstream Flow content after paginated tables.
+- QA: DB44-P3-T11 and DB44-P3-T12 pending manual verification.
+
+## DB-4G — Grouped Summary Table (2026-09-12)
+**Status:** Implemented / manual QA pending.
+
+- Added a third Create Table workflow: **Grouped Summary**.
+- Grouping is performed on the imported flat Data Source after filtering to the selected Parent / Document.
+- Supports single/composite Group By keys.
+- Output columns support Group value, SUM, COUNT, AVG, MIN, MAX, FIRST and LAST.
+- Primary target scenario: HSN-wise GST summary (`HSN | Total GST | Taxable | CGST | SGST | IGST | Total`).
+- Reuses Dynamic Table rendering/pagination/Body Flow so grouped rows receive existing formatting, auto-height, repeat-header and continuation-page behavior.
+- Focused runtime verification: HSN grouping and SUM aggregation PASS; modified TS/TSX syntax transpile PASS.
+- Full workspace typecheck remains blocked by missing extracted-environment dependencies/stale build references.
+- Next: manual DB4G-T01..T07 QA, then continue DB-4.4 Phase 3 closure.
+
+## DB-4G Fix1 — Grouped Formula + Unified Table Editor (2026-09-12)
+- Status: Implemented / manual QA pending.
+- Added `FORMULA` as a Grouped Summary output operation.
+- Formula evaluation happens after group/aggregate values and supports chained output references such as `[Taxable] + [Total GST]`.
+- Self/circular or unresolved formulas safely remain blank.
+- Existing Grouped Summary tables now expose **Edit Grouped Summary Configuration** and reopen the same configuration UI used during creation with existing values prefilled.
+- Applying edits preserves table identity and visual column settings by position where possible.
+- Focused runtime verification: PASS. Workspace-wide typecheck remains blocked by missing dependencies/stale build references in the provided source environment.
+
+## DB-4G Fix2 — Grouped Final Summary Row (2026-09-12)
+- Status: Implemented / manual QA pending.
+- Added optional final total row to Grouped Summary create/edit UI.
+- Per-column operations: Blank, Custom Text, SUM, COUNT, AVG, MIN, MAX, FORMULA.
+- Final totals calculate over grouped output rows (not raw line items).
+- Summary renders once on final page, Keep Summary Together, Footer hard boundary aware.
+- Next: DB4G-F2-T01..T06 manual QA, then finish DB-4.4 Phase 3 stabilization.
