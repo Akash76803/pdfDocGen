@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentBoundsPx, defaultPageSettings } from './pageModel.ts';
-import { layoutBodyFlow, materializeBodyFlowPages, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights } from './bodyFlow.ts';
+import { layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights } from './bodyFlow.ts';
 
 describe('body flow layout', () => {
   it('pushes later flow blocks down when an earlier block grows', () => {
@@ -104,5 +104,75 @@ describe('measured flow height commit policy', () => {
   it('does not commit a page-local multi-page Dynamic Table fragment height', () => {
     expect(shouldCommitMeasuredFlowHeight(0, true)).toBe(false);
     expect(shouldCommitMeasuredFlowHeight(3, true)).toBe(false);
+  });
+});
+
+
+describe('shared Flow row ordering', () => {
+  const rowFixture = () => [
+    { id: 'top', type: 'text', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-top', x: 0, y: 0, width: 600, height: 40 },
+    { id: 'a', type: 'image', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-shared', x: 0, y: 0, width: 180, height: 80 },
+    { id: 'b', type: 'text', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-shared', x: 0, y: 0, width: 240, height: 100 },
+    { id: 'c', type: 'image', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-shared', x: 0, y: 0, width: 180, height: 80 },
+    { id: 'bottom', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-bottom', x: 0, y: 0, width: 600, height: 90 },
+  ];
+
+  it('moves all three members of a shared row above the previous row together', () => {
+    const moved = moveFlowRow(rowFixture(), 'b', -1);
+    const flowIds = moved.filter((item) => item.layoutMode === 'flow').map((item) => item.id);
+    expect(flowIds).toEqual(['a', 'b', 'c', 'top', 'bottom']);
+    const projected = layoutBodyFlow(moved, defaultPageSettings());
+    const a = projected.find((item) => item.id === 'a')!;
+    const b = projected.find((item) => item.id === 'b')!;
+    const c = projected.find((item) => item.id === 'c')!;
+    const top = projected.find((item) => item.id === 'top')!;
+    expect(a.y).toBe(b.y);
+    expect(b.y).toBe(c.y);
+    expect(top.y).toBeGreaterThan(a.y);
+  });
+
+  it('moves a complete shared row down without changing member order', () => {
+    const moved = moveFlowRow(rowFixture(), 'a', 1);
+    const flowIds = moved.filter((item) => item.layoutMode === 'flow').map((item) => item.id);
+    expect(flowIds).toEqual(['top', 'bottom', 'a', 'b', 'c']);
+  });
+
+  it('keeps floating elements in their existing array slots while moving a Flow row', () => {
+    const base = rowFixture();
+    const floating = { id: 'float', type: 'shape', region: 'body' as const, layoutMode: 'floating' as const, x: 1, y: 1, width: 20, height: 20 };
+    const mixed = [base[0], base[1], floating, base[2], base[3], base[4]];
+    const moved = moveFlowRow(mixed, 'b', -1);
+    expect(moved[2].id).toBe('float');
+    expect(moved.filter((item) => item.layoutMode === 'flow').map((item) => item.id)).toEqual(['a', 'b', 'c', 'top', 'bottom']);
+  });
+});
+
+
+describe('Flow row distribution', () => {
+  it('anchors two 35% blocks to opposite edges with Space Between', () => {
+    const settings = defaultPageSettings();
+    const bounds = contentBoundsPx(settings);
+    const row = [
+      { id: 'left-shape', type: 'shape', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-distribute', flowWidthPercent: 35, flowDistribution: 'space-between' as const, x: 0, y: 0, width: 100, height: 60 },
+      { id: 'right-shape', type: 'shape', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-distribute', flowWidthPercent: 35, flowDistribution: 'space-between' as const, x: 0, y: 0, width: 100, height: 60 },
+    ];
+    const projected = layoutBodyFlow(row, settings);
+    expect(projected[0].x).toBeCloseTo(bounds.x, 5);
+    expect(projected[1].x + projected[1].width).toBeCloseTo(bounds.x + bounds.width, 5);
+    expect(projected[1].x - (projected[0].x + projected[0].width)).toBeGreaterThan(0);
+  });
+
+  it('places three blocks with equal outer and inner gaps for Space Evenly', () => {
+    const settings = defaultPageSettings();
+    const bounds = contentBoundsPx(settings);
+    const row = ['a','b','c'].map((id) => ({ id, type: 'shape', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-even', flowWidthPercent: 20, flowDistribution: 'space-evenly' as const, x: 0, y: 0, width: 100, height: 40 }));
+    const projected = layoutBodyFlow(row, settings);
+    const outerLeft = projected[0].x - bounds.x;
+    const gap1 = projected[1].x - (projected[0].x + projected[0].width);
+    const gap2 = projected[2].x - (projected[1].x + projected[1].width);
+    const outerRight = bounds.x + bounds.width - (projected[2].x + projected[2].width);
+    expect(gap1).toBeCloseTo(outerLeft, 5);
+    expect(gap2).toBeCloseTo(outerLeft, 5);
+    expect(outerRight).toBeCloseTo(outerLeft, 5);
   });
 });

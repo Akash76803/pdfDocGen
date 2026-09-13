@@ -496,3 +496,42 @@ This scope supersedes today's experimental Body placement patches (DB-4H Fix6/Fi
 - Normal Flow blocks now persist measured DOM height on any physical page; only derived paginated Dynamic Table fragments are excluded.
 - Shared-row inspector reports selected measured height separately from tallest row reservation.
 - Added regression tests for continuation-page measurement policy.
+
+## DB-4.6 — Number / Amount to Words (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING
+- Added `NUMBER_TO_WORDS`, `AMOUNT_IN_WORDS` and `INR_WORDS` Formula Field functions.
+- Uses Indian numbering and INR Rupees/Paise wording.
+- Supports imported fields, Global Formula Fields, aggregate expressions and arithmetic before conversion.
+- Result is a normal reusable Formula Field value, so all existing Formula Everywhere binding locations are supported.
+- Added Formula Properties **Amount in words** insertion helper.
+
+
+## DB-4B Fix4 — Move Shared Flow Row as One Unit (2026-09-13)
+- Status: Implemented / QA pending.
+- Move Up/Down now reorders complete logical Flow rows rather than one selected member.
+- Shared rows with 2–3+ blocks keep member order and move above/below adjacent rows atomically.
+- In Row left/right remains the within-row ordering control.
+
+
+## DB-4B Fix5 — Flow Row Distribution (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added row-level Packed / Space Between / Space Around / Space Evenly distribution.
+- Space Between supports left/right anchored blocks with automatic flexible middle space and no spacer element.
+- Distribution is synchronized across row members and inherited when joining an existing row.
+- Older templates default to Packed; existing behavior is preserved.
+
+## DB-4.5C — DOCX Renderer Parity v1 (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added Template Builder DOCX export using the DB-4.5A materialized physical-page manifest.
+- Uses the same 192-DPI Preview capture/cleanup path as exact PDF, so Preview/PDF/DOCX share page count, order, row breaks, Header/Footer, formulas, media and table styling.
+- Generates a standards-based OOXML DOCX package with one matching Word section per physical page, including mixed page sizes/orientations.
+- v1 is fidelity-first raster DOCX; native editable Word objects are reserved for a later v2 without changing the materialized pagination contract.
+
+## DB-4.5C v2 — Native Editable DOCX (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added **DOCX Editable** beside the existing **DOCX Exact** mode; v1 is not replaced.
+- Editable mode converts rendered Preview text and tables into native WordprocessingML while preserving DB-4.5A physical page order/context.
+- Custom/Dynamic/Grouped tables become native Word tables; text/formula/amount-in-words values become editable text.
+- Side-by-side Flow rows are represented by a zero-border Word layout table with spacer cells.
+- Images/signatures remain images; QR/barcode visual blocks use raster fallback.
+- Word may reflow native content slightly; PDF/DOCX Exact remain the fidelity outputs.

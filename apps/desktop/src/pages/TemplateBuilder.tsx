@@ -13,9 +13,12 @@ import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode } from '../lib/pageModel.ts';
 import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
-import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowWidth } from '../lib/bodyFlow.ts';
+import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowDistribution, type BodyFlowWidth } from '../lib/bodyFlow.ts';
 import { buildMaterializedRenderDocument, type MaterializedRenderPage } from '../lib/materializedRenderModel.ts';
 import { buildExactPreviewPdf, downloadPdf } from '../lib/exactPdfExport.ts';
+import { buildExactPreviewDocx, downloadDocx } from '../lib/exactDocxExport.ts';
+import { buildEditablePreviewDocx } from '../lib/editableDocxExport.ts';
+import { amountToIndianWords } from '../lib/numberToWords.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'binding' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -52,6 +55,7 @@ type BuilderElement = {
   flowGapAfterMm?: number;
   flowColumnGapMm?: number;
   flowAlign?: BodyFlowAlign;
+  flowDistribution?: BodyFlowDistribution;
   flowWidth?: BodyFlowWidth;
   flowRowHeightPx?: number;
   /** DB-4F reusable document formula field. The formula name becomes a Dynamic Field token. */
@@ -120,6 +124,10 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [status, setStatus] = useState('Draft');
   const [pdfExporting, setPdfExporting] = useState(false);
   const [pdfExportProgress, setPdfExportProgress] = useState('');
+  const [docxExporting, setDocxExporting] = useState(false);
+  const [docxExportProgress, setDocxExportProgress] = useState('');
+  const [editableDocxExporting, setEditableDocxExporting] = useState(false);
+  const [editableDocxExportProgress, setEditableDocxExportProgress] = useState('');
   const undoStackRef = useRef<EditorSnapshot[]>([]);
   const redoStackRef = useRef<EditorSnapshot[]>([]);
   const historyGestureRef = useRef<EditorSnapshot | null>(null);
@@ -200,7 +208,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       if ((Array.isArray(saved.pages) && saved.pages.length) || Array.isArray(saved.elements)) {
         setName(saved.name || 'Untitled Document');
         if (Array.isArray(saved.pages) && saved.pages.length) {
-          const normalizedPages = saved.pages.map((page) => ({ ...page, settings: normalizePageSettings(page.settings), elements: (page.elements ?? []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowWidth: element.flowWidth ?? 'full' })) }));
+          const normalizedPages = saved.pages.map((page) => ({ ...page, settings: normalizePageSettings(page.settings), elements: (page.elements ?? []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowDistribution: element.flowDistribution ?? 'packed', flowWidth: element.flowWidth ?? 'full' })) }));
           const globalHeader = normalizedPages[0].settings.header;
           const globalFooter = normalizedPages[0].settings.footer;
           const masterHeaderIds = new Set(normalizedPages[0].elements.filter((element) => (element.region ?? 'body') !== 'body').map((element) => element.id));
@@ -213,7 +221,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           setActivePageId(saved.activePageId && migratedPages.some((p) => p.id === saved.activePageId) ? saved.activePageId : migratedPages[0].id);
         } else {
           const legacy = defaultPageSettings(); legacy.preset = saved.pageSize || 'A4'; legacy.orientation = saved.orientation || 'Portrait';
-          const migrated: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings: legacy, elements: (saved.elements || []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowWidth: element.flowWidth ?? 'full' })) };
+          const migrated: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings: legacy, elements: (saved.elements || []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowDistribution: element.flowDistribution ?? 'packed', flowWidth: element.flowWidth ?? 'full' })) };
           setPages([migrated]); setActivePageId(migrated.id);
         }
         setStatus('Saved locally');
@@ -361,7 +369,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
         return page;
       }));
     } else if (currentRegion !== 'body' && requestedRegion === 'body') {
-      const moved = constrainElementToRegion({ ...selected, ...patch, region: 'body', layoutMode: 'flow', flowRowId: selected.flowRowId ?? newFlowRowId(), flowWidthPercent: selected.flowWidthPercent ?? 100, flowGapBeforeMm: selected.flowGapBeforeMm ?? 0, flowGapAfterMm: selected.flowGapAfterMm ?? 4, flowColumnGapMm: selected.flowColumnGapMm ?? 4, flowAlign: selected.flowAlign ?? 'left' }, pageSettings);
+      const moved = constrainElementToRegion({ ...selected, ...patch, region: 'body', layoutMode: 'flow', flowRowId: selected.flowRowId ?? newFlowRowId(), flowWidthPercent: selected.flowWidthPercent ?? 100, flowGapBeforeMm: selected.flowGapBeforeMm ?? 0, flowGapAfterMm: selected.flowGapAfterMm ?? 4, flowColumnGapMm: selected.flowColumnGapMm ?? 4, flowAlign: selected.flowAlign ?? 'left', flowDistribution: selected.flowDistribution ?? 'packed' }, pageSettings);
       setPages((currentPages) => currentPages.map((page, index) => {
         if (index === 0) return { ...page, elements: page.elements.filter((item) => item.id !== selectedId) };
         if (page.id === activePageId) return { ...page, elements: [...page.elements.filter((item) => item.id !== selectedId), moved] };
@@ -370,14 +378,14 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     } else {
       const next = constrainElementToRegion({ ...selected, ...patch, region: requestedRegion }, pageSettings);
       const targetMaster = requestedRegion !== 'body';
-      const flowRowPatch = requestedRegion === 'body' && (selected.layoutMode ?? 'floating') === 'flow' && (patch.flowAlign != null || patch.flowColumnGapMm != null);
+      const flowRowPatch = requestedRegion === 'body' && (selected.layoutMode ?? 'floating') === 'flow' && (patch.flowAlign != null || patch.flowColumnGapMm != null || patch.flowDistribution != null);
       const selectedRowId = flowRowKey(selected);
       setPages((currentPages) => currentPages.map((page, index) => {
         if (!((targetMaster && index === 0) || (!targetMaster && page.id === activePageId))) return page;
         const nextElements = page.elements.map((item) => {
           if (item.id === selectedId) return next;
           if (flowRowPatch && (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === selectedRowId) {
-            return { ...item, ...(patch.flowAlign != null ? { flowAlign: patch.flowAlign } : {}), ...(patch.flowColumnGapMm != null ? { flowColumnGapMm: patch.flowColumnGapMm } : {}) };
+            return { ...item, ...(patch.flowAlign != null ? { flowAlign: patch.flowAlign } : {}), ...(patch.flowColumnGapMm != null ? { flowColumnGapMm: patch.flowColumnGapMm } : {}), ...(patch.flowDistribution != null ? { flowDistribution: patch.flowDistribution } : {}) };
           }
           return item;
         });
@@ -471,15 +479,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     recordHistory();
     setPages((currentPages) => currentPages.map((page) => {
       if (page.id !== activePageId) return page;
-      const items = [...page.elements];
-      const bodyFlowIndexes = items.map((item, index) => ({ item, index })).filter(({ item }) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow');
-      const flowIndex = bodyFlowIndexes.findIndex(({ item }) => item.id === selectedId);
-      const targetFlowIndex = flowIndex + direction;
-      if (flowIndex < 0 || targetFlowIndex < 0 || targetFlowIndex >= bodyFlowIndexes.length) return page;
-      const from = bodyFlowIndexes[flowIndex].index;
-      const to = bodyFlowIndexes[targetFlowIndex].index;
-      [items[from], items[to]] = [items[to], items[from]];
-      return { ...page, elements: items };
+      return { ...page, elements: moveFlowRow(page.elements, selectedId, direction) };
     }));
     setStatus('Unsaved changes');
   }
@@ -507,7 +507,14 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
         return { ...page, elements: synchronizeFlowRowHeights(items) };
       }
       const rowId = action === 'newRow' ? newFlowRowId() : flowRowKey(target!);
-      return { ...page, elements: synchronizeFlowRowHeights(items.map((item) => item.id === selectedId ? { ...item, flowRowId: rowId } : item)) };
+      const targetRowSettings = target ? {
+        flowAlign: target.flowAlign ?? 'left' as BodyFlowAlign,
+        flowDistribution: target.flowDistribution ?? 'packed' as BodyFlowDistribution,
+        flowColumnGapMm: target.flowColumnGapMm ?? 4,
+        flowGapBeforeMm: target.flowGapBeforeMm ?? 0,
+        flowGapAfterMm: target.flowGapAfterMm ?? 4,
+      } : {};
+      return { ...page, elements: synchronizeFlowRowHeights(items.map((item) => item.id === selectedId ? { ...item, flowRowId: rowId, ...(action === 'newRow' ? {} : targetRowSettings) } : item)) };
     }));
     setStatus('Unsaved changes');
   }
@@ -614,6 +621,111 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     }
   }
 
+  async function exportPreviewDocx() {
+    if (docxExporting) return;
+    const originalPageId = activePageId;
+    const originalPreviewPage = activePreviewPageIndex;
+    const originalSelectedId = selectedId;
+    setDocxExporting(true);
+    setDocxExportProgress('Preparing render model…');
+    setSelectedId(null);
+    try {
+      const counts = pages.map((page) => {
+        const effectiveSettings = { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } };
+        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
+      });
+      const model = buildMaterializedRenderDocument(name, pages.map((page, index) => ({
+        id: page.id,
+        name: page.name,
+        settings: { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } },
+        outputPageCount: counts[index] ?? 1,
+      })));
+      const resolvePageNode = async (renderPage: MaterializedRenderPage) => {
+        if (activePageIdRef.current !== renderPage.builderPageId) {
+          setActivePageId(renderPage.builderPageId);
+          setActivePreviewPageIndex(0);
+          await waitForBuilderPaint();
+          await waitForBuilderPaint();
+        } else {
+          await waitForBuilderPaint();
+        }
+        const node = document.querySelector<HTMLElement>(`.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`);
+        if (!node) throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable.`);
+        return node;
+      };
+      const bytes = await buildExactPreviewDocx(model, resolvePageNode, {
+        dpi: 192,
+        quality: 0.96,
+        onProgress: ({ current, total }) => setDocxExportProgress(`Rendering DOCX ${current} / ${total}`),
+      });
+      downloadDocx(bytes, sanitizeExportFileName(name || 'Document'));
+      setStatus('DOCX generated');
+      setDocxExportProgress(`DOCX ready • ${model.totalPages} page${model.totalPages === 1 ? '' : 's'}`);
+    } catch (error) {
+      console.error('DB-4.5C exact DOCX export failed', error);
+      setStatus('DOCX export failed');
+      setDocxExportProgress(error instanceof Error ? error.message : 'Unable to generate DOCX');
+    } finally {
+      setActivePageId(originalPageId);
+      setActivePreviewPageIndex(originalPreviewPage);
+      setSelectedId(originalSelectedId);
+      await waitForBuilderPaint();
+      setDocxExporting(false);
+    }
+  }
+
+
+  async function exportEditableDocx() {
+    if (editableDocxExporting) return;
+    const originalPageId = activePageId;
+    const originalPreviewPage = activePreviewPageIndex;
+    const originalSelectedId = selectedId;
+    setEditableDocxExporting(true);
+    setEditableDocxExportProgress('Preparing editable render model…');
+    setSelectedId(null);
+    try {
+      const counts = pages.map((page) => {
+        const effectiveSettings = { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } };
+        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
+      });
+      const model = buildMaterializedRenderDocument(name, pages.map((page, index) => ({
+        id: page.id,
+        name: page.name,
+        settings: { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } },
+        outputPageCount: counts[index] ?? 1,
+      })));
+      const resolvePageNode = async (renderPage: MaterializedRenderPage) => {
+        if (activePageIdRef.current !== renderPage.builderPageId) {
+          setActivePageId(renderPage.builderPageId);
+          setActivePreviewPageIndex(0);
+          await waitForBuilderPaint();
+          await waitForBuilderPaint();
+        } else {
+          await waitForBuilderPaint();
+        }
+        const node = document.querySelector<HTMLElement>(`.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`);
+        if (!node) throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable.`);
+        return node;
+      };
+      const bytes = await buildEditablePreviewDocx(model, resolvePageNode, {
+        onProgress: ({ current, total }) => setEditableDocxExportProgress(`Building editable DOCX ${current} / ${total}`),
+      });
+      downloadDocx(bytes, `${sanitizeExportFileName(name || 'Document')}-editable`);
+      setStatus('Editable DOCX generated');
+      setEditableDocxExportProgress(`Editable DOCX ready • ${model.totalPages} page${model.totalPages === 1 ? '' : 's'}`);
+    } catch (error) {
+      console.error('DB-4.5C v2 editable DOCX export failed', error);
+      setStatus('Editable DOCX export failed');
+      setEditableDocxExportProgress(error instanceof Error ? error.message : 'Unable to generate editable DOCX');
+    } finally {
+      setActivePageId(originalPageId);
+      setActivePreviewPageIndex(originalPreviewPage);
+      setSelectedId(originalSelectedId);
+      await waitForBuilderPaint();
+      setEditableDocxExporting(false);
+    }
+  }
+
   const contentBounds = contentBoundsPx(pageSettings);
 
   function buildBodyMaterialization(pageElements: BuilderElement[], settings: PageSettings) {
@@ -677,7 +789,9 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <button className="secondary" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span>Undo</span></button>
           <button className="secondary" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" onClick={redo} disabled={redoStackRef.current.length === 0}><Redo2 size={16}/><span>Redo</span></button>
           <button className="secondary"><Eye size={16}/><span>Preview</span></button>
-          <button className="secondary" onClick={exportPreviewPdf} disabled={pdfExporting} title="DB-4.5 exact Preview → PDF"><Download size={16}/><span>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</span></button>
+          <button className="secondary" onClick={exportPreviewPdf} disabled={pdfExporting || docxExporting || editableDocxExporting} title="DB-4.5 exact Preview → PDF"><Download size={16}/><span>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</span></button>
+          <button className="secondary" onClick={exportPreviewDocx} disabled={docxExporting || pdfExporting || editableDocxExporting} title="DOCX Exact: maximum Preview fidelity; content is page artwork"><FileText size={16}/><span>{docxExporting ? docxExportProgress || 'DOCX Exact…' : 'DOCX Exact'}</span></button>
+          <button className="secondary" onClick={exportEditableDocx} disabled={editableDocxExporting || docxExporting || pdfExporting} title="DOCX Editable: native Word text and tables; Word may reflow slightly"><FileText size={16}/><span>{editableDocxExporting ? editableDocxExportProgress || 'DOCX Editable…' : 'DOCX Editable'}</span></button>
           <button className="secondary" onClick={saveTemplate}><Save size={16}/><span>Save</span></button>
           <button className="primary" onClick={() => onNavigate('generate')}>Generate</button>
         </div>
@@ -1105,17 +1219,19 @@ function BodyFlowControls({ selected, elements, onUpdate, onMove, onRowAction }:
   const rowMembers = isFlow ? elements.filter((item) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === flowRowKey(selected)) : [];
   const reservedRowHeight = rowMembers.length ? Math.max(...rowMembers.map((item) => Math.max(item.height, item.flowRowHeightPx ?? 0))) : selected.height;
   return <section className="inspector-card body-flow-card"><div className="inspector-card-title">Body Block Layout</div>
-    <div className="layout-mode-toggle"><button type="button" className={isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'flow', flowRowId: selected.flowRowId ?? newFlowRowId(), flowWidthPercent: selected.flowWidthPercent ?? 100, flowGapBeforeMm: selected.flowGapBeforeMm ?? 0, flowGapAfterMm: selected.flowGapAfterMm ?? 4, flowColumnGapMm: selected.flowColumnGapMm ?? 4, flowAlign: selected.flowAlign ?? 'left', flowWidth: 'full' })}>Flow Block</button><button type="button" className={!isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'floating' })}>Floating</button></div>
+    <div className="layout-mode-toggle"><button type="button" className={isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'flow', flowRowId: selected.flowRowId ?? newFlowRowId(), flowWidthPercent: selected.flowWidthPercent ?? 100, flowGapBeforeMm: selected.flowGapBeforeMm ?? 0, flowGapAfterMm: selected.flowGapAfterMm ?? 4, flowColumnGapMm: selected.flowColumnGapMm ?? 4, flowAlign: selected.flowAlign ?? 'left', flowDistribution: selected.flowDistribution ?? 'packed', flowWidth: 'full' })}>Flow Block</button><button type="button" className={!isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'floating' })}>Floating</button></div>
     {isFlow ? <>
       <p className="table-cell-help"><strong>Simple document flow:</strong> Body starts at the usable top. Every new block gets a new row by default. Row height follows its tallest block; when Text/Table grows, every following row shifts automatically.</p>
       {rowMembers.length > 1 ? <div className="flow-row-status"><strong>Shared row</strong><span>{rowMembers.length} blocks · selected measures {Math.round(selected.height)}px · tallest reserves {Math.round(reservedRowHeight)}px</span></div> : <div className="flow-row-status"><strong>Measured height</strong><span>{Math.round(selected.height)}px</span></div>}
       <div className="property-grid"><label>Width (%)<input type="number" min="5" max="100" step="1" value={widthPct} onChange={(e) => onUpdate({ flowWidthPercent: Math.min(100, Math.max(5, Number(e.target.value) || 100)), flowWidth: 'custom' })}/></label><label>Row gap after (mm)<input type="number" min="0" step="0.5" value={selected.flowGapAfterMm ?? 4} onChange={(e) => onUpdate({ flowGapAfterMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
-      <div className="property-grid"><label>Gap before (mm)<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm ?? 0} onChange={(e) => onUpdate({ flowGapBeforeMm: Math.max(0, Number(e.target.value) || 0) })}/></label><label>Block gap in row (mm)<input type="number" min="0" step="0.5" value={selected.flowColumnGapMm ?? 4} onChange={(e) => onUpdate({ flowColumnGapMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
-      <label>Row alignment<select value={selected.flowAlign ?? 'left'} onChange={(e) => onUpdate({ flowAlign: e.target.value as BodyFlowAlign })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
-      <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onMove(-1)}>↑ Move Up</button><button type="button" className="secondary compact" onClick={() => onMove(1)}>↓ Move Down</button></div>
+      <label>Row distribution<select value={selected.flowDistribution ?? 'packed'} onChange={(e) => onUpdate({ flowDistribution: e.target.value as BodyFlowDistribution })}><option value="packed">Packed</option><option value="space-between">Space Between</option><option value="space-around">Space Around</option><option value="space-evenly">Space Evenly</option></select></label>
+      <div className="property-grid"><label>Gap before (mm)<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm ?? 0} onChange={(e) => onUpdate({ flowGapBeforeMm: Math.max(0, Number(e.target.value) || 0) })}/></label><label>Block gap in row (mm)<input type="number" min="0" step="0.5" disabled={(selected.flowDistribution ?? 'packed') !== 'packed'} value={selected.flowColumnGapMm ?? 4} onChange={(e) => onUpdate({ flowColumnGapMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
+      <label>Row alignment<select disabled={(selected.flowDistribution ?? 'packed') !== 'packed'} value={selected.flowAlign ?? 'left'} onChange={(e) => onUpdate({ flowAlign: e.target.value as BodyFlowAlign })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+      {(selected.flowDistribution ?? 'packed') !== 'packed' ? <p className="table-cell-help"><strong>Distributed row:</strong> leftover usable width is automatic. Space Between pins the first block to the left edge and the last block to the right edge; no spacer block is required.</p> : null}
+      <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onMove(-1)}>↑ {rowMembers.length > 1 ? 'Move Row Up' : 'Move Up'}</button><button type="button" className="secondary compact" onClick={() => onMove(1)}>↓ {rowMembers.length > 1 ? 'Move Row Down' : 'Move Down'}</button></div>
       <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onRowAction('joinPrevious')}>Join Previous Row</button><button type="button" className="secondary compact" onClick={() => onRowAction('joinNext')}>Join Next Row</button><button type="button" className="secondary compact" onClick={() => onRowAction('newRow')}>New Row</button></div>
       <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onRowAction('left')}>← In Row</button><button type="button" className="secondary compact" onClick={() => onRowAction('right')}>In Row →</button></div>
-      <p className="table-cell-help">Default width is 100%. Set 50% + 50%, 33% + 67%, etc. and use Join Previous/Next Row to place blocks on the same horizontal line. Flow owns X/Y; use Floating only for intentional overlays.</p>
+      <p className="table-cell-help">Default width is 100%. Set 50% + 50%, 35% + 35%, etc. and use Join Previous/Next Row to place blocks on the same horizontal line. Use Space Between when the first block must touch the left edge and the last block must touch the right edge with automatic blank space in the middle. Move Up/Down moves the complete logical row together; use In Row ←/→ only to reorder blocks inside that row. Flow owns X/Y; use Floating only for intentional overlays.</p>
     </> : <p className="table-cell-help">Floating is an explicit escape hatch for watermarks, stamps, decorative overlays and free X/Y placement. Switch back to Flow Block to rejoin automatic document flow.</p>}
   </section>;
 }
@@ -1454,8 +1570,37 @@ function formulaAggregateValue(rows: Array<Record<string, unknown>>, field: stri
   return numeric.length ? Math.max(...numeric) : 0;
 }
 
-function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: Array<Record<string, unknown>>): number | null {
+function unwrapWholeFormulaFunction(expression: string, functionNames: string[]): { name: string; inner: string } | null {
+  const trimmed = expression.trim();
+  const open = trimmed.indexOf('(');
+  if (open <= 0 || !trimmed.endsWith(')')) return null;
+  const name = trimmed.slice(0, open).trim().toUpperCase();
+  if (!functionNames.includes(name)) return null;
+  let depth = 0;
+  for (let index = open; index < trimmed.length; index += 1) {
+    const char = trimmed[index];
+    if (char === '(') depth += 1;
+    if (char === ')') depth -= 1;
+    if (depth === 0 && index !== trimmed.length - 1) return null;
+    if (depth < 0) return null;
+  }
+  if (depth !== 0) return null;
+  return { name, inner: trimmed.slice(open + 1, -1).trim() };
+}
+
+function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: Array<Record<string, unknown>>): string | number | null {
   if (!expression?.trim()) return null;
+
+  // DB-4.6 Number to Words: keep conversion at the document-formula layer so the
+  // result becomes a normal reusable Formula Field value and therefore works in
+  // Text, tables, Header/Footer, QR, Barcode and every other binding location.
+  const wordsCall = unwrapWholeFormulaFunction(expression, ['NUMBER_TO_WORDS', 'AMOUNT_IN_WORDS', 'INR_WORDS']);
+  if (wordsCall) {
+    const numeric = evaluateDocumentFormulaExpression(wordsCall.inner, scalarContext, aggregateRows);
+    if (typeof numeric !== 'number' || !Number.isFinite(numeric)) return null;
+    return amountToIndianWords(numeric);
+  }
+
   const replaced = expression.replace(/\b(SUM|COUNT|AVG|MIN|MAX)\s*\(\s*(?:(?:\[([^\]]+)\])|([A-Za-z_$][A-Za-z0-9_.$]*))?\s*\)/gi, (_full, opRaw, bracketField, bareField) => {
     const operation = String(opRaw).toUpperCase() as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX';
     const field = String(bracketField || bareField || '').trim();
@@ -1511,7 +1656,7 @@ function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFie
   return valueForField(record, matched?.name ?? field);
 }
 
-function FormulaFieldProperties({ selected, source, formulaElements, preview, onUpdate }: { selected: BuilderElement; source: ReturnType<typeof activeSource>; formulaElements: BuilderElement[]; preview: number | null; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+function FormulaFieldProperties({ selected, source, formulaElements, preview, onUpdate }: { selected: BuilderElement; source: ReturnType<typeof activeSource>; formulaElements: BuilderElement[]; preview: string | number | null; onUpdate: (patch: Partial<BuilderElement>) => void }) {
   const name = selected.formulaName ?? '';
   const duplicate = !!name.trim() && formulaElements.some((item) => item.id !== selected.id && item.formulaName?.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase());
   const formulaRefs = formulaTokenFieldsForElements(formulaElements.filter((item) => item.id !== selected.id));
@@ -1540,10 +1685,10 @@ function FormulaFieldProperties({ selected, source, formulaElements, preview, on
     {duplicate ? <div className="formula-field-warning">Use a unique field name.</div> : null}
     <label>Formula<input value={selected.formulaExpression ?? ''} placeholder="[Taxable] + [Total GST]" onChange={(e) => onUpdate({ formulaExpression: e.target.value })}/></label>
     <label>Reference field<select value={referenceSelection} onChange={(e) => setReferenceSelection(e.target.value)}><option value="">Choose field…</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`ff-src:${field.name}`} value={`source:${field.name}`}>{field.label || field.name}</option>)}</optgroup> : null}{formulaRefs.length ? <optgroup label="Formula Fields">{formulaRefs.map((field) => <option key={`ff-formula:${field.name}`} value={`formula:${field.name}`}>{field.label}</option>)}</optgroup> : null}</select></label>
-    <div className="formula-reference-actions"><button type="button" className="secondary compact" disabled={!selectedReferenceName} onClick={insertSelectedRef}>Insert field</button><div className="formula-aggregate-picker"><select value={aggregateFunction} onChange={(e) => setAggregateFunction(e.target.value as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX')}><option value="SUM">SUM</option><option value="COUNT">COUNT</option><option value="AVG">AVG</option><option value="MIN">MIN</option><option value="MAX">MAX</option></select><button type="button" className="secondary compact" disabled={!selectedSourceField} title={selectedFormulaField ? 'Aggregate functions use imported source fields, not Formula Fields.' : undefined} onClick={insertSelectedAggregate}>Insert aggregate</button></div></div>
+    <div className="formula-reference-actions"><button type="button" className="secondary compact" disabled={!selectedReferenceName} onClick={insertSelectedRef}>Insert field</button><button type="button" className="secondary compact" disabled={!selectedReferenceName} onClick={() => appendFormulaText(`NUMBER_TO_WORDS(${formulaFieldReference(selectedReferenceName)})`)}>Amount in words</button><div className="formula-aggregate-picker"><select value={aggregateFunction} onChange={(e) => setAggregateFunction(e.target.value as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX')}><option value="SUM">SUM</option><option value="COUNT">COUNT</option><option value="AVG">AVG</option><option value="MIN">MIN</option><option value="MAX">MAX</option></select><button type="button" className="secondary compact" disabled={!selectedSourceField} title={selectedFormulaField ? 'Aggregate functions use imported source fields, not Formula Fields.' : undefined} onClick={insertSelectedAggregate}>Insert aggregate</button></div></div>
     {selectedFormulaField ? <p className="table-cell-help">Formula Fields can be inserted as references. Aggregate functions operate on imported source fields, so choose an Imported Field to enable Insert aggregate.</p> : null}
     <div className="binding-value"><small>Preview</small><strong>{preview == null ? 'Enter a valid formula' : displayValue(preview)}</strong></div>
-    <p className="table-cell-help"><b>Aggregates:</b> SUM, COUNT, AVG, MIN, MAX. They run over rows for the active Parent / Document ID; if no parent key exists, they use all rows in the active source. Arithmetic +, −, ×, ÷ and parentheses can be mixed with aggregates.</p>
+    <p className="table-cell-help"><b>Functions:</b> SUM, COUNT, AVG, MIN, MAX and NUMBER_TO_WORDS. Example: <code>NUMBER_TO_WORDS([GrandTotal])</code> or <code>NUMBER_TO_WORDS(SUM([Taxable]))</code>. Amount words use the Indian numbering system (Thousand/Lakh/Crore) with Rupees + Paise. Arithmetic +, −, ×, ÷ and parentheses can be mixed before conversion.</p>
   </section>;
 }
 
@@ -1709,6 +1854,7 @@ function prepareNewFlowElement(element: BuilderElement, existingElements: Builde
     flowGapAfterMm: element.flowGapAfterMm ?? 4,
     flowColumnGapMm: element.flowColumnGapMm ?? 4,
     flowAlign: element.flowAlign ?? 'left',
+    flowDistribution: element.flowDistribution ?? 'packed',
     flowWidth: 'full',
     x: bounds.x,
     y: bounds.y,
@@ -1730,7 +1876,7 @@ function reflowRegionElement(element: BuilderElement, previousSettings: PageSett
 
 function defaultElement(type: ToolType, index: number): BuilderElement {
   const position = 70 + (index % 6) * 18;
-  const common = { id: crypto.randomUUID(), type, region: 'body' as PageRegion, layoutMode: 'flow' as BodyLayoutMode, flowRowId: newFlowRowId(), flowWidthPercent: 100, flowGapBeforeMm: 0, flowGapAfterMm: 4, flowColumnGapMm: 4, flowAlign: 'left' as BodyFlowAlign, flowWidth: 'full' as BodyFlowWidth, x: position, y: position, fontSize: 18, fontFamily: 'Arial', fontWeight: 400, italic: false, underline: false, lineHeight: 1.25, textAlign: 'left' as TextAlign, fill: '#eaf1ff', color: '#18212f' };
+  const common = { id: crypto.randomUUID(), type, region: 'body' as PageRegion, layoutMode: 'flow' as BodyLayoutMode, flowRowId: newFlowRowId(), flowWidthPercent: 100, flowGapBeforeMm: 0, flowGapAfterMm: 4, flowColumnGapMm: 4, flowAlign: 'left' as BodyFlowAlign, flowDistribution: 'packed' as BodyFlowDistribution, flowWidth: 'full' as BodyFlowWidth, x: position, y: position, fontSize: 18, fontFamily: 'Arial', fontWeight: 400, italic: false, underline: false, lineHeight: 1.25, textAlign: 'left' as TextAlign, fill: '#eaf1ff', color: '#18212f' };
   switch (type) {
     case 'text': return { ...common, width: 260, height: 44, text: 'Double-click style text' };
     case 'image': return { ...common, width: 180, height: 130, text: '', imageFit: 'contain' };

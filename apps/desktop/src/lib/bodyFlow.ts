@@ -2,6 +2,7 @@ import { contentBoundsPx, mmToPx, type PageSettings } from './pageModel.ts';
 
 export type BodyLayoutMode = 'flow' | 'floating';
 export type BodyFlowAlign = 'left' | 'center' | 'right';
+export type BodyFlowDistribution = 'packed' | 'space-between' | 'space-around' | 'space-evenly';
 export type BodyFlowWidth = 'full' | 'custom';
 
 export type BodyFlowElement = {
@@ -19,6 +20,7 @@ export type BodyFlowElement = {
   flowGapAfterMm?: number;
   flowColumnGapMm?: number;
   flowAlign?: BodyFlowAlign;
+  flowDistribution?: BodyFlowDistribution;
   flowWidth?: BodyFlowWidth;
   /** Cached derived height for the complete shared Flow row. Every member of the
    * row receives the same value whenever one member's measured height changes.
@@ -95,6 +97,44 @@ export function synchronizeFlowRowHeights<T extends BodyFlowElement>(elements: T
  * - Any block height change therefore pushes every following row automatically.
  * - Floating blocks keep explicit X/Y and do not reserve flow space.
  */
+
+/**
+ * Move a complete Flow row up/down as one logical unit.
+ *
+ * The persisted element array is also the row-order source for layoutBodyFlow.
+ * Reordering only one member of a shared row breaks that contract because the
+ * row's members become interleaved with another row. This helper therefore
+ * reorders the flattened Flow sequence by whole row, then writes that sequence
+ * back into the existing Flow slots so floating/non-body elements keep their
+ * relative positions.
+ */
+export function moveFlowRow<T extends BodyFlowElement>(elements: T[], selectedId: string, direction: -1 | 1): T[] {
+  const flowSlots = elements
+    .map((element, index) => ({ element, index }))
+    .filter(({ element }) => (element.region ?? 'body') === 'body' && (element.layoutMode ?? 'floating') === 'flow');
+  const selected = flowSlots.find(({ element }) => element.id === selectedId)?.element;
+  if (!selected) return elements;
+
+  const rowOrder: string[] = [];
+  const rowMembers = new Map<string, T[]>();
+  for (const { element } of flowSlots) {
+    const key = flowRowKey(element);
+    if (!rowMembers.has(key)) { rowMembers.set(key, []); rowOrder.push(key); }
+    rowMembers.get(key)!.push(element);
+  }
+
+  const selectedRow = flowRowKey(selected);
+  const rowAt = rowOrder.indexOf(selectedRow);
+  const targetAt = rowAt + direction;
+  if (rowAt < 0 || targetAt < 0 || targetAt >= rowOrder.length) return elements;
+
+  [rowOrder[rowAt], rowOrder[targetAt]] = [rowOrder[targetAt], rowOrder[rowAt]];
+  const reorderedFlow = rowOrder.flatMap((rowId) => rowMembers.get(rowId) ?? []);
+  const next = [...elements];
+  flowSlots.forEach(({ index }, i) => { next[index] = reorderedFlow[i]; });
+  return synchronizeFlowRowHeights(next);
+}
+
 export function layoutBodyFlow<T extends BodyFlowElement>(elements: T[], settings: PageSettings): T[] {
   const bounds = contentBoundsPx(settings);
   const flow = elements.filter((e) => (e.region ?? 'body') === 'body' && (e.layoutMode ?? 'floating') === 'flow');
@@ -117,19 +157,44 @@ export function layoutBodyFlow<T extends BodyFlowElement>(elements: T[], setting
     cursorY += gapBefore;
 
     const requested = row.map((e) => Math.min(100, Math.max(5, e.flowWidthPercent ?? (e.flowWidth === 'custom' ? Math.min(100, Math.max(5, (e.width / bounds.width) * 100)) : 100))));
-    const gapTotal = Math.max(0, row.length - 1) * columnGap;
-    const available = Math.max(20, bounds.width - gapTotal);
     const totalPct = requested.reduce((a, b) => a + b, 0);
     const scale = totalPct > 100 ? 100 / totalPct : 1;
-    const widths = requested.map((pct) => available * ((pct * scale) / 100));
-    const occupied = widths.reduce((a, b) => a + b, 0) + gapTotal;
-    let x = rowAlign === 'center' ? bounds.x + Math.max(0, (bounds.width - occupied) / 2) : rowAlign === 'right' ? bounds.x + Math.max(0, bounds.width - occupied) : bounds.x;
+    const distribution = row.length > 1 ? (row[0]?.flowDistribution ?? 'packed') : 'packed';
+    let widths: number[];
+    let x: number;
+    let resolvedGap = columnGap;
+
+    if (distribution === 'packed') {
+      const gapTotal = Math.max(0, row.length - 1) * columnGap;
+      const available = Math.max(20, bounds.width - gapTotal);
+      widths = requested.map((pct) => available * ((pct * scale) / 100));
+      const occupied = widths.reduce((a, b) => a + b, 0) + gapTotal;
+      x = rowAlign === 'center' ? bounds.x + Math.max(0, (bounds.width - occupied) / 2) : rowAlign === 'right' ? bounds.x + Math.max(0, bounds.width - occupied) : bounds.x;
+    } else {
+      // Distribution modes deliberately use each block's percentage against the
+      // complete usable Body width. The leftover horizontal space is then
+      // distributed by the row, which makes layouts such as 35% + 35% naturally
+      // anchor to opposite edges without a fake spacer element.
+      widths = requested.map((pct) => bounds.width * ((pct * scale) / 100));
+      const occupiedWidth = widths.reduce((a, b) => a + b, 0);
+      const free = Math.max(0, bounds.width - occupiedWidth);
+      if (distribution === 'space-between') {
+        resolvedGap = row.length > 1 ? free / (row.length - 1) : 0;
+        x = bounds.x;
+      } else if (distribution === 'space-around') {
+        resolvedGap = row.length > 0 ? free / row.length : 0;
+        x = bounds.x + resolvedGap / 2;
+      } else {
+        resolvedGap = free / (row.length + 1);
+        x = bounds.x + resolvedGap;
+      }
+    }
     const rowHeight = effectiveFlowRowHeight(row);
 
     row.forEach((element, i) => {
       const width = widths[i];
       projectedById.set(element.id, { ...element, x, y: cursorY, width } as T);
-      x += width + columnGap;
+      x += width + resolvedGap;
     });
     cursorY += rowHeight + gapAfter;
   }
