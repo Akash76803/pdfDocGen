@@ -419,3 +419,80 @@ This scope supersedes today's experimental Body placement patches (DB-4H Fix6/Fi
 - Paginated virtual Dynamic Table fragments no longer publish page-local height into the logical Builder element; pagination materialization remains the source of truth for fragment height.
 - Fix5 continuation-page fragment hitbox behavior is preserved.
 - Manual QA: paginated table selection, fragment visibility, single-page/custom table auto-height, pagination stability.
+
+## DB-4F Fix1 — Global Formula Aggregate Functions (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added SUM, COUNT, AVG, MIN and MAX to Global Formula Fields.
+- Aggregate scope follows the active Parent / Document ID when configured; otherwise it uses all active-source rows.
+- Added Formula inspector UI to insert aggregate calls safely using imported field names.
+- Existing arithmetic/chained formulas and reusable Dynamic Field tokens remain compatible.
+
+
+## DB-4F Fix2 — Single Formula Reference Selector (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Removed duplicate source-field dropdowns from Formula Properties.
+- Added one shared Reference field selector used by both direct field insertion and aggregate insertion.
+- Aggregate insertion remains limited to imported source fields; Formula Field references can still be inserted normally.
+
+
+## DB-4F Fix3 — Unified Formula Binding Everywhere (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Global Formula Fields are now surfaced anywhere table content already supports Custom Content / Field Binding, including text, QR, barcode, image binding, custom summaries and table formula references.
+- Table rendering resolves Formula Field bindings/tokens from the same document-level formula context used by regular builder elements.
+- Preview Document changes therefore recalculate the same Formula Field consistently across regular elements and table cells.
+
+## DB-4.5A — Materialized Render Model v1 (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added one document-wide physical output page manifest based on the existing tested body-flow/table materializer.
+- Preview and PDF share output page ordering and continuation identities; PDF does not independently paginate.
+
+## DB-4.5B — Preview → PDF Exact Parity v1 (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added exact-raster Preview-to-PDF export from the Template Builder top toolbar.
+- Exports all Builder Pages + continuation pages in document order at physical page dimensions.
+- Removes editor-only guides/selection chrome from captures; uses existing PDF writer for final file bytes.
+
+## DB-4.5B Fix1 — Repeated Header/Footer Badge Export Cleanup (2026-09-13)
+- Status: Implemented / QA pending.
+- Removed the editor-only `Repeated` pseudo-element badge from exact Preview → PDF capture.
+- Preview authoring badge remains visible inside the editor; PDF output no longer contains it.
+- No pagination/layout behavior changed.
+
+
+## DB-4.5B Fix2 — Table Border Style (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING
+- Added table-wide border Style (Solid/Dashed/Dotted/Double/None), Width and Color controls.
+- Applies to Custom, Dynamic and Grouped Summary tables, including continuation pages and Preview→PDF capture.
+- Existing tables default to Solid for backward compatibility; grouped-summary reconfiguration preserves the style.
+
+## DB-4.5B Fix3 — Repeated Badge Hard Removal (2026-09-13)
+- Status: IMPLEMENTED / RETEST REQUIRED.
+- Replaced CSS-only pseudo-element suppression with direct clone DOM cleanup for repeated Header/Footer projections.
+- Export clone removes `.repeated-region-projection`, clears the repeated data marker, and keeps a defensive pseudo-element CSS guard.
+- Live editor still shows the authoring badge; PDF must not.
+
+## DB-4.5B Fix4 — Repeated Badge Pre-Capture Removal (2026-09-13)
+- Fix3 clone-only cleanup was still too late on the user's Chromium/html2canvas path.
+- Export now temporarily strips the repeated-authoring class/data marker from the live physical page before html2canvas reads computed/generated content, waits one animation frame, captures, then restores the original DOM markers in `finally`.
+- No React state or document layout is changed. Editor-only `Repeated` badges should never enter PDF rasterization.
+
+## DB-4.5B Fix5 — Custom Table Auto-Height / Body Reflow (2026-09-13)
+- Status: Implemented / QA pending.
+- Hardened Custom Table DOM height measurement using shell/table scrollHeight and ResizeObserver after paint.
+- New/deleted rows update the logical table element height and therefore reflow all following Body Flow rows.
+- Existing maximum-update-depth dedupe guard remains intact.
+
+
+## DB-4B Fix2 — Shared Flow Row Tallest-Block Reflow (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING.
+- Added explicit shared-row height synchronization for side-by-side Body Flow blocks.
+- Row reservation is the tallest current member; shorter blocks keep their own visual heights.
+- Table grow/shrink and Flow row membership changes atomically recalculate `flowRowHeightPx`.
+- Following rows and pagination use the synchronized row height.
+
+
+## DB-4B Fix3 — Continuation-page measured height commit (2026-09-13)
+- Root cause confirmed in code: `onLayoutChange` ignored measured table height whenever `virtualPageIndex > 0`, even for ordinary non-paginated Flow blocks.
+- Normal Flow blocks now persist measured DOM height on any physical page; only derived paginated Dynamic Table fragments are excluded.
+- Shared-row inspector reports selected measured height separately from tallest row reservation.
+- Added regression tests for continuation-page measurement policy.

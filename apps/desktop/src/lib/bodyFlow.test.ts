@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentBoundsPx, defaultPageSettings } from './pageModel.ts';
-import { layoutBodyFlow, materializeBodyFlowPages } from './bodyFlow.ts';
+import { layoutBodyFlow, materializeBodyFlowPages, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights } from './bodyFlow.ts';
 
 describe('body flow layout', () => {
   it('pushes later flow blocks down when an earlier block grows', () => {
@@ -67,5 +67,42 @@ describe('materializeBodyFlowPages', () => {
     expect(textPlacement.pageIndex).toBe(2);
     expect(textPlacement.y).toBe(bounds.y);
     expect(result.pageCount).toBe(3);
+  });
+
+  it('uses the tallest member of a shared row and pushes the following row', () => {
+    const settings = defaultPageSettings();
+    const left = { id: 'left-table', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-shared', flowWidthPercent: 50, x: 0, y: 0, width: 300, height: 90 };
+    const right = { id: 'right-table', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-shared', flowWidthPercent: 50, x: 0, y: 0, width: 300, height: 150 };
+    const next = { id: 'next-table', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-next', x: 0, y: 0, width: 600, height: 70, flowGapAfterMm: 0 };
+    const projected = layoutBodyFlow([left, right, next], settings);
+    const projectedLeft = projected.find((item) => item.id === left.id)!;
+    const projectedNext = projected.find((item) => item.id === next.id)!;
+    expect(projectedNext.y).toBeGreaterThanOrEqual(projectedLeft.y + 150);
+  });
+
+  it('synchronizes shared row height after one table grows and allows the row to shrink again', () => {
+    const left = { id: 'left-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 90 };
+    const right = { id: 'right-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 110 };
+    const grown = synchronizeFlowRowHeights([{ ...left, height: 220 }, right]);
+    expect(grown[0].flowRowHeightPx).toBe(220);
+    expect(grown[1].flowRowHeightPx).toBe(220);
+    const shrunk = synchronizeFlowRowHeights(grown.map((item) => item.id === left.id ? { ...item, height: 80 } : item));
+    expect(shrunk[0].flowRowHeightPx).toBe(110);
+    expect(shrunk[1].flowRowHeightPx).toBe(110);
+  });
+
+});
+
+
+describe('measured flow height commit policy', () => {
+  it('commits a normal Flow table height even when the block is materialized on continuation page 2+', () => {
+    expect(shouldCommitMeasuredFlowHeight(0, false)).toBe(true);
+    expect(shouldCommitMeasuredFlowHeight(1, false)).toBe(true);
+    expect(shouldCommitMeasuredFlowHeight(4, false)).toBe(true);
+  });
+
+  it('does not commit a page-local multi-page Dynamic Table fragment height', () => {
+    expect(shouldCommitMeasuredFlowHeight(0, true)).toBe(false);
+    expect(shouldCommitMeasuredFlowHeight(3, true)).toBe(false);
   });
 });

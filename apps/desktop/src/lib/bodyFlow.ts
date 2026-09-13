@@ -20,10 +20,71 @@ export type BodyFlowElement = {
   flowColumnGapMm?: number;
   flowAlign?: BodyFlowAlign;
   flowWidth?: BodyFlowWidth;
+  /** Cached derived height for the complete shared Flow row. Every member of the
+   * row receives the same value whenever one member's measured height changes.
+   * Older templates may omit it; layout always falls back to live member heights. */
+  flowRowHeightPx?: number;
 };
+
+
+/**
+ * A normal Flow block can physically land on any continuation page after
+ * document materialization. Its DOM height is still the authoritative height
+ * of the persistent block and must be committed even when pageIndex > 0.
+ *
+ * Only a virtual fragment of a multi-page Dynamic Table is derived output; its
+ * page-local fragment height must never overwrite the logical source element.
+ */
+export function shouldCommitMeasuredFlowHeight(physicalPageIndex: number, virtualPaginatedFragment: boolean): boolean {
+  void physicalPageIndex; // page index is intentionally NOT a restriction.
+  return !virtualPaginatedFragment;
+}
 
 export function newFlowRowId() {
   return `flow-row-${crypto.randomUUID()}`;
+}
+
+export function flowRowKey(element: BodyFlowElement) {
+  return element.flowRowId || `legacy-row-${element.id}`;
+}
+
+export function effectiveFlowRowHeight<T extends BodyFlowElement>(row: T[]): number {
+  if (!row.length) return 0;
+  const memberHeight = Math.max(...row.map((element) => Math.max(element.type === 'divider' ? 4 : 20, element.height)));
+  const cachedRowHeight = Math.max(0, ...row.map((element) => element.flowRowHeightPx ?? 0));
+  return Math.max(memberHeight, cachedRowHeight);
+}
+
+/**
+ * Rebuild the shared Flow-row height cache from the individual block heights.
+ * This is intentionally explicit rather than render-time state mutation: when a
+ * table/text block changes measured height, callers update the block and then
+ * atomically synchronize its row. The next row therefore always starts below
+ * the tallest current member, while shorter side-by-side members keep their own
+ * visual height.
+ */
+export function synchronizeFlowRowHeights<T extends BodyFlowElement>(elements: T[]): T[] {
+  const rows = new Map<string, T[]>();
+  for (const element of elements) {
+    if ((element.region ?? 'body') !== 'body' || (element.layoutMode ?? 'floating') !== 'flow') continue;
+    const key = flowRowKey(element);
+    if (!rows.has(key)) rows.set(key, []);
+    rows.get(key)!.push(element);
+  }
+  const rowHeights = new Map<string, number>();
+  for (const [key, row] of rows) {
+    // Derive only from each block's own measured height. Do not feed the old
+    // cached row height back into itself, otherwise a row could never shrink.
+    rowHeights.set(key, Math.max(...row.map((element) => Math.max(element.type === 'divider' ? 4 : 20, element.height))));
+  }
+  return elements.map((element) => {
+    if ((element.region ?? 'body') !== 'body' || (element.layoutMode ?? 'floating') !== 'flow') {
+      return element.flowRowHeightPx == null ? element : ({ ...element, flowRowHeightPx: undefined } as T);
+    }
+    const nextHeight = rowHeights.get(flowRowKey(element));
+    if (nextHeight == null || Math.abs((element.flowRowHeightPx ?? -1) - nextHeight) < 0.5) return element;
+    return { ...element, flowRowHeightPx: nextHeight } as T;
+  });
 }
 
 /**
@@ -40,7 +101,7 @@ export function layoutBodyFlow<T extends BodyFlowElement>(elements: T[], setting
   const rowOrder: string[] = [];
   const rows = new Map<string, T[]>();
   for (const element of flow) {
-    const rowId = element.flowRowId || `legacy-row-${element.id}`;
+    const rowId = flowRowKey(element);
     if (!rows.has(rowId)) { rows.set(rowId, []); rowOrder.push(rowId); }
     rows.get(rowId)!.push(element);
   }
@@ -63,7 +124,7 @@ export function layoutBodyFlow<T extends BodyFlowElement>(elements: T[], setting
     const widths = requested.map((pct) => available * ((pct * scale) / 100));
     const occupied = widths.reduce((a, b) => a + b, 0) + gapTotal;
     let x = rowAlign === 'center' ? bounds.x + Math.max(0, (bounds.width - occupied) / 2) : rowAlign === 'right' ? bounds.x + Math.max(0, bounds.width - occupied) : bounds.x;
-    const rowHeight = Math.max(...row.map((e) => Math.max(e.type === 'divider' ? 4 : 20, e.height)));
+    const rowHeight = effectiveFlowRowHeight(row);
 
     row.forEach((element, i) => {
       const width = widths[i];
@@ -96,7 +157,7 @@ export function insertFlowElementByVisualY<T extends BodyFlowElement>(elements: 
 
   without.forEach((item, index) => {
     if ((item.region ?? 'body') !== 'body' || (item.layoutMode ?? 'floating') !== 'flow') return;
-    const rowId = item.flowRowId ?? `legacy-row-${item.id}`;
+    const rowId = flowRowKey(item);
     const projectedItem = projectedById.get(item.id) ?? item;
     const existing = rowMap.get(rowId);
     if (existing) {
@@ -160,7 +221,7 @@ export function materializeBodyFlowPages<T extends BodyFlowElement>(
   const rowOrder: string[] = [];
   const rows = new Map<string, T[]>();
   for (const element of flow) {
-    const rowId = element.flowRowId || `legacy-row-${element.id}`;
+    const rowId = flowRowKey(element);
     if (!rows.has(rowId)) { rows.set(rowId, []); rowOrder.push(rowId); }
     rows.get(rowId)!.push(element);
   }
@@ -173,7 +234,7 @@ export function materializeBodyFlowPages<T extends BodyFlowElement>(
     const row = rows.get(rowId)!;
     const gapBefore = mmToPx(Math.max(0, Math.max(...row.map((e) => e.flowGapBeforeMm ?? 0))));
     const gapAfter = mmToPx(Math.max(0, Math.max(...row.map((e) => e.flowGapAfterMm ?? 4))));
-    const rowHeight = Math.max(...row.map((e) => Math.max(e.type === 'divider' ? 4 : 20, e.height)));
+    const rowHeight = effectiveFlowRowHeight(row);
 
     cursorY += gapBefore;
 

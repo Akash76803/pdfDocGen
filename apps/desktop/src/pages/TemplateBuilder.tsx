@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as Rea
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
   Copy, Eye, Image, Minus, MousePointer2, QrCode, Save, Signature, Table2, Trash2, Calculator,
-  Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2,
+  Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2, Download,
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
 import { RecordPicker } from '../components/RecordPicker.tsx';
@@ -13,7 +13,9 @@ import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode } from '../lib/pageModel.ts';
 import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
-import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, newFlowRowId, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowWidth } from '../lib/bodyFlow.ts';
+import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowWidth } from '../lib/bodyFlow.ts';
+import { buildMaterializedRenderDocument, type MaterializedRenderPage } from '../lib/materializedRenderModel.ts';
+import { buildExactPreviewPdf, downloadPdf } from '../lib/exactPdfExport.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'binding' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -51,6 +53,7 @@ type BuilderElement = {
   flowColumnGapMm?: number;
   flowAlign?: BodyFlowAlign;
   flowWidth?: BodyFlowWidth;
+  flowRowHeightPx?: number;
   /** DB-4F reusable document formula field. The formula name becomes a Dynamic Field token. */
   formulaName?: string;
   formulaExpression?: string;
@@ -115,6 +118,8 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activePreviewPageIndex, setActivePreviewPageIndex] = useState(0);
   const [status, setStatus] = useState('Draft');
+  const [pdfExporting, setPdfExporting] = useState(false);
+  const [pdfExportProgress, setPdfExportProgress] = useState('');
   const undoStackRef = useRef<EditorSnapshot[]>([]);
   const redoStackRef = useRef<EditorSnapshot[]>([]);
   const historyGestureRef = useRef<EditorSnapshot | null>(null);
@@ -175,6 +180,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [activeInsertRegion, setActiveInsertRegion] = useState<PageRegion>('body');
   const source = activeSource(dataState);
   const record = activeRecord(dataState);
+  const formulaAggregateRows = source ? documentFormulaAggregateRows(source, record, pages.flatMap((page) => page.elements)) : [];
   const formulaTokenFields: TemplateTokenField[] = formulaElements.map((item) => ({ name: item.formulaName!.trim(), label: item.formulaName!.trim() }));
   const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
   const selected = formulaElements.find((item) => item.id === selectedId) ?? masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
@@ -365,16 +371,17 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       const next = constrainElementToRegion({ ...selected, ...patch, region: requestedRegion }, pageSettings);
       const targetMaster = requestedRegion !== 'body';
       const flowRowPatch = requestedRegion === 'body' && (selected.layoutMode ?? 'floating') === 'flow' && (patch.flowAlign != null || patch.flowColumnGapMm != null);
-      const selectedRowId = selected.flowRowId ?? `legacy-row-${selected.id}`;
+      const selectedRowId = flowRowKey(selected);
       setPages((currentPages) => currentPages.map((page, index) => {
         if (!((targetMaster && index === 0) || (!targetMaster && page.id === activePageId))) return page;
-        return { ...page, elements: page.elements.map((item) => {
+        const nextElements = page.elements.map((item) => {
           if (item.id === selectedId) return next;
-          if (flowRowPatch && (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && (item.flowRowId ?? `legacy-row-${item.id}`) === selectedRowId) {
+          if (flowRowPatch && (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === selectedRowId) {
             return { ...item, ...(patch.flowAlign != null ? { flowAlign: patch.flowAlign } : {}), ...(patch.flowColumnGapMm != null ? { flowColumnGapMm: patch.flowColumnGapMm } : {}) };
           }
           return item;
-        }) };
+        });
+        return { ...page, elements: synchronizeFlowRowHeights(nextElements) };
       }));
     }
     setStatus('Unsaved changes');
@@ -398,12 +405,13 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           ...(patch.y != null ? { y: masterBounds.y + (patch.y - activeBounds.y) } : {}),
         };
       }
-      return { ...page, elements: page.elements.map((entry) => {
+      const nextElements = page.elements.map((entry) => {
         if (entry.id !== item.id) return entry;
         const isBodyFlow = (entry.region ?? 'body') === 'body' && (entry.layoutMode ?? 'floating') === 'flow';
         const safePatch = isBodyFlow ? Object.fromEntries(Object.entries(normalizedPatch).filter(([key]) => key !== 'x' && key !== 'y')) as Partial<BuilderElement> : normalizedPatch;
         return constrainElementToRegion({ ...entry, ...safePatch }, effectiveSettings);
-      }) };
+      });
+      return { ...page, elements: synchronizeFlowRowHeights(nextElements) };
     }));
     setStatus('Unsaved changes');
   }
@@ -416,7 +424,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       setSelectedId(null); setStatus('Unsaved changes'); return;
     }
     const targetMaster = (selected.region ?? 'body') !== 'body';
-    setPages((currentPages) => currentPages.map((page, index) => ((targetMaster && index === 0) || (!targetMaster && page.id === activePageId)) ? { ...page, elements: page.elements.filter((item) => item.id !== selectedId) } : page));
+    setPages((currentPages) => currentPages.map((page, index) => ((targetMaster && index === 0) || (!targetMaster && page.id === activePageId)) ? { ...page, elements: synchronizeFlowRowHeights(page.elements.filter((item) => item.id !== selectedId)) } : page));
     setSelectedId(null);
     setStatus('Unsaved changes');
   }
@@ -430,7 +438,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       setSelectedId(copy.id); setStatus('Unsaved changes'); return;
     }
     const region = selected.region ?? 'body';
-    const copy: BuilderElement = constrainElementToRegion({ ...selected, id: crypto.randomUUID(), x: selected.x + 18, y: selected.y + 18, ...((selected.region ?? 'body') === 'body' && (selected.layoutMode ?? 'floating') === 'flow' ? { flowRowId: newFlowRowId() } : {}) }, pageSettings);
+    const copy: BuilderElement = constrainElementToRegion({ ...selected, id: crypto.randomUUID(), x: selected.x + 18, y: selected.y + 18, ...((selected.region ?? 'body') === 'body' && (selected.layoutMode ?? 'floating') === 'flow' ? { flowRowId: newFlowRowId(), flowRowHeightPx: undefined } : {}) }, pageSettings);
     setPages((currentPages) => currentPages.map((page, index) => ((region !== 'body' && index === 0) || (region === 'body' && page.id === activePageId)) ? { ...page, elements: [...page.elements, copy] } : page));
     setSelectedId(copy.id);
     setStatus('Unsaved changes');
@@ -490,16 +498,16 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       if ((action === 'joinPrevious' || action === 'joinNext') && !target) return page;
       if (action === 'left' || action === 'right') {
         const rowId = selected.flowRowId;
-        const rowIds = items.map((item, index) => ({ item, index })).filter(({ item }) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && (item.flowRowId ?? `legacy-row-${item.id}`) === (rowId ?? `legacy-row-${selected.id}`));
+        const rowIds = items.map((item, index) => ({ item, index })).filter(({ item }) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === flowRowKey(selected));
         const rowAt = rowIds.findIndex(({ item }) => item.id === selectedId);
         const swapWith = action === 'left' ? rowAt - 1 : rowAt + 1;
         if (rowAt < 0 || swapWith < 0 || swapWith >= rowIds.length) return page;
         const a = rowIds[rowAt].index, b = rowIds[swapWith].index;
         [items[a], items[b]] = [items[b], items[a]];
-        return { ...page, elements: items };
+        return { ...page, elements: synchronizeFlowRowHeights(items) };
       }
-      const rowId = action === 'newRow' ? newFlowRowId() : (target!.flowRowId ?? `legacy-row-${target!.id}`);
-      return { ...page, elements: items.map((item) => item.id === selectedId ? { ...item, flowRowId: rowId } : item) };
+      const rowId = action === 'newRow' ? newFlowRowId() : flowRowKey(target!);
+      return { ...page, elements: synchronizeFlowRowHeights(items.map((item) => item.id === selectedId ? { ...item, flowRowId: rowId } : item)) };
     }));
     setStatus('Unsaved changes');
   }
@@ -551,6 +559,59 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     const payload: SavedTemplate = { name, pages, activePageId, updatedAt: new Date().toISOString() };
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
     setStatus('Saved locally');
+  }
+
+  async function exportPreviewPdf() {
+    if (pdfExporting) return;
+    const originalPageId = activePageId;
+    const originalPreviewPage = activePreviewPageIndex;
+    const originalSelectedId = selectedId;
+    setPdfExporting(true);
+    setPdfExportProgress('Preparing render model…');
+    setSelectedId(null);
+    try {
+      const counts = pages.map((page) => {
+        const effectiveSettings = { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } };
+        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
+      });
+      const model = buildMaterializedRenderDocument(name, pages.map((page, index) => ({
+        id: page.id,
+        name: page.name,
+        settings: { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } },
+        outputPageCount: counts[index] ?? 1,
+      })));
+      const resolvePageNode = async (renderPage: MaterializedRenderPage) => {
+        if (activePageIdRef.current !== renderPage.builderPageId) {
+          setActivePageId(renderPage.builderPageId);
+          setActivePreviewPageIndex(0);
+          await waitForBuilderPaint();
+          await waitForBuilderPaint();
+        } else {
+          await waitForBuilderPaint();
+        }
+        const node = document.querySelector<HTMLElement>(`.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`);
+        if (!node) throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable.`);
+        return node;
+      };
+      const bytes = await buildExactPreviewPdf(model, resolvePageNode, {
+        dpi: 192,
+        quality: 0.96,
+        onProgress: ({ current, total }) => setPdfExportProgress(`Rendering PDF ${current} / ${total}`),
+      });
+      downloadPdf(bytes, sanitizeExportFileName(name || 'Document'));
+      setStatus('PDF generated');
+      setPdfExportProgress(`PDF ready • ${model.totalPages} page${model.totalPages === 1 ? '' : 's'}`);
+    } catch (error) {
+      console.error('DB-4.5 exact PDF export failed', error);
+      setStatus('PDF export failed');
+      setPdfExportProgress(error instanceof Error ? error.message : 'Unable to generate PDF');
+    } finally {
+      setActivePageId(originalPageId);
+      setActivePreviewPageIndex(originalPreviewPage);
+      setSelectedId(originalSelectedId);
+      await waitForBuilderPaint();
+      setPdfExporting(false);
+    }
   }
 
   const contentBounds = contentBoundsPx(pageSettings);
@@ -616,6 +677,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <button className="secondary" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span>Undo</span></button>
           <button className="secondary" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" onClick={redo} disabled={redoStackRef.current.length === 0}><Redo2 size={16}/><span>Redo</span></button>
           <button className="secondary"><Eye size={16}/><span>Preview</span></button>
+          <button className="secondary" onClick={exportPreviewPdf} disabled={pdfExporting} title="DB-4.5 exact Preview → PDF"><Download size={16}/><span>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</span></button>
           <button className="secondary" onClick={saveTemplate}><Save size={16}/><span>Save</span></button>
           <button className="primary" onClick={() => onNavigate('generate')}>Generate</button>
         </div>
@@ -671,7 +733,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
             {Array.from({ length: virtualPageCount }, (_, virtualPageIndex) => (
               <div className={`virtual-page-frame${activePreviewPageIndex === virtualPageIndex ? ' active-preview-page' : ''}`} data-virtual-page-index={virtualPageIndex} key={`virtual-page-${virtualPageIndex}`} style={{ width: previewPagePixels.width * previewScale, height: previewPagePixels.height * previewScale }} onPointerDown={() => setActivePreviewPageIndex(virtualPageIndex)}>
                 <div className="virtual-page-label">{activePage?.name || 'Page'}{virtualPageIndex > 0 ? ` · Continuation ${virtualPageIndex + 1}` : ''}<span>{virtualPageIndex + 1} / {virtualPageCount}</span></div>
-                <div className="document-page" style={{ ...pageCanvasStyle(pageSettings), transform: `scale(${zoom / 100})` }} onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
+                <div className="document-page" data-export-page="true" data-builder-page-id={activePage?.id} data-continuation-index={virtualPageIndex} data-document-page-index={documentPageOffset + virtualPageIndex} style={{ ...pageCanvasStyle(pageSettings), transform: `scale(${zoom / 100})` }} onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
                   {pageSettings.showGuides && <PageGuides settings={pageSettings}/>} 
                   {virtualPageIndex === 0 && elements.length === 0 && <div className="page-empty"><span>{pageSettings.preset} DOCUMENT</span><strong>Start building your template</strong><small>Click an element from the left panel. You can then move, resize and edit it.</small></div>}
                   {elements.map((item) => {
@@ -717,7 +779,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
                       return null;
                     }
 
-                    return <CanvasElement key={`${item.id}:vp:${virtualPageIndex}`} item={renderItem} selected={item.id === selectedId} zoom={zoom} pageSettings={pageSettings} record={record} source={source} sources={dataState.sources} formulaElements={formulaElements} virtualPageIndex={isPaginatedTable ? tableFragmentIndex : virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={documentOutputPageCount} virtualPageMode={isPaginatedTable} repeatedBandElement={(activePageId !== masterPage?.id || virtualPageIndex > 0) && (isHeader || isFooter)} onSelect={() => setSelectedId(item.id)} onHistoryStart={beginHistoryGesture} onHistoryEnd={endHistoryGesture} onSelectionChange={(table) => { setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, table } : entry)); }} onLayoutChange={(patch) => { if (virtualPageIndex === 0) setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry)); }} onChange={(patch) => updateCanvasElement(item, patch)}/>;
+                    return <CanvasElement key={`${item.id}:vp:${virtualPageIndex}`} item={renderItem} selected={item.id === selectedId} zoom={zoom} pageSettings={pageSettings} record={record} source={source} sources={dataState.sources} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} virtualPageIndex={isPaginatedTable ? tableFragmentIndex : virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={documentOutputPageCount} virtualPageMode={isPaginatedTable} repeatedBandElement={(activePageId !== masterPage?.id || virtualPageIndex > 0) && (isHeader || isFooter)} onSelect={() => setSelectedId(item.id)} onHistoryStart={beginHistoryGesture} onHistoryEnd={endHistoryGesture} onSelectionChange={(table) => { setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, table } : entry)); }} onLayoutChange={(patch) => { if (shouldCommitMeasuredFlowHeight(virtualPageIndex, isPaginatedTable)) setElementsRaw((current) => synchronizeFlowRowHeights(current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry))); }} onChange={(patch) => updateCanvasElement(item, patch)}/>;
                   })}
                 </div>
               </div>
@@ -731,14 +793,23 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <div className="inspector-tabs">
             {(['properties', 'binding', 'formatting', 'conditions', 'header', 'footer'] as const).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'binding' ? 'Dynamic Field' : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
-          <Inspector tab={tab} selected={selected} source={source} record={record} formulaElements={formulaElements} dynamicTokenFields={dynamicTokenFields} dataState={dataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
+          <Inspector tab={tab} selected={selected} source={source} record={record} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} dynamicTokenFields={dynamicTokenFields} dataState={dataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
         </aside>
       </div>
     </div>
   );
 }
 
-function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
+function waitForBuilderPaint() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+}
+
+function sanitizeExportFileName(value: string) {
+  const cleaned = value.trim().replace(/[\\/:*?"<>|]+/g, '_').replace(/\s+/g, ' ');
+  return cleaned || 'Document';
+}
+
+function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
   const drag = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const resize = useRef<{ sx: number; sy: number; width: number; height: number } | null>(null);
   const scale = zoom / 100;
@@ -804,19 +875,19 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
   const continuationTop = contentBoundsPx(pageSettings).y;
   const renderedTop = virtualPageMode && virtualPageIndex > 0 ? continuationTop : item.y;
   return <div data-page-region={region} data-repeated-projection={repeatedBandElement ? 'true' : 'false'} className={`canvas-element ${selected ? 'selected' : ''} element-${item.type} region-${region} ${virtualPageMode ? 'virtual-continuation-element' : ''} ${repeatedBandElement ? 'repeated-region-projection' : ''}`} style={{ left: item.x, top: renderedTop, width: item.width, height: item.height, color: item.color, background: item.type === 'shape' ? item.fill : undefined, fontSize: item.fontSize, fontFamily: item.fontFamily ?? 'Arial', fontWeight: item.fontWeight ?? 400, fontStyle: item.italic ? 'italic' : 'normal', textDecoration: item.underline ? 'underline' : 'none', lineHeight: item.lineHeight ?? 1.25, textAlign: item.textAlign }} onPointerDown={startDrag} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-    <ElementContent item={item} pageSettings={pageSettings} record={record} source={source} sources={sources} formulaElements={formulaElements} virtualPageIndex={virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={runtimePageCount} virtualPageMode={virtualPageMode} onElementSelect={onSelect} onTableChange={(table) => onChange({ table })} onTableSelectionChange={onSelectionChange} onTableHistoryStart={onHistoryStart} onTableHistoryEnd={onHistoryEnd} onTableHeightChange={virtualPageMode ? undefined : (height) => { if (Math.abs(item.height - height) >= 1) onLayoutChange({ height }); }}/>
+    <ElementContent item={item} pageSettings={pageSettings} record={record} source={source} sources={sources} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} virtualPageIndex={virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={runtimePageCount} virtualPageMode={virtualPageMode} onElementSelect={onSelect} onTableChange={(table) => onChange({ table })} onTableSelectionChange={onSelectionChange} onTableHistoryStart={onHistoryStart} onTableHistoryEnd={onHistoryEnd} onTableHeightChange={virtualPageMode ? undefined : (height) => { if (Math.abs(item.height - height) >= 1) onLayoutChange({ height }); }}/>
     {selected && (!virtualPageMode || virtualPageIndex === 0 || bandConstrained) && <>{!(region === 'body' && (item.layoutMode ?? 'floating') === 'flow') ? <span className="resize-handle" data-resize="true" onPointerDown={startResize}/> : null}<span className="selection-label">{repeatedBandElement ? `Global ${region === 'header' ? 'Header' : 'Footer'}` : labelFor(item.type)}</span></>}
   </div>;
 }
 
-function ElementContent({ item, pageSettings, record, source, sources, formulaElements, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
-  const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field);
+function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
+  const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
   const bound = item.binding ? resolveBuilderField(item.binding) : undefined;
   const hasMixedTokens = templateHasTokens(item.text);
   const rawRendered = !hasMixedTokens && item.binding && bound !== undefined ? displayValue(bound) : item.text;
   const rendered = resolveTemplateTokens(rawRendered, resolveBuilderField, { pageNumber: runtimePageIndex + 1, totalPages: runtimePageCount, preserveUnknown: !record });
   if (item.type === 'formula') {
-    const result = evaluateDocumentFormulaElement(item, record, formulaElements);
+    const result = evaluateDocumentFormulaElement(item, record, formulaElements, formulaAggregateRows);
     return <span className="text-content formula-field-result">{result == null ? '—' : displayValue(result)}</span>;
   }
   if (item.type === 'image' || item.type === 'signature') return <ImageBackedContent item={item} bound={bound}/>;
@@ -824,7 +895,7 @@ function ElementContent({ item, pageSettings, record, source, sources, formulaEl
     const tableSource = sources.find((candidate) => candidate.id === item.table?.binding?.sourceId) ?? source;
     const bounds = contentBoundsPx(pageSettings);
     const availableHeight = Math.max(80, bounds.y + bounds.height - item.y);
-    return <TableCanvas table={item.table} record={record} source={tableSource} documentSource={source} availableHeight={availableHeight} continuationAvailableHeight={Math.max(80, bounds.height)} availableWidth={Math.max(80, item.width)} fragmentIndex={virtualPageMode ? virtualPageIndex : undefined} virtualPageMode={virtualPageMode} onChange={(table) => { onElementSelect(); onTableChange(table); }} onSelectionChange={(table) => { onElementSelect(); onTableSelectionChange(table); }} onInteractionStart={onTableHistoryStart} onInteractionEnd={onTableHistoryEnd} onHeightChange={onTableHeightChange}/>;
+    return <TableCanvas table={item.table} record={record} source={tableSource} documentSource={source} globalFormulaValues={documentFormulaValues(record, formulaElements, formulaAggregateRows)} availableHeight={availableHeight} continuationAvailableHeight={Math.max(80, bounds.height)} availableWidth={Math.max(80, item.width)} fragmentIndex={virtualPageMode ? virtualPageIndex : undefined} virtualPageMode={virtualPageMode} onChange={(table) => { onElementSelect(); onTableChange(table); }} onSelectionChange={(table) => { onElementSelect(); onTableSelectionChange(table); }} onInteractionStart={onTableHistoryStart} onInteractionEnd={onTableHistoryEnd} onHeightChange={onTableHeightChange}/>;
   }
   if (item.type === 'table') return <div className="db-table-empty-placeholder">Table schema missing</div>;
   if (item.type === 'qr') return <><QrCode size={52}/><small>{rendered}</small></>;
@@ -943,8 +1014,8 @@ function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof active
   return { options: Array.from(seen.values()), value: selectedOption?.value ?? activeRecordIndex };
 }
 
-function Inspector({ tab, selected, source, record, formulaElements, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
-  tab: InspectorTab; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
+function Inspector({ tab, selected, source, record, formulaElements, formulaAggregateRows, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
+  tab: InspectorTab; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
   onPageSettings: (patch: Partial<PageSettings>) => void; onPageName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void;
   onUpdate: (patch: Partial<BuilderElement>) => void; onDelete: () => void; onDuplicate: () => void; onArrange: (action: 'front' | 'forward' | 'backward' | 'back') => void; onMoveFlow: (direction: -1 | 1) => void; onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; relativeElements: BuilderElement[]; onSetInsertRegion: (region: PageRegion) => void; onEditTableConfiguration: (elementId: string) => void;
 }) {
@@ -970,16 +1041,16 @@ function Inspector({ tab, selected, source, record, formulaElements, dynamicToke
     onUpdate({ region, x, y, width, height });
   };
   const selectedBand = selected?.region === 'header' ? 'header' : selected?.region === 'footer' ? 'footer' : null;
-  const selectedContentPreview = selected ? resolveTemplateTokens(selected.text, (field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field), { pageNumber: activePreviewPageIndex + 1, totalPages: Math.max(1, virtualPageCount), preserveUnknown: !record }) : '';
-  const selectedFormulaPreview = selected?.type === 'formula' ? evaluateDocumentFormulaElement(selected, record, formulaElements) : null;
+  const selectedContentPreview = selected ? resolveTemplateTokens(selected.text, (field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows), { pageNumber: activePreviewPageIndex + 1, totalPages: Math.max(1, virtualPageCount), preserveUnknown: !record }) : '';
+  const selectedFormulaPreview = selected?.type === 'formula' ? evaluateDocumentFormulaElement(selected, record, formulaElements, formulaAggregateRows) : null;
 
   if (tab === 'header') return <GlobalBandEditor region="header" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion}/>;
   if (tab === 'footer') return <GlobalBandEditor region="footer" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion}/>;
-  if (tab === 'binding') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
+  if (tab === 'binding') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
   if (tab === 'formatting') return <div className="inspector-body"><h3>Formatting</h3>{!selected ? <p>Select an element to edit document-safe formatting.</p> : <><label>Font family<select value={selected.fontFamily ?? 'Arial'} onChange={(e) => onUpdate({ fontFamily: e.target.value })}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label><div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e) => onUpdate({ fontSize: Math.max(6, Number(e.target.value) || 12) })}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight ?? 1.25} onChange={(e) => onUpdate({ lineHeight: Math.min(3, Math.max(0.8, Number(e.target.value) || 1.25)) })}/></label></div><div className="text-style-actions"><button type="button" className={(selected.fontWeight ?? 400) >= 700 ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ fontWeight: (selected.fontWeight ?? 400) >= 700 ? 400 : 700 })}><b>B</b></button><button type="button" className={selected.italic ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ italic: !selected.italic })}><i>I</i></button><button type="button" className={selected.underline ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ underline: !selected.underline })}><u>U</u></button></div><label>Text color<input type="color" value={selected.color} onChange={(e) => onUpdate({ color: e.target.value })}/></label>{selected.type === 'shape' && <label>Fill<input type="color" value={selected.fill} onChange={(e) => onUpdate({ fill: e.target.value })}/></label>}<div className="align-actions"><button className={selected.textAlign === 'left' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'left' })}><AlignLeft size={16}/></button><button className={selected.textAlign === 'center' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'center' })}><AlignCenter size={16}/></button><button className={selected.textAlign === 'right' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'right' })}><AlignRight size={16}/></button></div><p className="table-cell-help">Typography applies to static text and every resolved dynamic token in this content block.</p></>}</div>;
   if (tab === 'properties' && selected?.type === 'formula') return <div className="inspector-body"><h3>Formula Field</h3><FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div>;
   if (tab === 'conditions') return <div className="inspector-body"><h3>Conditions</h3><p>Condition rules are planned for a later phase. The selected element remains schema-ready for them.</p><button className="secondary" disabled={!selected}>Add condition</button></div>;
-  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage}/>}</div>;
+  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} elements={relativeElements} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage}/>}</div>;
 }
 
 
@@ -1026,15 +1097,18 @@ function elementDisplayName(element: BuilderElement) {
   return `${typeLabel}${suffix}`;
 }
 
-function BodyFlowControls({ selected, onUpdate, onMove, onRowAction }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1 | 1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void }) {
+function BodyFlowControls({ selected, elements, onUpdate, onMove, onRowAction }: { selected: BuilderElement; elements: BuilderElement[]; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1 | 1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void }) {
   const mode = selected.layoutMode ?? 'floating';
   if ((selected.region ?? 'body') !== 'body') return null;
   const isFlow = mode === 'flow';
   const widthPct = Math.round(selected.flowWidthPercent ?? 100);
+  const rowMembers = isFlow ? elements.filter((item) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === flowRowKey(selected)) : [];
+  const reservedRowHeight = rowMembers.length ? Math.max(...rowMembers.map((item) => Math.max(item.height, item.flowRowHeightPx ?? 0))) : selected.height;
   return <section className="inspector-card body-flow-card"><div className="inspector-card-title">Body Block Layout</div>
     <div className="layout-mode-toggle"><button type="button" className={isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'flow', flowRowId: selected.flowRowId ?? newFlowRowId(), flowWidthPercent: selected.flowWidthPercent ?? 100, flowGapBeforeMm: selected.flowGapBeforeMm ?? 0, flowGapAfterMm: selected.flowGapAfterMm ?? 4, flowColumnGapMm: selected.flowColumnGapMm ?? 4, flowAlign: selected.flowAlign ?? 'left', flowWidth: 'full' })}>Flow Block</button><button type="button" className={!isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'floating' })}>Floating</button></div>
     {isFlow ? <>
       <p className="table-cell-help"><strong>Simple document flow:</strong> Body starts at the usable top. Every new block gets a new row by default. Row height follows its tallest block; when Text/Table grows, every following row shifts automatically.</p>
+      {rowMembers.length > 1 ? <div className="flow-row-status"><strong>Shared row</strong><span>{rowMembers.length} blocks · selected measures {Math.round(selected.height)}px · tallest reserves {Math.round(reservedRowHeight)}px</span></div> : <div className="flow-row-status"><strong>Measured height</strong><span>{Math.round(selected.height)}px</span></div>}
       <div className="property-grid"><label>Width (%)<input type="number" min="5" max="100" step="1" value={widthPct} onChange={(e) => onUpdate({ flowWidthPercent: Math.min(100, Math.max(5, Number(e.target.value) || 100)), flowWidth: 'custom' })}/></label><label>Row gap after (mm)<input type="number" min="0" step="0.5" value={selected.flowGapAfterMm ?? 4} onChange={(e) => onUpdate({ flowGapAfterMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
       <div className="property-grid"><label>Gap before (mm)<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm ?? 0} onChange={(e) => onUpdate({ flowGapBeforeMm: Math.max(0, Number(e.target.value) || 0) })}/></label><label>Block gap in row (mm)<input type="number" min="0" step="0.5" value={selected.flowColumnGapMm ?? 4} onChange={(e) => onUpdate({ flowColumnGapMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
       <label>Row alignment<select value={selected.flowAlign ?? 'left'} onChange={(e) => onUpdate({ flowAlign: e.target.value as BodyFlowAlign })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
@@ -1106,7 +1180,7 @@ function GlobalBandEditor({ region, settings, onPageSettings, onSetInsertRegion 
   </div>;
 }
 
-function TableProperties({ table, sources, activeSourceId, onUpdate, onEditConfiguration }: { table: TableDefinition; sources: BuilderDataState['sources']; activeSourceId?: string; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
+function TableProperties({ table, sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
   const cell = findTableCell(table, table.selectedCellId);
   const cellLocation = findTableCellLocation(table, table.selectedCellId);
   const selectedColumn = cellLocation ? table.columns[Math.min(cellLocation.columnIndex, table.columns.length - 1)] ?? null : null;
@@ -1119,6 +1193,7 @@ function TableProperties({ table, sources, activeSourceId, onUpdate, onEditConfi
   const bindingSource = table.mode === 'dynamic'
     ? (sources.find((item) => item.id === table.binding?.sourceId) ?? null)
     : (sources.find((item) => item.id === activeSourceId) ?? sources[0] ?? null);
+  const tableContentFields: TemplateTokenField[] = [...(bindingSource?.fields ?? []), ...formulaFields.filter((formula) => !(bindingSource?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
   const patchCell = (patch: Parameters<typeof updateTableCell>[2]) => {
     if (!cell) return;
     onUpdate(updateTableCell(table, cell.id, patch));
@@ -1130,6 +1205,15 @@ function TableProperties({ table, sources, activeSourceId, onUpdate, onEditConfi
   return <div className="table-properties">
     <div className="table-summary"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
     <label>Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
+    <section className="table-inspector-card table-border-card">
+      <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▦</span><span>Table Border</span></span><small className="table-inspector-badge">Style</small></div>
+      <div className="property-grid">
+        <label>Style<select value={table.borderStyle ?? 'solid'} onChange={(e) => onUpdate({ ...table, borderStyle: e.target.value as 'solid'|'dashed'|'dotted'|'double'|'none' })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option><option value="double">Double</option><option value="none">None</option></select></label>
+        <label>Width<input type="number" min="0" max="10" step="0.5" disabled={(table.borderStyle ?? 'solid') === 'none'} value={table.borderWidth} onChange={(e) => onUpdate({ ...table, borderWidth: Math.max(0, Number(e.target.value) || 0) })}/></label>
+      </div>
+      <label>Color<input type="color" disabled={(table.borderStyle ?? 'solid') === 'none'} value={table.borderColor} onChange={(e) => onUpdate({ ...table, borderColor: e.target.value })}/></label>
+      <div className="table-border-preview" style={{ borderWidth: (table.borderStyle ?? 'solid') === 'none' ? 0 : Math.max(1, table.borderWidth), borderStyle: table.borderStyle ?? 'solid', borderColor: table.borderColor }}><span>Border preview</span></div>
+    </section>
     {groupedSummary && <button type="button" className="secondary table-edit-configuration" onClick={onEditConfiguration}>Edit Grouped Summary Configuration</button>}
     {table.mode === 'dynamic' && (() => {
       const selectedSource = sources.find((item) => item.id === table.binding?.sourceId) ?? null;
@@ -1216,9 +1300,9 @@ function TableProperties({ table, sources, activeSourceId, onUpdate, onEditConfi
           <div className="section-title"><span>Data &amp; Format</span><small>Column default</small></div>
           {table.mode === 'dynamic' && selectedDynamicBodyCell && !groupedSummary && <>
             <label>Body value type<select value={selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')} onChange={(e) => patchDynamicBodyCell({ valueMode: e.target.value as TableValueMode })}><option value="binding">Field binding</option><option value="formula">Formula</option><option value="custom">Custom value</option></select></label>
-            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} value={selectedDynamicBodyCell.binding} onChange={(binding) => patchDynamicBodyCell({ binding, valueMode: 'binding' })}/>}
-            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={selectedDynamicBodyCell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchDynamicBodyCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Formula applies to every repeated body row in this column.</p><FormulaFieldPicker source={bindingSource} table={table} currentColumnId={selectedColumn.id} onInsert={(fieldRef) => patchDynamicBodyCell({ formula: `${selectedDynamicBodyCell.formula ?? ''}${selectedDynamicBodyCell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
-            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'custom' && <MixedContentEditor label="Body custom value" value={selectedDynamicBodyCell.content ?? ''} fields={bindingSource?.fields ?? []} compact onChange={(content) => patchDynamicBodyCell({ content, valueMode: 'custom' })}/>}
+            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={selectedDynamicBodyCell.binding} onChange={(binding) => patchDynamicBodyCell({ binding, valueMode: 'binding' })}/>}
+            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={selectedDynamicBodyCell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchDynamicBodyCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Formula applies to every repeated body row in this column.</p><FormulaFieldPicker source={bindingSource} globalFormulaFields={formulaFields} table={table} currentColumnId={selectedColumn.id} onInsert={(fieldRef) => patchDynamicBodyCell({ formula: `${selectedDynamicBodyCell.formula ?? ''}${selectedDynamicBodyCell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
+            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'custom' && <MixedContentEditor label="Body custom value" value={selectedDynamicBodyCell.content ?? ''} fields={tableContentFields} compact onChange={(content) => patchDynamicBodyCell({ content, valueMode: 'custom' })}/>}
           </>}
           {groupedSummary && cellLocation?.section === 'bodyRows' && <p className="table-cell-help">Grouped values are produced by the Group By + aggregate mapping configured when the table is created. You can still format the output column here.</p>}
           <label>Data type<select value={selectedColumn.dataType ?? 'text'} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { dataType: e.target.value as TableDataType }))}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
@@ -1240,21 +1324,21 @@ function TableProperties({ table, sources, activeSourceId, onUpdate, onEditConfi
       <details className="table-tech-details"><summary>Technical ID</summary><code title={cell.id}>{cell.id}</code></details>
       <label>Cell type<select value={cell.type} onChange={(e) => { const nextType = e.target.value as TableCellType; patchCell({ type: nextType, ...(nextType === 'image' && !cell.imageFit ? { imageFit: 'cover' as const } : {}) }); }}><option value="text">Text</option><option value="image">Image</option><option value="qr">QR Code</option><option value="barcode">Barcode</option></select></label>
       {cell.type === 'text' ? <>
-        {table.mode === 'dynamic' && cellLocation?.section === 'customRows' ? <SummaryCellEditor table={table} cell={cell} source={bindingSource} onPatch={patchCell}/> : groupedSummary && cellLocation?.section === 'bodyRows' ? <p className="table-cell-help">This body cell is generated by the Grouped Summary configuration. Use Edit Grouped Summary Configuration above to change Group By, aggregate operations or formulas; formatting remains editable here.</p> : <>
+        {table.mode === 'dynamic' && cellLocation?.section === 'customRows' ? <SummaryCellEditor table={table} cell={cell} source={bindingSource} formulaFields={formulaFields} onPatch={patchCell}/> : groupedSummary && cellLocation?.section === 'bodyRows' ? <p className="table-cell-help">This body cell is generated by the Grouped Summary configuration. Use Edit Grouped Summary Configuration above to change Group By, aggregate operations or formulas; formatting remains editable here.</p> : <>
         <label>Value mode<select value={cell.valueMode ?? (cell.binding ? 'binding' : 'custom')} onChange={(e) => patchCell({ valueMode: e.target.value as TableValueMode })}><option value="custom">Custom value</option><option value="binding">Field binding</option><option value="formula" disabled={cellLocation?.row.kind === 'header'}>Formula</option></select></label>
         {cellLocation?.row.kind === 'header' && table.mode === 'dynamic' && <p className="table-cell-help">Header cells are labels. Set this column's repeated Field Binding / Formula from Column Structure → Body value type.</p>}
-        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'custom' && <MixedContentEditor label="Content" value={cell.content} fields={bindingSource?.fields ?? []} compact onChange={(content) => patchCell({ content })}/>}
-        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} value={cell.binding} onChange={(binding) => patchCell({ binding, valueMode: 'binding' })}/>}
-        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={cell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Use imported fields with +, -, *, / and parentheses. Fields containing spaces are inserted safely as [Basic Value].</p><FormulaFieldPicker source={bindingSource} table={table} currentColumnId={selectedColumn?.id} onInsert={(fieldRef) => patchCell({ formula: `${cell.formula ?? ''}${cell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
+        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'custom' && <MixedContentEditor label="Content" value={cell.content} fields={tableContentFields} compact onChange={(content) => patchCell({ content })}/>}
+        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={cell.binding} onChange={(binding) => patchCell({ binding, valueMode: 'binding' })}/>}
+        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={cell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Use imported fields with +, -, *, / and parentheses. Fields containing spaces are inserted safely as [Basic Value].</p><FormulaFieldPicker source={bindingSource} globalFormulaFields={formulaFields} table={table} currentColumnId={selectedColumn?.id} onInsert={(fieldRef) => patchCell({ formula: `${cell.formula ?? ''}${cell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
         </>}
         <div className="table-data-format-card">
           <div className="section-title"><span>Data &amp; Format</span><small>Cell override</small></div>
           <label>Data type<select value={cell.dataType ?? selectedColumn?.dataType ?? 'text'} onChange={(e) => patchCell({ dataType: e.target.value as TableDataType })}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <TableDataFormatEditor dataType={cell.dataType ?? selectedColumn?.dataType ?? 'text'} value={cell.format ?? selectedColumn?.format ?? {}} onChange={(format) => patchCell({ format })}/>
         </div>
-      </> : cell.type === 'image' ? <TableCellImageProperties cell={cell} source={bindingSource} onPatch={patchCell}/> : <>
-        <MixedContentEditor label={cell.type === 'qr' ? 'Custom QR value' : 'Custom barcode value'} value={cell.content} fields={bindingSource?.fields ?? []} compact onChange={(content) => patchCell({ content })}/>
-        <TableCellBindingPicker source={bindingSource} value={cell.binding} onChange={(binding) => patchCell({ binding })}/>
+      </> : cell.type === 'image' ? <TableCellImageProperties cell={cell} source={bindingSource} formulaFields={formulaFields} onPatch={patchCell}/> : <>
+        <MixedContentEditor label={cell.type === 'qr' ? 'Custom QR value' : 'Custom barcode value'} value={cell.content} fields={tableContentFields} compact onChange={(content) => patchCell({ content })}/>
+        <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={cell.binding} onChange={(binding) => patchCell({ binding })}/>
         <p className="table-cell-help">Field binding overrides the custom value during preview/generation.</p>
       </>}
       <div className="property-grid"><label>Row span<input type="number" min="1" max="50" value={cell.rowSpan} onChange={(e) => patchCell({ rowSpan: Math.max(1, Number(e.target.value) || 1) })}/></label><label>Col span<input type="number" min="1" max={Math.max(1, table.columns.length)} value={cell.colSpan} onChange={(e) => patchCell({ colSpan: Math.max(1, Math.min(table.columns.length, Number(e.target.value) || 1)) })}/></label></div>
@@ -1267,24 +1351,25 @@ function TableProperties({ table, sources, activeSourceId, onUpdate, onEditConfi
 
 
 
-function SummaryCellEditor({ table, cell, source, onPatch }: { table: TableDefinition; cell: NonNullable<ReturnType<typeof findTableCell>>; source: BuilderDataState['sources'][number] | null; onPatch: (patch: Parameters<typeof updateTableCell>[2]) => void }) {
+function SummaryCellEditor({ table, cell, source, formulaFields, onPatch }: { table: TableDefinition; cell: NonNullable<ReturnType<typeof findTableCell>>; source: BuilderDataState['sources'][number] | null; formulaFields: TemplateTokenField[]; onPatch: (patch: Parameters<typeof updateTableCell>[2]) => void }) {
   const mode = cell.summaryMode ?? 'custom';
   const fieldOptions = summaryFieldOptions(table, source);
+  const summaryContentFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
   const summaryRefs = summaryValueReferences(table, cell.id);
   const [insertValue, setInsertValue] = useState('');
   const append = (token: string) => onPatch({ summaryFormula: `${cell.summaryFormula ?? ''}${cell.summaryFormula ? ' ' : ''}${token}`, summaryMode: 'formula' });
   return <div className="table-summary-cell-editor">
     <div className="section-title"><span>Summary Value</span><small>Document group</small></div>
     <label>Summary mode<select value={mode} onChange={(e) => onPatch({ summaryMode: e.target.value as 'custom'|'aggregate'|'formula' })}><option value="custom">Custom value</option><option value="aggregate">Aggregate</option><option value="formula">Formula</option></select></label>
-    {mode === 'custom' && <MixedContentEditor label="Content" value={cell.content} fields={source?.fields ?? []} compact onChange={(content) => onPatch({ content, summaryMode: 'custom' })}/>}
+    {mode === 'custom' && <MixedContentEditor label="Content" value={cell.content} fields={summaryContentFields} compact onChange={(content) => onPatch({ content, summaryMode: 'custom' })}/>}
     {mode === 'aggregate' && <>
       <label>Aggregate<select value={cell.aggregate?.operation ?? 'sum'} onChange={(e) => onPatch({ summaryMode: 'aggregate', aggregate: { operation: e.target.value as TableAggregateOperation, field: cell.aggregate?.field ?? '' } })}><option value="sum">SUM</option><option value="count">COUNT</option><option value="avg">AVG</option><option value="min">MIN</option><option value="max">MAX</option></select></label>
       <label>Field / formula column<select value={cell.aggregate?.field ?? ''} onChange={(e) => onPatch({ summaryMode: 'aggregate', aggregate: { operation: cell.aggregate?.operation ?? 'sum', field: e.target.value } })}><option value="">Select field…</option><optgroup label="Imported Fields">{fieldOptions.filter((item) => item.kind === 'field').map((item) => <option key={`sf:${item.value}`} value={item.value}>{item.label}</option>)}</optgroup><optgroup label="Formula Columns">{fieldOptions.filter((item) => item.kind === 'formula').map((item) => <option key={`sc:${item.value}`} value={item.value}>{item.label}</option>)}</optgroup></select></label>
     </>}
     {mode === 'formula' && <>
       <label>Summary formula<input value={cell.summaryFormula ?? ''} placeholder="SUM([Net Value]) * 0.18" onChange={(e) => onPatch({ summaryFormula: e.target.value, summaryMode: 'formula' })}/></label>
-      <label>Insert reference<select value={insertValue} onChange={(e) => { const value = e.target.value; if (!value) return; if (value.startsWith('agg:')) append(value.slice(4)); else if (value.startsWith('summary:')) append(value.slice(8)); setInsertValue(''); }}><option value="">Select aggregate or summary…</option><optgroup label="Aggregates">{fieldOptions.map((item) => { const ref = formulaFieldReference(item.value); return ['SUM','COUNT','AVG','MIN','MAX'].map((fn) => <option key={`${fn}:${item.kind}:${item.value}`} value={`agg:${fn}(${ref})`}>{fn}({item.label})</option>); })}</optgroup>{summaryRefs.length > 0 && <optgroup label="Previous Summary Values">{summaryRefs.map((item) => <option key={item.name} value={`summary:${item.reference}`}>{item.name}</option>)}</optgroup>}</select></label>
-      <p className="table-cell-help">Aggregates use only the currently selected Parent / Document group. Previous named summary values can be chained.</p>
+      <label>Insert reference<select value={insertValue} onChange={(e) => { const value = e.target.value; if (!value) return; if (value.startsWith('agg:')) append(value.slice(4)); else if (value.startsWith('summary:')) append(value.slice(8)); else if (value.startsWith('global:')) append(formulaFieldReference(value.slice(7))); setInsertValue(''); }}><option value="">Select aggregate, formula or summary…</option><optgroup label="Aggregates">{fieldOptions.map((item) => { const ref = formulaFieldReference(item.value); return ['SUM','COUNT','AVG','MIN','MAX'].map((fn) => <option key={`${fn}:${item.kind}:${item.value}`} value={`agg:${fn}(${ref})`}>{fn}({item.label})</option>); })}</optgroup>{formulaFields.length > 0 && <optgroup label="Global Formula Fields">{formulaFields.map((item) => <option key={`sum-global:${item.name}`} value={`global:${item.name}`}>{item.label || item.name}</option>)}</optgroup>}{summaryRefs.length > 0 && <optgroup label="Previous Summary Values">{summaryRefs.map((item) => <option key={item.name} value={`summary:${item.reference}`}>{item.name}</option>)}</optgroup>}</select></label>
+      <p className="table-cell-help">Aggregates use only the currently selected Parent / Document group. Global Formula Fields and previous named summary values can be chained.</p>
     </>}
     {(mode === 'aggregate' || mode === 'formula') && <label>Summary name<input value={cell.summaryName ?? ''} placeholder="Subtotal / Tax Amount" onChange={(e) => onPatch({ summaryName: e.target.value })}/></label>}
   </div>;
@@ -1335,7 +1420,53 @@ function formulaTokenFieldsForElements(formulas: BuilderElement[]): TemplateToke
   });
 }
 
-function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], excludeId?: string) {
+function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[]): Array<Record<string, unknown>> {
+  const rows = source.records.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+  if (!record || typeof record !== 'object') return rows;
+  const identityTable = elements.find((item) => {
+    if (item.type !== 'table' || item.table?.mode !== 'dynamic' || item.table.binding?.sourceId !== source.id) return false;
+    const parentKeys = item.table.binding.parentKeys?.filter(Boolean) ?? (item.table.binding.parentKey ? [item.table.binding.parentKey] : []);
+    return parentKeys.length > 0;
+  });
+  const parentKeys = identityTable?.table?.binding?.parentKeys?.filter(Boolean)
+    ?? (identityTable?.table?.binding?.parentKey ? [identityTable.table.binding.parentKey] : []);
+  if (parentKeys.length === 0) return rows;
+  const same = (left: unknown, right: unknown) => displayValue(left).trim() === displayValue(right).trim();
+  return rows.filter((row) => parentKeys.every((key) => same(valueForField(row, key), valueForField(record, key))));
+}
+
+function formulaAggregateNumericValue(value: unknown): number | null {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value === 'boolean') return value ? 1 : 0;
+  if (value == null || value === '') return null;
+  const normalized = String(value).trim().replace(/,/g, '').replace(/[%₹$€£]/g, '');
+  const parsed = Number(normalized);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function formulaAggregateValue(rows: Array<Record<string, unknown>>, field: string, operation: 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX'): number {
+  const values = rows.map((row) => valueForField(row, field)).filter((value) => value !== undefined && value !== null && value !== '');
+  if (operation === 'COUNT') return values.length;
+  const numeric = values.map(formulaAggregateNumericValue).filter((value): value is number => value != null);
+  if (operation === 'SUM') return numeric.reduce((total, value) => total + value, 0);
+  if (operation === 'AVG') return numeric.length ? numeric.reduce((total, value) => total + value, 0) / numeric.length : 0;
+  if (operation === 'MIN') return numeric.length ? Math.min(...numeric) : 0;
+  return numeric.length ? Math.max(...numeric) : 0;
+}
+
+function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: Array<Record<string, unknown>>): number | null {
+  if (!expression?.trim()) return null;
+  const replaced = expression.replace(/\b(SUM|COUNT|AVG|MIN|MAX)\s*\(\s*(?:(?:\[([^\]]+)\])|([A-Za-z_$][A-Za-z0-9_.$]*))?\s*\)/gi, (_full, opRaw, bracketField, bareField) => {
+    const operation = String(opRaw).toUpperCase() as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX';
+    const field = String(bracketField || bareField || '').trim();
+    if (operation === 'COUNT' && !field) return String(aggregateRows.length);
+    if (!field) return '0';
+    return String(formulaAggregateValue(aggregateRows, field, operation));
+  });
+  return evaluateTableFormula(replaced, scalarContext);
+}
+
+function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>, excludeId?: string) {
   const context: Record<string, unknown> = record && typeof record === 'object' ? { ...(record as Record<string, unknown>) } : {};
   const usable = formulas.filter((item) => item.id !== excludeId && item.formulaName?.trim() && item.formulaExpression?.trim());
   const unresolved = new Set(usable.map((item) => item.id));
@@ -1344,7 +1475,7 @@ function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, fo
     for (const formula of usable) {
       if (!unresolved.has(formula.id)) continue;
       const name = formula.formulaName!.trim();
-      const value = evaluateTableFormula(formula.formulaExpression, context);
+      const value = evaluateDocumentFormulaExpression(formula.formulaExpression, context, aggregateRows);
       if (value == null) continue;
       context[name] = value;
       unresolved.delete(formula.id);
@@ -1355,14 +1486,26 @@ function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, fo
   return context;
 }
 
-function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[]) {
+function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>) {
   if (item.type !== 'formula' || !item.formulaExpression?.trim()) return null;
-  return evaluateTableFormula(item.formulaExpression, buildDocumentFormulaContext(record, formulas, item.id));
+  return evaluateDocumentFormulaExpression(item.formulaExpression, buildDocumentFormulaContext(record, formulas, aggregateRows, item.id), aggregateRows);
 }
 
-function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string) {
+function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>): Record<string, unknown> {
+  const context = buildDocumentFormulaContext(record, formulas, aggregateRows);
+  const values: Record<string, unknown> = {};
+  for (const formula of formulas) {
+    const name = formula.formulaName?.trim();
+    if (!name) continue;
+    const exact = Object.prototype.hasOwnProperty.call(context, name) ? name : Object.keys(context).find((key) => key.toLocaleLowerCase() === name.toLocaleLowerCase());
+    if (exact && context[exact] !== undefined) values[name] = context[exact];
+  }
+  return values;
+}
+
+function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string, aggregateRows: Array<Record<string, unknown>>) {
   const formula = formulas.find((item) => item.formulaName?.trim().toLocaleLowerCase() === field.trim().toLocaleLowerCase());
-  if (formula) return evaluateDocumentFormulaElement(formula, record, formulas);
+  if (formula) return evaluateDocumentFormulaElement(formula, record, formulas, aggregateRows);
   if (!record) return undefined;
   const matched = matchTemplateTokenField(sourceFields, field);
   return valueForField(record, matched?.name ?? field);
@@ -1372,11 +1515,23 @@ function FormulaFieldProperties({ selected, source, formulaElements, preview, on
   const name = selected.formulaName ?? '';
   const duplicate = !!name.trim() && formulaElements.some((item) => item.id !== selected.id && item.formulaName?.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase());
   const formulaRefs = formulaTokenFieldsForElements(formulaElements.filter((item) => item.id !== selected.id));
-  const insertRef = (value: string) => {
-    if (!value) return;
-    const ref = formulaFieldReference(value);
+  const [aggregateFunction, setAggregateFunction] = useState<'SUM'|'COUNT'|'AVG'|'MIN'|'MAX'>('SUM');
+  const [referenceSelection, setReferenceSelection] = useState('');
+  const selectedSourceField = referenceSelection.startsWith('source:') ? referenceSelection.slice(7) : '';
+  const selectedFormulaField = referenceSelection.startsWith('formula:') ? referenceSelection.slice(8) : '';
+  const selectedReferenceName = selectedSourceField || selectedFormulaField;
+  const appendFormulaText = (text: string) => {
+    if (!text) return;
     const current = selected.formulaExpression ?? '';
-    onUpdate({ formulaExpression: `${current}${current && !/\s$/.test(current) ? ' ' : ''}${ref}` });
+    onUpdate({ formulaExpression: `${current}${current && !/\s$/.test(current) ? ' ' : ''}${text}` });
+  };
+  const insertSelectedRef = () => {
+    if (!selectedReferenceName) return;
+    appendFormulaText(formulaFieldReference(selectedReferenceName));
+  };
+  const insertSelectedAggregate = () => {
+    if (!selectedSourceField) return;
+    appendFormulaText(`${aggregateFunction}(${formulaFieldReference(selectedSourceField)})`);
   };
   return <section className="inspector-card formula-field-card">
     <div className="inspector-card-title">Formula Field</div>
@@ -1384,9 +1539,11 @@ function FormulaFieldProperties({ selected, source, formulaElements, preview, on
     <label>Field name<input value={name} placeholder="GrandTotal" onChange={(e) => onUpdate({ formulaName: e.target.value.replace(/[{}]/g, '') })}/></label>
     {duplicate ? <div className="formula-field-warning">Use a unique field name.</div> : null}
     <label>Formula<input value={selected.formulaExpression ?? ''} placeholder="[Taxable] + [Total GST]" onChange={(e) => onUpdate({ formulaExpression: e.target.value })}/></label>
-    <label>Insert field<select value="" onChange={(e) => insertRef(e.target.value)}><option value="">Choose field…</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`ff-src:${field.name}`} value={field.name}>{field.label || field.name}</option>)}</optgroup> : null}{formulaRefs.length ? <optgroup label="Formula Fields">{formulaRefs.map((field) => <option key={`ff-formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>
+    <label>Reference field<select value={referenceSelection} onChange={(e) => setReferenceSelection(e.target.value)}><option value="">Choose field…</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`ff-src:${field.name}`} value={`source:${field.name}`}>{field.label || field.name}</option>)}</optgroup> : null}{formulaRefs.length ? <optgroup label="Formula Fields">{formulaRefs.map((field) => <option key={`ff-formula:${field.name}`} value={`formula:${field.name}`}>{field.label}</option>)}</optgroup> : null}</select></label>
+    <div className="formula-reference-actions"><button type="button" className="secondary compact" disabled={!selectedReferenceName} onClick={insertSelectedRef}>Insert field</button><div className="formula-aggregate-picker"><select value={aggregateFunction} onChange={(e) => setAggregateFunction(e.target.value as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX')}><option value="SUM">SUM</option><option value="COUNT">COUNT</option><option value="AVG">AVG</option><option value="MIN">MIN</option><option value="MAX">MAX</option></select><button type="button" className="secondary compact" disabled={!selectedSourceField} title={selectedFormulaField ? 'Aggregate functions use imported source fields, not Formula Fields.' : undefined} onClick={insertSelectedAggregate}>Insert aggregate</button></div></div>
+    {selectedFormulaField ? <p className="table-cell-help">Formula Fields can be inserted as references. Aggregate functions operate on imported source fields, so choose an Imported Field to enable Insert aggregate.</p> : null}
     <div className="binding-value"><small>Preview</small><strong>{preview == null ? 'Enter a valid formula' : displayValue(preview)}</strong></div>
-    <p className="table-cell-help">Supported now: +, −, ×, ÷ and parentheses. Fields with spaces are inserted automatically as [Field Name].</p>
+    <p className="table-cell-help"><b>Aggregates:</b> SUM, COUNT, AVG, MIN, MAX. They run over rows for the active Parent / Document ID; if no parent key exists, they use all rows in the active source. Arithmetic +, −, ×, ÷ and parentheses can be mixed with aggregates.</p>
   </section>;
 }
 
@@ -1394,10 +1551,10 @@ function formulaFieldReference(fieldName: string) {
   return /^[A-Za-z_$][A-Za-z0-9_.$]*$/.test(fieldName) ? fieldName : `[${fieldName}]`;
 }
 
-function FormulaFieldPicker({ source, table, currentColumnId, onInsert }: { source: BuilderDataState['sources'][number] | null; table?: TableDefinition; currentColumnId?: string; onInsert: (fieldRef: string) => void }) {
+function FormulaFieldPicker({ source, globalFormulaFields = [], table, currentColumnId, onInsert }: { source: BuilderDataState['sources'][number] | null; globalFormulaFields?: TemplateTokenField[]; table?: TableDefinition; currentColumnId?: string; onInsert: (fieldRef: string) => void }) {
   const [selectedField, setSelectedField] = useState('');
   const formulaColumns = table ? formulaColumnReferences(table, currentColumnId) : [];
-  if (!source && formulaColumns.length === 0) return <p className="table-cell-help">Load/select a Data Source or create another formula column to insert references.</p>;
+  if (!source && formulaColumns.length === 0 && globalFormulaFields.length === 0) return <p className="table-cell-help">Load/select a Data Source or create a Formula Field / formula column to insert references.</p>;
   return <label className="formula-field-picker">Insert field
     <select value={selectedField} onChange={(e) => {
       const value = e.target.value;
@@ -1407,12 +1564,14 @@ function FormulaFieldPicker({ source, table, currentColumnId, onInsert }: { sour
         const match = formulaColumns.find((column) => column.columnId === value.slice(8));
         if (match) onInsert(match.reference);
       }
+      if (value.startsWith('global:')) onInsert(formulaFieldReference(value.slice(7)));
       setSelectedField('');
     }}>
       <option value="">Select field or formula column…</option>
       {source && <optgroup label={`Imported Fields — ${source.name}`}>
         {source.fields.map((field) => <option key={`source:${field.name}`} value={`source:${field.name}`}>{field.label || field.name} ({field.type})</option>)}
       </optgroup>}
+      {globalFormulaFields.length > 0 && <optgroup label="Global Formula Fields">{globalFormulaFields.map((field) => <option key={`global:${field.name}`} value={`global:${field.name}`}>{field.label || field.name}</option>)}</optgroup>}
       {formulaColumns.length > 0 && <optgroup label="Formula Columns">
         {formulaColumns.map((column) => <option key={`formula:${column.columnId}`} value={`formula:${column.columnId}`}>{column.label} ({column.dataType})</option>)}
       </optgroup>}
@@ -1421,14 +1580,16 @@ function FormulaFieldPicker({ source, table, currentColumnId, onInsert }: { sour
   </label>;
 }
 
-function TableCellBindingPicker({ source, value, onChange }: { source: BuilderDataState['sources'][number] | null; value?: string; onChange: (value?: string) => void }) {
-  return <label>Field binding<select disabled={!source} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)}>
-    <option value="">{source ? 'No binding / use custom value' : 'Import/select a Data Source first'}</option>
-    {source?.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.type})</option>)}
+function TableCellBindingPicker({ source, formulaFields, value, onChange }: { source: BuilderDataState['sources'][number] | null; formulaFields: TemplateTokenField[]; value?: string; onChange: (value?: string) => void }) {
+  const hasOptions = Boolean(source?.fields.length || formulaFields.length);
+  return <label>Field binding<select disabled={!hasOptions} value={value ?? ''} onChange={(e) => onChange(e.target.value || undefined)}>
+    <option value="">{hasOptions ? 'No binding / use custom value' : 'Import a Data Source or create a Formula Field first'}</option>
+    {source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`tbl-src:${field.name}`} value={field.name}>{field.label || field.name} ({field.type})</option>)}</optgroup> : null}
+    {formulaFields.length ? <optgroup label="Formula Fields">{formulaFields.map((field) => <option key={`tbl-formula:${field.name}`} value={field.name}>{field.label || field.name}</option>)}</optgroup> : null}
   </select></label>;
 }
 
-function TableCellImageProperties({ cell, source, onPatch }: { cell: NonNullable<ReturnType<typeof findTableCell>>; source: BuilderDataState['sources'][number] | null; onPatch: (patch: Parameters<typeof updateTableCell>[2]) => void }) {
+function TableCellImageProperties({ cell, source, formulaFields, onPatch }: { cell: NonNullable<ReturnType<typeof findTableCell>>; source: BuilderDataState['sources'][number] | null; formulaFields: TemplateTokenField[]; onPatch: (patch: Parameters<typeof updateTableCell>[2]) => void }) {
   const inputRef = useRef<HTMLInputElement | null>(null);
   const [message, setMessage] = useState('');
 
@@ -1451,7 +1612,7 @@ function TableCellImageProperties({ cell, source, onPatch }: { cell: NonNullable
   }
 
   return <div className="table-cell-media-editor">
-    <TableCellBindingPicker source={source} value={cell.binding} onChange={(binding) => onPatch({ binding })}/>
+    <TableCellBindingPicker source={source} formulaFields={formulaFields} value={cell.binding} onChange={(binding) => onPatch({ binding })}/>
     <div className="table-cell-help">Field binding can contain an image URL or data:image Base64 value. Binding overrides the manual image.</div>
     <input ref={inputRef} className="hidden-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onChange={upload}/>
     <div className="image-action-row">

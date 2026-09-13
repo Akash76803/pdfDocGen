@@ -29,3 +29,7 @@ Thumbs.db
 # Rust / Tauri output
 apps/desktop/src-tauri/target/
 
+# Temporary measure/fix backup folders
+db4b_fix3_measure/
+
+

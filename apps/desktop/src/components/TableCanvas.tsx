@@ -6,13 +6,14 @@ import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
 import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, smartColumnWidths, paginateDynamicTable, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
 import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.ts';
 
-export function TableCanvas({ table, record, source, documentSource, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
+export function TableCanvas({ table, record, source, documentSource, globalFormulaValues = {}, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; globalFormulaValues?: Record<string, unknown>; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => (onSelectionChange ?? onChange)({ ...table, selectedCellId: cellId });
   const runtime = dynamicRows(table, record, source, documentSource);
   const columnWidths = smartColumnWidths(table, runtime.map((row) => row.value));
-  const summaryResults = table.mode === 'dynamic' ? evaluateTableSummaryRows(table, runtime.map((row) => row.value)) : { byCellId: {}, byName: {} };
+  const summaryResults = table.mode === 'dynamic' ? evaluateTableSummaryRows(table, runtime.map((row) => row.value), globalFormulaValues) : { byCellId: {}, byName: {} };
   const paginationPages = table.mode === 'dynamic' ? paginateDynamicTable(table, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
   const renderedPages = fragmentIndex === undefined ? paginationPages : paginationPages.filter((page) => page.index === fragmentIndex);
+  const shellRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
   // Height publication must not be coupled to the callback identity. TemplateBuilder
   // recreates its callback during render, so keeping `onHeightChange` in the effect
@@ -24,20 +25,35 @@ export function TableCanvas({ table, record, source, documentSource, availableHe
   const lastPublishedHeightRef = useRef<number | null>(null);
   useEffect(() => { onHeightChangeRef.current = onHeightChange; }, [onHeightChange]);
 
+  const tableStructureKey = `${table.id}:${table.mode}:${table.columns.length}:${table.headerRows.length}:${table.bodyRows.length}:${table.customRows.length}:${table.rows.length}:${runtime.length}`;
+
   useLayoutEffect(() => {
+    const shell = shellRef.current;
     const node = tableRef.current;
-    if (!node || !onHeightChangeRef.current) return;
+    if (!shell || !node || !onHeightChangeRef.current) return;
+    let frame = 0;
     const publish = () => {
-      const next = Math.max(32, Math.ceil(node.offsetHeight));
-      if (lastPublishedHeightRef.current !== null && Math.abs(next - lastPublishedHeightRef.current) < 1) return;
-      lastPublishedHeightRef.current = next;
-      onHeightChangeRef.current?.(next);
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        // Measure the real rendered content, not the logical canvas element height.
+        // scrollHeight is important when a newly-added Custom Table row temporarily
+        // overflows its old wrapper before Body Flow receives the new height.
+        const next = Math.max(32, Math.ceil(Math.max(
+          shell.scrollHeight,
+          node.scrollHeight,
+          node.getBoundingClientRect().height,
+        )));
+        if (lastPublishedHeightRef.current !== null && Math.abs(next - lastPublishedHeightRef.current) < 1) return;
+        lastPublishedHeightRef.current = next;
+        onHeightChangeRef.current?.(next);
+      });
     };
     publish();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
+    observer?.observe(shell);
     observer?.observe(node);
-    return () => observer?.disconnect();
-  }, [table.id, table.mode, table.columns.length, table.headerRows.length, table.bodyRows.length, table.customRows.length, table.rows.length, runtime.length]);
+    return () => { cancelAnimationFrame(frame); observer?.disconnect(); };
+  }, [tableStructureKey]);
 
   const startColumnResize = (event: ReactPointerEvent<HTMLSpanElement>, columnIndex: number) => {
     if (columnIndex < 0 || columnIndex >= table.columns.length - 1) return;
@@ -80,7 +96,7 @@ export function TableCanvas({ table, record, source, documentSource, availableHe
     window.addEventListener('pointercancel', onUp, { once: true });
   };
 
-  return <div className="db-table-shell" style={{ '--table-border': table.borderColor, '--table-border-width': `${table.borderWidth}px` } as CSSProperties}>
+  return <div ref={shellRef} className="db-table-shell" style={{ '--table-border': table.borderColor, '--table-border-width': `${table.borderWidth}px`, '--table-border-style': table.borderStyle ?? 'solid' } as CSSProperties}>
     {table.mode === 'dynamic' && paginationPages.length > 1 && !virtualPageMode ? <div className="db-pagination-status">{paginationPages.length} pages · automatic overflow</div> : null}
     {(table.mode === 'dynamic' ? renderedPages : [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }]).map((page, renderedIndex) => { const pageIndex = page.index; return <div className="db-table-page-fragment" key={`fragment-${page.index}`}>
     {pageIndex === 0 && table.selectedCellId && table.columns.length > 1 && <div className="db-column-ruler" aria-label="Column resize ruler">
@@ -92,33 +108,51 @@ export function TableCanvas({ table, record, source, documentSource, availableHe
     {!virtualPageMode && renderedIndex > 0 && <div className="db-page-break-marker"><span>Page break</span><small>Continuation {pageIndex + 1}</small></div>}
     <table ref={pageIndex === 0 ? tableRef : undefined} className="db-table">
       {table.columns.length > 0 && <colgroup>{table.columns.map((column, index) => <col key={column.id} style={{ width: `${columnWidths[index] ?? (100 / table.columns.length)}%` }}/>)}</colgroup>}
-      {table.headerRows.length > 0 && page.includeHeader && <thead>{table.headerRows.filter((row) => pageIndex === 0 || !table.pagination.repeatHeader || row.repeatOnEveryPage !== false).map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}</thead>}
+      {table.headerRows.length > 0 && page.includeHeader && <thead>{table.headerRows.filter((row) => pageIndex === 0 || !table.pagination.repeatHeader || row.repeatOnEveryPage !== false).map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}</thead>}
       <tbody>
-        {table.mode === 'custom' && table.rows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} onSelect={selectCell}/>) }
+        {table.mode === 'custom' && table.rows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} onSelect={selectCell}/>) }
         {table.mode === 'dynamic' && runtime.length === 0 && <tr><td className="db-table-empty" colSpan={Math.max(1, table.columns.length)}>{table.binding?.parentKey || table.binding?.parentKeys?.length ? <>No rows match the selected document ID in <b>{table.binding?.repeatSource || 'source'}</b></> : <>No line items for <b>{table.binding?.repeatSource || 'items'}</b></>}</td></tr>}
-        {table.mode === 'dynamic' && page.runtimeRows.flatMap((runtimeRow) => { const formulaResults = evaluateTableFormulaColumns(table, runtimeRow.value); return table.bodyRows.map((template) => <RenderRow key={`${runtimeRow.key}:${template.id}`} row={template} table={table} runtimeValue={runtimeRow.value} formulaResults={formulaResults} onSelect={selectCell}/>); })}
-        {table.mode === 'dynamic' && page.includeSummary && table.customRows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} summaryResults={summaryResults.byCellId} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}
+        {table.mode === 'dynamic' && page.runtimeRows.flatMap((runtimeRow) => { const formulaContext = mergeTableFormulaContext(runtimeRow.value, globalFormulaValues); const formulaResults = evaluateTableFormulaColumns(table, formulaContext); return table.bodyRows.map((template) => <RenderRow key={`${runtimeRow.key}:${template.id}`} row={template} table={table} runtimeValue={runtimeRow.value} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} onSelect={selectCell}/>); })}
+        {table.mode === 'dynamic' && page.includeSummary && table.customRows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} summaryResults={summaryResults.byCellId} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}
       </tbody>
     </table>
     </div>})}
   </div>;
 }
 
-function RenderRow({ row, table, runtimeValue, formulaResults, summaryResults, onSelect, onResizeColumn }: { row: TableRow; table: TableDefinition; runtimeValue?: unknown; formulaResults?: Record<string, number | null>; summaryResults?: Record<string, unknown>; onSelect: (cellId: string) => void; onResizeColumn?: (event: ReactPointerEvent<HTMLSpanElement>, columnIndex: number) => void }) {
+function globalFormulaValue(values: Record<string, unknown>, field: string) {
+  if (Object.prototype.hasOwnProperty.call(values, field)) return values[field];
+  const key = Object.keys(values).find((name) => name.toLocaleLowerCase() === field.trim().toLocaleLowerCase());
+  return key ? values[key] : undefined;
+}
+
+function tableFieldValue(runtimeValue: unknown, globalFormulaValues: Record<string, unknown>, field: string) {
+  const local = valueAtPath(runtimeValue, field);
+  return local !== undefined ? local : globalFormulaValue(globalFormulaValues, field);
+}
+
+function mergeTableFormulaContext(runtimeValue: unknown, globalFormulaValues: Record<string, unknown>): Record<string, unknown> {
+  const local = runtimeValue && typeof runtimeValue === 'object' ? runtimeValue as Record<string, unknown> : {};
+  // Row/source fields intentionally win on exact-name collisions. Formula names should
+  // normally be unique, while this preserves existing Dynamic Table semantics.
+  return { ...globalFormulaValues, ...local };
+}
+
+function RenderRow({ row, table, runtimeValue, globalFormulaValues, formulaResults, summaryResults, onSelect, onResizeColumn }: { row: TableRow; table: TableDefinition; runtimeValue?: unknown; globalFormulaValues: Record<string, unknown>; formulaResults?: Record<string, number | null>; summaryResults?: Record<string, unknown>; onSelect: (cellId: string) => void; onResizeColumn?: (event: ReactPointerEvent<HTMLSpanElement>, columnIndex: number) => void }) {
   let visualColumn = 0;
   return <tr style={{ height: row.autoHeight ? undefined : row.height }}>{row.cells.map((cell) => {
     const column = table.columns[visualColumn];
     visualColumn += Math.max(1, cell.colSpan);
     const startColumn = visualColumn - Math.max(1, cell.colSpan);
     const endColumn = visualColumn - 1;
-    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={`${table.selectedCellId === cell.id ? 'selected-db-cell' : ''}${row.kind === 'header' ? ' db-table-header-cell' : ''}`} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} table={table} runtimeValue={runtimeValue} formulaResults={formulaResults} summaryValue={summaryResults?.[cell.id]}/>{row.kind === 'header' && cell.colSpan === 1 && endColumn < table.columns.length - 1 && onResizeColumn && <span className="db-column-resize-handle" title="Drag to resize this column" onPointerDown={(e) => onResizeColumn(e, startColumn)} aria-hidden="true"/>}</td>;
+    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={`${table.selectedCellId === cell.id ? 'selected-db-cell' : ''}${row.kind === 'header' ? ' db-table-header-cell' : ''}`} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} table={table} runtimeValue={runtimeValue} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} summaryValue={summaryResults?.[cell.id]}/>{row.kind === 'header' && cell.colSpan === 1 && endColumn < table.columns.length - 1 && onResizeColumn && <span className="db-column-resize-handle" title="Drag to resize this column" onPointerDown={(e) => onResizeColumn(e, startColumn)} aria-hidden="true"/>}</td>;
   })}</tr>;
 }
 
-function CellValue({ cell, column, table, runtimeValue, formulaResults, summaryValue }: { cell: TableCell; column?: TableColumn; table: TableDefinition; runtimeValue?: unknown; formulaResults?: Record<string, number | null>; summaryValue?: unknown }) {
+function CellValue({ cell, column, table, runtimeValue, globalFormulaValues, formulaResults, summaryValue }: { cell: TableCell; column?: TableColumn; table: TableDefinition; runtimeValue?: unknown; globalFormulaValues: Record<string, unknown>; formulaResults?: Record<string, number | null>; summaryValue?: unknown }) {
   const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
   const useMixedTemplate = templateHasTokens(cell.content);
-  const boundRaw = cell.binding ? valueAtPath(runtimeValue, cell.binding) : undefined;
+  const boundRaw = cell.binding ? tableFieldValue(runtimeValue, globalFormulaValues, cell.binding) : undefined;
   const percentageFields: Record<string, { inputMode?: 'fraction' | 'whole' }> = {};
   const designRows = table.mode === 'dynamic' ? table.bodyRows : table.rows;
   for (const designRow of designRows) {
@@ -133,7 +167,8 @@ function CellValue({ cell, column, table, runtimeValue, formulaResults, summaryV
       }
     }
   }
-  const raw = cell.summaryMode === 'aggregate' || cell.summaryMode === 'formula' ? summaryValue : mode === 'formula' ? (column && formulaResults && Object.prototype.hasOwnProperty.call(formulaResults, column.id) ? formulaResults[column.id] : evaluateTableFormula(cell.formula, runtimeValue, { percentageFields })) : mode === 'binding' && !useMixedTemplate ? boundRaw : resolveTemplateTokens(cell.content, (field) => valueAtPath(runtimeValue, field), { preserveUnknown: runtimeValue == null });
+  const formulaContext = mergeTableFormulaContext(runtimeValue, globalFormulaValues);
+  const raw = cell.summaryMode === 'aggregate' || cell.summaryMode === 'formula' ? summaryValue : mode === 'formula' ? (column && formulaResults && Object.prototype.hasOwnProperty.call(formulaResults, column.id) ? formulaResults[column.id] : evaluateTableFormula(cell.formula, formulaContext, { percentageFields })) : mode === 'binding' && !useMixedTemplate ? boundRaw : resolveTemplateTokens(cell.content, (field) => tableFieldValue(runtimeValue, globalFormulaValues, field), { preserveUnknown: runtimeValue == null });
   const dataType = cell.dataType ?? column?.dataType ?? 'text';
   const format = { ...(column?.format ?? {}), ...(cell.format ?? {}) };
   const value = formatTableValue(raw, dataType, format);

@@ -107,6 +107,8 @@ export type TableColumn = {
   manualWidth?: boolean;
 };
 
+export type TableBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
+
 export type TableDefinition = {
   id: string;
   name: string;
@@ -138,6 +140,7 @@ export type TableDefinition = {
   };
   borderWidth: number;
   borderColor: string;
+  borderStyle?: TableBorderStyle;
   defaultPadding: number;
   selectedCellId?: string;
 };
@@ -181,7 +184,7 @@ export function createCustomTable(columnCount: number, rowCount: number): TableD
     id: crypto.randomUUID(), name: 'Custom Table', mode: 'custom', columns,
     headerRows: [], bodyRows: [], customRows: [], rows,
     pagination: { enabled: true, repeatHeader: false, allowRowSplit: false, keepRowsTogether: true, keepSummaryTogether: true },
-    borderWidth: 1, borderColor: '#cfd6df', defaultPadding: 5,
+    borderWidth: 1, borderColor: '#cfd6df', borderStyle: 'solid', defaultPadding: 5,
   };
 }
 
@@ -220,7 +223,7 @@ export function createDynamicTable(columnCount: number, repeatSource: string, he
       childForeignKey: binding?.childForeignKey,
     },
     pagination: { enabled: true, repeatHeader: true, allowRowSplit: false, keepRowsTogether: true, keepSummaryTogether: true },
-    borderWidth: 1, borderColor: '#cfd6df', defaultPadding: 5,
+    borderWidth: 1, borderColor: '#cfd6df', borderStyle: 'solid', defaultPadding: 5,
   };
 }
 
@@ -335,6 +338,7 @@ export function reconfigureGroupedSummaryTable(
     pagination: { ...existing.pagination },
     borderWidth: existing.borderWidth,
     borderColor: existing.borderColor,
+    borderStyle: existing.borderStyle ?? 'solid',
     defaultPadding: existing.defaultPadding,
     selectedCellId: existing.selectedCellId,
   };
@@ -1155,7 +1159,7 @@ function replaceAggregateCalls(expression: string, rows: Array<Record<string, un
  * values, so SUM([Net Value]) and similar aggregates work naturally. Summary rows resolve
  * top-to-bottom, exposing named results to later rows (e.g. [Subtotal] + [Tax Amount]).
  */
-export function evaluateTableSummaryRows(table: TableDefinition, runtimeRecords: unknown[]): TableSummaryResult {
+export function evaluateTableSummaryRows(table: TableDefinition, runtimeRecords: unknown[], scalarContext: Record<string, unknown> = {}): TableSummaryResult {
   const rows = runtimeRecords.map((record) => formulaColumnContext(table, record));
   const byCellId: Record<string, unknown> = {};
   const byName: Record<string, number> = {};
@@ -1175,7 +1179,7 @@ export function evaluateTableSummaryRows(table: TableDefinition, runtimeRecords:
       }
       if (mode === 'formula') {
         const expression = replaceAggregateCalls(cell.summaryFormula ?? '', rows);
-        const value = evaluateTableFormula(expression, byName);
+        const value = evaluateTableFormula(expression, { ...scalarContext, ...byName });
         byCellId[cell.id] = value;
         const name = cell.summaryName?.trim();
         if (name && value != null) byName[name] = value;

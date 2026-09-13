@@ -233,3 +233,16 @@ Grouped Summary Create/Edit now exposes explicit Move Left / Move Right controls
 - Imported fields and other Formula Fields can be inserted into a formula; chained formulas resolve in bounded passes and circular/unresolved references stay blank.
 - Formula Fields are stored with the template, participate in undo/redo, and do not consume Body Flow space or render on output by themselves.
 
+
+### DB-4F Fix1 — Aggregate Functions
+
+Global Formula Fields now support `SUM`, `COUNT`, `AVG`, `MIN`, and `MAX` over imported data rows. When the active source is used by a Dynamic Table with Parent / Document ID keys, aggregates are restricted to the currently previewed document; otherwise the whole active source is used. The Formula Field inspector includes an **Insert aggregate** control that inserts safe expressions such as `SUM([Taxable Value])`.
+
+Examples:
+- `SUM([Taxable])`
+- `COUNT([Product])`
+- `COUNT()`
+- `AVG([Rate])`
+- `MIN([Amount])`
+- `MAX([Amount])`
+- `SUM([CGST]) + SUM([SGST]) + SUM([IGST])`
