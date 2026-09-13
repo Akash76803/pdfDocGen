@@ -529,4 +529,30 @@ describe('DB-4G grouped summary table', () => {
     expect(updated.binding?.grouping?.columns[2].operation).toBe('formula');
   });
 
+  it('preserves logical Grouped Summary column widths and styles when edit reorders columns', () => {
+    const original = createGroupedSummaryTable('S', ['HSN'], [
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum' },
+      { label: 'Total GST', field: '', operation: 'formula', formula: '[Taxable] * 0.18' },
+    ], { sourceId: 's', parentKey: 'Doc', parentKeys: ['Doc'] });
+    original.columns[0].width = 111;
+    original.columns[1].width = 222;
+    original.columns[2].width = 333;
+    original.columns.forEach((column) => { column.manualWidth = true; });
+    original.headerRows[0].cells[0].style.background = '#111111';
+    original.headerRows[0].cells[1].style.background = '#222222';
+    original.headerRows[0].cells[2].style.background = '#333333';
+
+    const updated = reconfigureGroupedSummaryTable(original, 'S', ['HSN'], [
+      { label: 'Total GST', field: '', operation: 'formula', formula: '[Taxable] * 0.18' },
+      { label: 'HSN', field: 'HSN', operation: 'group' },
+      { label: 'Taxable', field: 'Taxable', operation: 'sum' },
+    ], { sourceId: 's', parentKey: 'Doc', parentKeys: ['Doc'] });
+
+    expect(updated.binding?.grouping?.columns.map((column) => column.label)).toEqual(['Total GST', 'HSN', 'Taxable']);
+    expect(updated.columns.map((column) => column.width)).toEqual([333, 111, 222]);
+    expect(updated.columns.every((column) => column.manualWidth)).toBe(true);
+    expect(updated.headerRows[0].cells.map((cell) => cell.style.background)).toEqual(['#333333', '#111111', '#222222']);
+  });
+
 });

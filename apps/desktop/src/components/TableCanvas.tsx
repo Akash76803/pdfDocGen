@@ -14,22 +14,30 @@ export function TableCanvas({ table, record, source, documentSource, availableHe
   const paginationPages = table.mode === 'dynamic' ? paginateDynamicTable(table, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
   const renderedPages = fragmentIndex === undefined ? paginationPages : paginationPages.filter((page) => page.index === fragmentIndex);
   const tableRef = useRef<HTMLTableElement | null>(null);
+  // Height publication must not be coupled to the callback identity. TemplateBuilder
+  // recreates its callback during render, so keeping `onHeightChange` in the effect
+  // dependency list caused the layout effect to remount, publish the same height,
+  // update parent state, render again and eventually hit React's maximum update depth.
+  // Keep the latest callback in a ref and remember the last published DOM height
+  // across renders.
+  const onHeightChangeRef = useRef(onHeightChange);
+  const lastPublishedHeightRef = useRef<number | null>(null);
+  useEffect(() => { onHeightChangeRef.current = onHeightChange; }, [onHeightChange]);
 
   useLayoutEffect(() => {
     const node = tableRef.current;
-    if (!node || !onHeightChange) return;
-    let last = 0;
+    if (!node || !onHeightChangeRef.current) return;
     const publish = () => {
       const next = Math.max(32, Math.ceil(node.offsetHeight));
-      if (Math.abs(next - last) < 1) return;
-      last = next;
-      onHeightChange(next);
+      if (lastPublishedHeightRef.current !== null && Math.abs(next - lastPublishedHeightRef.current) < 1) return;
+      lastPublishedHeightRef.current = next;
+      onHeightChangeRef.current?.(next);
     };
     publish();
     const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(publish);
     observer?.observe(node);
     return () => observer?.disconnect();
-  }, [onHeightChange, table.id, table.mode, table.columns.length, table.headerRows.length, table.bodyRows.length, table.customRows.length, table.rows.length, runtime.length]);
+  }, [table.id, table.mode, table.columns.length, table.headerRows.length, table.bodyRows.length, table.customRows.length, table.rows.length, runtime.length]);
 
   const startColumnResize = (event: ReactPointerEvent<HTMLSpanElement>, columnIndex: number) => {
     if (columnIndex < 0 || columnIndex >= table.columns.length - 1) return;

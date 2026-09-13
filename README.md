@@ -221,3 +221,15 @@ The Table creation dialog now includes **Grouped Summary** for imported-data agg
 
 ### DB-4G Fix1 — Grouped Formula + Unified Create/Edit
 Grouped Summary tables can now calculate output columns after aggregation (for example `Total GST = [CGST] + [SGST] + [IGST]` and `Total = [Taxable] + [Total GST]`). Existing grouped tables can be reopened from Properties using the same configuration UI as Create, with their current grouping/mappings/formulas prefilled.
+
+### DB-4G Fix3 — Grouped Summary column ordering
+Grouped Summary Create/Edit now exposes explicit Move Left / Move Right controls for output columns. Column order persists after Apply/save/reload, Final Summary settings move with their corresponding columns, and widths/formatting are preserved by logical column identity during reconfiguration.
+
+## DB-4F — Global Formula Field
+
+- Added a lightweight **Formula Field** item in the Builder Elements panel.
+- A Formula Field is a non-printing reusable document variable: give it a name and arithmetic formula, then reuse it from **Dynamic Field** anywhere in the template.
+- Formula editor keeps the UI intentionally small: **Field name → Formula → Insert field → Preview**.
+- Imported fields and other Formula Fields can be inserted into a formula; chained formulas resolve in bounded passes and circular/unresolved references stay blank.
+- Formula Fields are stored with the template, participate in undo/redo, and do not consume Body Flow space or render on output by themselves.
+

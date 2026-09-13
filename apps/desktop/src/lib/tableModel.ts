@@ -277,8 +277,23 @@ export function reconfigureGroupedSummaryTable(
   binding?: { sourceId?: string; parentKey?: string; parentKeys?: string[] },
 ): TableDefinition {
   const next = createGroupedSummaryTable(repeatSource, groupBy, mappings, binding);
+  const oldMappings = existing.binding?.grouping?.columns ?? [];
+  const mappingIdentity = (mapping: GroupedColumnMapping) => [mapping.label.trim(), mapping.field, mapping.operation, mapping.formula?.trim() ?? ''].join('::');
+  const usedOldIndexes = new Set<number>();
+  const sourceIndexByNextIndex = mappings.map((mapping, nextIndex) => {
+    const identity = mappingIdentity(mapping);
+    const exactIndex = oldMappings.findIndex((oldMapping, oldIndex) => !usedOldIndexes.has(oldIndex) && mappingIdentity(oldMapping) === identity);
+    if (exactIndex >= 0) {
+      usedOldIndexes.add(exactIndex);
+      return exactIndex;
+    }
+    const fallbackIndex = !usedOldIndexes.has(nextIndex) && existing.columns[nextIndex] ? nextIndex : -1;
+    if (fallbackIndex >= 0) usedOldIndexes.add(fallbackIndex);
+    return fallbackIndex;
+  });
   const columns = next.columns.map((column, index) => {
-    const old = existing.columns[index];
+    const oldIndex = sourceIndexByNextIndex[index];
+    const old = oldIndex >= 0 ? existing.columns[oldIndex] : undefined;
     if (!old) return column;
     return {
       ...column,
@@ -295,7 +310,8 @@ export function reconfigureGroupedSummaryTable(
     ...row,
     id: existing.headerRows[rowIndex]?.id ?? row.id,
     cells: row.cells.map((cell, index) => {
-      const old = existing.headerRows[rowIndex]?.cells[index];
+      const oldIndex = sourceIndexByNextIndex[index];
+      const old = oldIndex >= 0 ? existing.headerRows[rowIndex]?.cells[oldIndex] : undefined;
       return old ? { ...cell, id: old.id, style: { ...old.style }, rowSpan: old.rowSpan, colSpan: old.colSpan } : cell;
     }),
   }));
@@ -303,7 +319,8 @@ export function reconfigureGroupedSummaryTable(
     ...row,
     id: existing.bodyRows[rowIndex]?.id ?? row.id,
     cells: row.cells.map((cell, index) => {
-      const old = existing.bodyRows[rowIndex]?.cells[index];
+      const oldIndex = sourceIndexByNextIndex[index];
+      const old = oldIndex >= 0 ? existing.bodyRows[rowIndex]?.cells[oldIndex] : undefined;
       return old ? { ...cell, id: old.id, style: { ...old.style }, rowSpan: old.rowSpan, colSpan: old.colSpan, format: old.format } : cell;
     }),
   }));

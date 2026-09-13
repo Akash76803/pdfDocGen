@@ -391,3 +391,31 @@ This scope supersedes today's experimental Body placement patches (DB-4H Fix6/Fi
 - Final totals calculate over grouped output rows (not raw line items).
 - Summary renders once on final page, Keep Summary Together, Footer hard boundary aware.
 - Next: DB4G-F2-T01..T06 manual QA, then finish DB-4.4 Phase 3 stabilization.
+
+
+## DB-UX Fix1 — Global Searchable Preview Document Picker (2026-09-13)
+- Status: IMPLEMENTED / QA PENDING
+- Moved Preview document/record selection from Dynamic Field inspector to the global top builder toolbar.
+- Added searchable dropdown with lazy filtering; document labels continue to use single/composite Parent/Document ID values.
+- Preview selection is shared across the entire builder and resets preview focus to output page 1.
+- Dynamic Field inspector now contains binding/token controls only.
+
+## DB-4G Fix3 — Grouped Summary Column Order (2026-09-13)
+- Status: Implemented / manual QA pending.
+- Added Move Left / Move Right controls to Grouped Summary output columns in the shared Create/Edit configuration UI.
+- Reordering also moves the matching Final Summary Row configuration.
+- Reconfigure now preserves visual column settings by logical grouped-column identity rather than raw array index, preventing widths/formatting from jumping to another column after edits.
+- Added safe valid-column/summary alignment when incomplete draft mappings exist.
+
+## DB-4.4 Phase 3 Fix5 — Dynamic Table Fragment Height / Hitbox (2026-09-13)
+- Status: Implemented / manual QA pending.
+- Fix: paginated Dynamic Table canvas wrapper now uses the current materialized fragment `usedHeightPx`, not the logical/persisted table height.
+- Result: selecting a short continuation/final table fragment no longer creates a large white overlay that hides correctly-positioned blocks below it.
+- Layout/flow positions are intentionally unchanged; this is a page-local visual hitbox/selection fix.
+
+## DB-4.4 Phase 3 Fix6 — Table Height Update Loop Guard (2026-09-13)
+- Fixed React `Maximum update depth exceeded` caused by table height measurement feeding persistent layout state on every render.
+- `TableCanvas` now deduplicates DOM height publications across renders and decouples its measurement effect from callback identity.
+- Paginated virtual Dynamic Table fragments no longer publish page-local height into the logical Builder element; pagination materialization remains the source of truth for fragment height.
+- Fix5 continuation-page fragment hitbox behavior is preserved.
+- Manual QA: paginated table selection, fragment visibility, single-page/custom table auto-height, pagination stability.

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Plus, Table2, Trash2, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Plus, Table2, Trash2, X } from 'lucide-react';
 import type { BuilderDataSource } from '../lib/dataSourceStore.ts';
 import {
   createCustomTable,
@@ -78,7 +78,7 @@ const GROUP_OPERATIONS: Array<{ value: GroupedAggregateOperation; label: string 
   { value: 'formula', label: 'FORMULA' },
 ];
 
-function GroupedColumnFields({ source, mappings, onChange }: { source: BuilderDataSource; mappings: GroupedColumnMapping[]; onChange: (mappings: GroupedColumnMapping[]) => void }) {
+function GroupedColumnFields({ source, mappings, onChange, onMove }: { source: BuilderDataSource; mappings: GroupedColumnMapping[]; onChange: (mappings: GroupedColumnMapping[]) => void; onMove: (from: number, to: number) => void }) {
   const safe = mappings.length ? mappings : [{ label: '', field: '', operation: 'sum' as GroupedAggregateOperation }];
   const update = (index: number, patch: Partial<GroupedColumnMapping>) => onChange(safe.map((item, i) => i === index ? { ...item, ...patch } : item));
   const insertFormulaRef = (index: number, label: string) => {
@@ -90,7 +90,11 @@ function GroupedColumnFields({ source, mappings, onChange }: { source: BuilderDa
     <div className="table-key-title"><strong>Grouped output columns</strong><button type="button" className="secondary compact" onClick={() => onChange([...safe, { label: '', field: '', operation: 'sum' }])}><Plus size={13}/>Add column</button></div>
     <small>Aggregate columns resolve first. Formula columns can reference grouped output labels such as [Taxable] + [Total GST].</small>
     {safe.map((mapping, index) => <div className="grouped-column-row" key={`grouped-column-${index}`}>
-      <div className="dynamic-column-index">{index + 1}</div>
+      <div className="grouped-column-order">
+        <span className="dynamic-column-index">{index + 1}</span>
+        <button type="button" className="icon-btn compact" aria-label={`Move ${mapping.label || `column ${index + 1}`} left`} title="Move column left" disabled={index === 0} onClick={() => onMove(index, index - 1)}><ArrowLeft size={13}/></button>
+        <button type="button" className="icon-btn compact" aria-label={`Move ${mapping.label || `column ${index + 1}`} right`} title="Move column right" disabled={index === safe.length - 1} onClick={() => onMove(index, index + 1)}><ArrowRight size={13}/></button>
+      </div>
       <label>Header label
         <input value={mapping.label} placeholder={mapping.operation === 'group' ? 'e.g. HSN' : mapping.operation === 'formula' ? 'e.g. Total GST' : 'e.g. Taxable'} onChange={(e) => update(index, { label: e.target.value })}/>
       </label>
@@ -221,10 +225,15 @@ export function TableCreateModal({ sources, activeSourceId, initialTable, onCanc
     if (!source || validParentKeys.length === 0) return;
     if (mode === 'grouped') {
       if (validGroupBy.length === 0 || validGroupedColumns.length === 0) return;
+      const validEntries = groupedColumns
+        .map((mapping, index) => ({ mapping, index }))
+        .filter(({ mapping }) => mapping.operation && (mapping.operation === 'formula' ? mapping.formula?.trim() : mapping.field));
+      const orderedMappings = validEntries.map(({ mapping }) => mapping);
       const configured = initialTable
-        ? reconfigureGroupedSummaryTable(initialTable, source.name, validGroupBy, validGroupedColumns, { sourceId: source.id, parentKey: validParentKeys[0], parentKeys: validParentKeys })
-        : createGroupedSummaryTable(source.name, validGroupBy, validGroupedColumns, { sourceId: source.id, parentKey: validParentKeys[0], parentKeys: validParentKeys });
-      onCreate(applyGroupedFinalSummary(configured, { ...finalSummary, columns: validGroupedColumns.map((_, index) => finalSummary.columns[index] ?? defaultGroupedFinalSummaryConfig(validGroupedColumns).columns[index]) }));
+        ? reconfigureGroupedSummaryTable(initialTable, source.name, validGroupBy, orderedMappings, { sourceId: source.id, parentKey: validParentKeys[0], parentKeys: validParentKeys })
+        : createGroupedSummaryTable(source.name, validGroupBy, orderedMappings, { sourceId: source.id, parentKey: validParentKeys[0], parentKeys: validParentKeys });
+      const defaults = defaultGroupedFinalSummaryConfig(orderedMappings);
+      onCreate(applyGroupedFinalSummary(configured, { ...finalSummary, columns: validEntries.map(({ index }, outputIndex) => finalSummary.columns[index] ?? defaults.columns[outputIndex]) }));
       return;
     }
     if (validDynamicColumns.length === 0) return;
@@ -277,6 +286,20 @@ export function TableCreateModal({ sources, activeSourceId, initialTable, onCanc
           <GroupedColumnFields source={source} mappings={groupedColumns} onChange={(next) => {
             setGroupedColumns(next);
             setFinalSummary((current) => ({ ...current, columns: next.map((mapping, index) => current.columns[index] ?? defaultGroupedFinalSummaryConfig(next).columns[index] ?? (mapping.operation === 'group' ? { operation: 'blank' } : { operation: 'sum' })) }));
+          }} onMove={(from, to) => {
+            if (to < 0 || to >= groupedColumns.length || from === to) return;
+            setGroupedColumns((current) => {
+              const next = [...current];
+              const [moved] = next.splice(from, 1);
+              next.splice(to, 0, moved);
+              return next;
+            });
+            setFinalSummary((current) => {
+              const next = [...current.columns];
+              const [moved] = next.splice(from, 1);
+              next.splice(to, 0, moved);
+              return { ...current, columns: next };
+            });
           }}/>
           <GroupedFinalSummaryFields mappings={groupedColumns} config={finalSummary} onChange={setFinalSummary}/>
         </>}

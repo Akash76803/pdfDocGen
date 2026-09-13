@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type UIEvent } from 'react';
-import { ChevronDown } from 'lucide-react';
+import { ChevronDown, Search } from 'lucide-react';
 
 const PAGE_SIZE = 50;
 
@@ -15,12 +15,15 @@ type RecordPickerProps = {
   compactLabel?: string;
   disabled?: boolean;
   options?: RecordPickerOption[];
+  searchable?: boolean;
+  searchPlaceholder?: string;
 };
 
 const initialVisibleCount = (count: number) => Math.min(PAGE_SIZE, Math.max(0, count));
 
-export function RecordPicker({ count, value, onChange, compactLabel = 'Record', disabled = false, options }: RecordPickerProps) {
+export function RecordPicker({ count, value, onChange, compactLabel = 'Record', disabled = false, options, searchable = false, searchPlaceholder }: RecordPickerProps) {
   const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
   const [visibleCount, setVisibleCount] = useState(() => initialVisibleCount(count));
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -44,28 +47,36 @@ export function RecordPicker({ count, value, onChange, compactLabel = 'Record', 
     };
   }, [open]);
 
-  const itemCount = options?.length ?? count;
+  const allOptions: RecordPickerOption[] = options
+    ?? Array.from({ length: count }, (_, index) => ({ value: index, label: `Record #${index + 1}` }));
+  const itemCount = allOptions.length;
+  const normalizedQuery = query.trim().toLocaleLowerCase();
+  const filteredOptions = normalizedQuery
+    ? allOptions.filter((option) => option.label.toLocaleLowerCase().includes(normalizedQuery))
+    : allOptions;
 
   useEffect(() => {
-    setVisibleCount(initialVisibleCount(itemCount));
-  }, [itemCount]);
+    setVisibleCount(initialVisibleCount(filteredOptions.length));
+  }, [itemCount, normalizedQuery]);
+
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
 
   const loadNextPage = () => {
-    setVisibleCount((current) => Math.min(itemCount, current + PAGE_SIZE));
+    setVisibleCount((current) => Math.min(filteredOptions.length, current + PAGE_SIZE));
   };
 
   const handleScroll = (event: UIEvent<HTMLDivElement>) => {
     const element = event.currentTarget;
     const remaining = element.scrollHeight - element.scrollTop - element.clientHeight;
-    if (remaining <= 36 && visibleCount < itemCount) loadNextPage();
+    if (remaining <= 36 && visibleCount < filteredOptions.length) loadNextPage();
   };
 
   const fallbackValue = count > 0 ? Math.min(Math.max(0, value), count - 1) : 0;
-  const selectedOption = options?.find((option) => option.value === value) ?? options?.[0];
+  const selectedOption = allOptions.find((option) => option.value === value) ?? allOptions[0];
   const triggerLabel = itemCount === 0 ? 'No records' : selectedOption?.label ?? `${compactLabel} #${fallbackValue + 1}`;
-  const visibleOptions: RecordPickerOption[] = options
-    ? options.slice(0, Math.min(visibleCount, options.length))
-    : Array.from({ length: Math.min(visibleCount, count) }, (_, index) => ({ value: index, label: `Record #${index + 1}` }));
+  const visibleOptions = filteredOptions.slice(0, Math.min(visibleCount, filteredOptions.length));
 
   return (
     <div className="lazy-record-picker" ref={rootRef}>
@@ -82,6 +93,8 @@ export function RecordPicker({ count, value, onChange, compactLabel = 'Record', 
       </button>
       {open && itemCount > 0 && (
         <div className="lazy-record-picker-menu" role="listbox" onScroll={handleScroll}>
+          {searchable ? <div className="lazy-record-search"><Search size={14}/><input autoFocus value={query} placeholder={searchPlaceholder ?? `Search ${compactLabel.toLowerCase()}…`} onChange={(event) => setQuery(event.target.value)} onKeyDown={(event) => event.stopPropagation()}/></div> : null}
+          {visibleOptions.length === 0 ? <div className="lazy-record-empty">No matching {compactLabel.toLowerCase()}s</div> : null}
           {visibleOptions.map((option) => (
             <button
               type="button"
@@ -97,8 +110,8 @@ export function RecordPicker({ count, value, onChange, compactLabel = 'Record', 
               {option.label}
             </button>
           ))}
-          {visibleCount < itemCount && (
-            <div className="lazy-record-load-note">Scroll for next {Math.min(PAGE_SIZE, itemCount - visibleCount)} documents…</div>
+          {visibleCount < filteredOptions.length && (
+            <div className="lazy-record-load-note">Scroll for next {Math.min(PAGE_SIZE, filteredOptions.length - visibleCount)} {compactLabel.toLowerCase()}s…</div>
           )}
         </div>
       )}

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
-  Copy, Eye, Image, Minus, MousePointer2, QrCode, Save, Signature, Table2, Trash2,
+  Copy, Eye, Image, Minus, MousePointer2, QrCode, Save, Signature, Table2, Trash2, Calculator,
   Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2,
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
@@ -11,11 +11,11 @@ import { loadImageAsset, saveImageAsset } from '../lib/imageAssetStore.ts';
 import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode } from '../lib/pageModel.ts';
-import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
 import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, newFlowRowId, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowWidth } from '../lib/bodyFlow.ts';
 
-type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider';
+type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'binding' | 'formatting' | 'conditions' | 'header' | 'footer';
 type TextAlign = 'left' | 'center' | 'right';
 type PageRegion = 'body' | 'header' | 'footer';
@@ -51,6 +51,9 @@ type BuilderElement = {
   flowColumnGapMm?: number;
   flowAlign?: BodyFlowAlign;
   flowWidth?: BodyFlowWidth;
+  /** DB-4F reusable document formula field. The formula name becomes a Dynamic Field token. */
+  formulaName?: string;
+  formulaExpression?: string;
 };
 
 type BuilderPage = { id: string; name: string; settings: PageSettings; elements: BuilderElement[] };
@@ -77,6 +80,7 @@ const tools: Array<{ label: string; type: ToolType; icon: typeof Type }> = [
   { label: 'Barcode', type: 'barcode', icon: Barcode },
   { label: 'Signature', type: 'signature', icon: Signature },
   { label: 'Divider', type: 'divider', icon: Minus },
+  { label: 'Formula Field', type: 'formula', icon: Calculator },
 ];
 
 
@@ -94,11 +98,12 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const masterHeader = masterPage?.settings.header ?? defaultPageSettings().header;
   const masterFooter = masterPage?.settings.footer ?? defaultPageSettings().footer;
   const pageSettings = activePage ? { ...activePage.settings, header: { ...masterHeader }, footer: { ...masterFooter } } : defaultPageSettings();
+  const formulaElements = pages.flatMap((page) => page.elements).filter((item) => item.type === 'formula' && item.formulaName?.trim());
   const masterBandElements = (masterPage?.elements ?? []).filter((item) => (item.region ?? 'body') === 'header' || (item.region ?? 'body') === 'footer');
-  const rawActiveBodyElements = (activePage?.elements ?? []).filter((item) => (item.region ?? 'body') === 'body');
+  const rawActiveBodyElements = (activePage?.elements ?? []).filter((item) => (item.region ?? 'body') === 'body' && item.type !== 'formula');
   const activeBodyElements = layoutBodyFlow(rawActiveBodyElements, pageSettings);
   const projectedMasterBands = activePageId === masterPage?.id ? masterBandElements : masterBandElements.map((item) => reflowRegionElement(item, { ...masterPage.settings, header: { ...masterHeader }, footer: { ...masterFooter } }, pageSettings));
-  const elements = activePageId === masterPage?.id ? [...activeBodyElements, ...masterBandElements] : [...activeBodyElements, ...projectedMasterBands];
+  const elements = activePageId === masterPage?.id ? [...activeBodyElements, ...masterBandElements, ...formulaElements] : [...activeBodyElements, ...projectedMasterBands, ...formulaElements];
   const selectedIsMasterBand = (id: string | null) => Boolean(id && masterBandElements.some((item) => item.id === id));
   const setElementsRaw = (updater: BuilderElement[] | ((current: BuilderElement[]) => BuilderElement[])) => setPages((currentPages) => currentPages.map((page, index) => {
     const targetMaster = selectedIsMasterBand(selectedId);
@@ -170,7 +175,16 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [activeInsertRegion, setActiveInsertRegion] = useState<PageRegion>('body');
   const source = activeSource(dataState);
   const record = activeRecord(dataState);
-  const selected = masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
+  const formulaTokenFields: TemplateTokenField[] = formulaElements.map((item) => ({ name: item.formulaName!.trim(), label: item.formulaName!.trim() }));
+  const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
+  const selected = formulaElements.find((item) => item.id === selectedId) ?? masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
+  const globalDocumentPicker = source ? buildDocumentPreviewPicker(source, record, dataState.activeRecordIndex, activePage?.elements ?? []) : null;
+  const selectPreviewRecord = (index: number) => {
+    const next = { ...dataState, activeRecordIndex: index };
+    setDataState(next);
+    saveDataSelection(next);
+    setActivePreviewPageIndex(0);
+  };
 
   useEffect(() => {
     const raw = window.localStorage.getItem(STORAGE_KEY);
@@ -224,6 +238,16 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   });
 
   function addElement(type: ToolType) {
+    if (type === 'formula') {
+      const formulaCount = formulaElements.length;
+      const defaults = defaultElement('formula', formulaCount);
+      recordHistory();
+      setPages((currentPages) => currentPages.map((page, index) => index === 0 ? { ...page, elements: [...page.elements, defaults] } : page));
+      setSelectedId(defaults.id);
+      setTab('properties');
+      setStatus('Unsaved changes');
+      return;
+    }
     if (type === 'table') { setActiveInsertRegion('body'); setTableEditorElementId(null); setTableModalOpen(true); return; }
     let targetRegion = activeInsertRegion;
     let effectiveSettings = pageSettings;
@@ -278,6 +302,12 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
 
   function updateSelected(patch: Partial<BuilderElement>) {
     if (!selectedId || !selected) return;
+    if (selected.type === 'formula') {
+      recordHistory();
+      setPages((currentPages) => currentPages.map((page, index) => index === 0 ? { ...page, elements: page.elements.map((entry) => entry.id === selectedId ? { ...entry, ...patch } : entry) } : page));
+      setStatus('Unsaved changes');
+      return;
+    }
     recordHistory();
     const currentRegion = selected.region ?? 'body';
     let normalizedPatch = patch;
@@ -381,6 +411,10 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   function deleteSelected() {
     if (!selectedId || !selected) return;
     recordHistory();
+    if (selected.type === 'formula') {
+      setPages((currentPages) => currentPages.map((page) => ({ ...page, elements: page.elements.filter((item) => item.id !== selectedId) })));
+      setSelectedId(null); setStatus('Unsaved changes'); return;
+    }
     const targetMaster = (selected.region ?? 'body') !== 'body';
     setPages((currentPages) => currentPages.map((page, index) => ((targetMaster && index === 0) || (!targetMaster && page.id === activePageId)) ? { ...page, elements: page.elements.filter((item) => item.id !== selectedId) } : page));
     setSelectedId(null);
@@ -390,6 +424,11 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   function duplicateSelected() {
     if (!selected) return;
     recordHistory();
+    if (selected.type === 'formula') {
+      const copy: BuilderElement = { ...selected, id: crypto.randomUUID(), formulaName: `${selected.formulaName || 'Formula'}Copy` };
+      setPages((currentPages) => currentPages.map((page, index) => index === 0 ? { ...page, elements: [...page.elements, copy] } : page));
+      setSelectedId(copy.id); setStatus('Unsaved changes'); return;
+    }
     const region = selected.region ?? 'body';
     const copy: BuilderElement = constrainElementToRegion({ ...selected, id: crypto.randomUUID(), x: selected.x + 18, y: selected.y + 18, ...((selected.region ?? 'body') === 'body' && (selected.layoutMode ?? 'floating') === 'flow' ? { flowRowId: newFlowRowId() } : {}) }, pageSettings);
     setPages((currentPages) => currentPages.map((page, index) => ((region !== 'body' && index === 0) || (region === 'body' && page.id === activePageId)) ? { ...page, elements: [...page.elements, copy] } : page));
@@ -573,6 +612,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <span>{status} • {pageSettings.preset} {pageSettings.orientation.toLowerCase()} • {pages.length} builder page{pages.length === 1 ? '' : 's'}{documentOutputPageCount > 1 ? ` • ${documentOutputPageCount} output pages` : ''}</span>
         </div>
         <div className="builder-actions">
+          {source ? <div className="global-preview-picker"><span>{globalDocumentPicker ? 'Preview document' : 'Preview record'}</span><RecordPicker count={source.records.length} value={globalDocumentPicker?.value ?? dataState.activeRecordIndex} options={globalDocumentPicker?.options} disabled={source.records.length === 0} compactLabel={globalDocumentPicker ? 'Document' : 'Record'} searchable searchPlaceholder={globalDocumentPicker ? 'Search document ID…' : 'Search record…'} onChange={selectPreviewRecord}/></div> : null}
           <button className="secondary" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span>Undo</span></button>
           <button className="secondary" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" onClick={redo} disabled={redoStackRef.current.length === 0}><Redo2 size={16}/><span>Redo</span></button>
           <button className="secondary"><Eye size={16}/><span>Preview</span></button>
@@ -614,7 +654,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <div className="page-tree-actions"><button onClick={duplicatePage} title="Duplicate page">⧉</button><button onClick={() => movePage(-1)} title="Move page up">↑</button><button onClick={() => movePage(1)} title="Move page down">↓</button><button className="danger-lite" onClick={deletePage} disabled={pages.length <= 1} title="Delete page">×</button></div>
           <div className="section-title document-tree"><span>Elements</span></div>
           <div className="element-tree">
-            {elements.map((item, index) => <button key={item.id} className={item.id === selectedId ? 'element-row active' : 'element-row'} onClick={() => setSelectedId(item.id)}><span>{index + 1}</span><b>{labelFor(item.type)}</b>{(item.region ?? 'body') !== 'body' ? <small className={`region-badge ${(item.region ?? 'body')}`}>{(item.region ?? 'body') === 'header' ? 'H' : 'F'}</small> : null}</button>)}
+            {elements.map((item, index) => <button key={item.id} className={item.id === selectedId ? 'element-row active' : 'element-row'} onClick={() => setSelectedId(item.id)}><span>{index + 1}</span><b>{item.type === 'formula' ? `Formula · ${item.formulaName || 'Unnamed'}` : labelFor(item.type)}</b>{(item.region ?? 'body') !== 'body' ? <small className={`region-badge ${(item.region ?? 'body')}`}>{(item.region ?? 'body') === 'header' ? 'H' : 'F'}</small> : null}</button>)}
           </div>
         </aside>
         {!leftOpen && <button className="panel-expand expand-left" title="Open elements panel" onClick={() => setLeftOpen(true)}><ChevronRight size={16}/></button>}
@@ -635,6 +675,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
                   {pageSettings.showGuides && <PageGuides settings={pageSettings}/>} 
                   {virtualPageIndex === 0 && elements.length === 0 && <div className="page-empty"><span>{pageSettings.preset} DOCUMENT</span><strong>Start building your template</strong><small>Click an element from the left panel. You can then move, resize and edit it.</small></div>}
                   {elements.map((item) => {
+                    if (item.type === 'formula') return null;
                     const region = item.region ?? 'body';
                     const runtimePageIndex = documentPageOffset + virtualPageIndex;
                     const isHeader = region === 'header' && pageSettings.header.enabled && repeatModeShows(pageSettings.header.repeat, runtimePageIndex);
@@ -657,7 +698,16 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
                           if (virtualPageIndex < placement.pageIndex || virtualPageIndex > placement.endPageIndex) return null;
                           tableFragmentIndex = virtualPageIndex - placement.pageIndex;
                           isPaginatedTable = tablePlan.length > 1;
-                          renderItem = { ...item, y: placement.y };
+                          // DB-4.4 Phase 3 Fix5: a paginated Dynamic Table is one logical
+                          // Flow block, but every output page renders only one physical fragment.
+                          // Never reuse the persisted/logical table height as the fragment hit-box:
+                          // on short continuation pages that created a large white selected overlay
+                          // which covered otherwise-correct blocks below the table. Keep the logical
+                          // placement, while sizing the canvas wrapper to this page's materialized
+                          // table fragment only.
+                          const fragmentPlan = tablePlan[tableFragmentIndex];
+                          const fragmentHeight = Math.max(32, Math.ceil(fragmentPlan?.usedHeightPx ?? item.height));
+                          renderItem = { ...item, y: placement.y, height: fragmentHeight };
                         } else {
                           if (virtualPageIndex !== placement.pageIndex) return null;
                           renderItem = { ...item, y: placement.y };
@@ -667,7 +717,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
                       return null;
                     }
 
-                    return <CanvasElement key={`${item.id}:vp:${virtualPageIndex}`} item={renderItem} selected={item.id === selectedId} zoom={zoom} pageSettings={pageSettings} record={record} source={source} sources={dataState.sources} virtualPageIndex={isPaginatedTable ? tableFragmentIndex : virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={documentOutputPageCount} virtualPageMode={isPaginatedTable} repeatedBandElement={(activePageId !== masterPage?.id || virtualPageIndex > 0) && (isHeader || isFooter)} onSelect={() => setSelectedId(item.id)} onHistoryStart={beginHistoryGesture} onHistoryEnd={endHistoryGesture} onSelectionChange={(table) => { setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, table } : entry)); }} onLayoutChange={(patch) => { if (virtualPageIndex === 0) setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry)); }} onChange={(patch) => updateCanvasElement(item, patch)}/>;
+                    return <CanvasElement key={`${item.id}:vp:${virtualPageIndex}`} item={renderItem} selected={item.id === selectedId} zoom={zoom} pageSettings={pageSettings} record={record} source={source} sources={dataState.sources} formulaElements={formulaElements} virtualPageIndex={isPaginatedTable ? tableFragmentIndex : virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={documentOutputPageCount} virtualPageMode={isPaginatedTable} repeatedBandElement={(activePageId !== masterPage?.id || virtualPageIndex > 0) && (isHeader || isFooter)} onSelect={() => setSelectedId(item.id)} onHistoryStart={beginHistoryGesture} onHistoryEnd={endHistoryGesture} onSelectionChange={(table) => { setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, table } : entry)); }} onLayoutChange={(patch) => { if (virtualPageIndex === 0) setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry)); }} onChange={(patch) => updateCanvasElement(item, patch)}/>;
                   })}
                 </div>
               </div>
@@ -681,14 +731,14 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <div className="inspector-tabs">
             {(['properties', 'binding', 'formatting', 'conditions', 'header', 'footer'] as const).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'binding' ? 'Dynamic Field' : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
-          <Inspector tab={tab} selected={selected} source={source} record={record} dataState={dataState} onDataState={setDataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
+          <Inspector tab={tab} selected={selected} source={source} record={record} formulaElements={formulaElements} dynamicTokenFields={dynamicTokenFields} dataState={dataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
         </aside>
       </div>
     </div>
   );
 }
 
-function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
+function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
   const drag = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const resize = useRef<{ sx: number; sy: number; width: number; height: number } | null>(null);
   const scale = zoom / 100;
@@ -754,20 +804,21 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
   const continuationTop = contentBoundsPx(pageSettings).y;
   const renderedTop = virtualPageMode && virtualPageIndex > 0 ? continuationTop : item.y;
   return <div data-page-region={region} data-repeated-projection={repeatedBandElement ? 'true' : 'false'} className={`canvas-element ${selected ? 'selected' : ''} element-${item.type} region-${region} ${virtualPageMode ? 'virtual-continuation-element' : ''} ${repeatedBandElement ? 'repeated-region-projection' : ''}`} style={{ left: item.x, top: renderedTop, width: item.width, height: item.height, color: item.color, background: item.type === 'shape' ? item.fill : undefined, fontSize: item.fontSize, fontFamily: item.fontFamily ?? 'Arial', fontWeight: item.fontWeight ?? 400, fontStyle: item.italic ? 'italic' : 'normal', textDecoration: item.underline ? 'underline' : 'none', lineHeight: item.lineHeight ?? 1.25, textAlign: item.textAlign }} onPointerDown={startDrag} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
-    <ElementContent item={item} pageSettings={pageSettings} record={record} source={source} sources={sources} virtualPageIndex={virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={runtimePageCount} virtualPageMode={virtualPageMode} onElementSelect={onSelect} onTableChange={(table) => onChange({ table })} onTableSelectionChange={onSelectionChange} onTableHistoryStart={onHistoryStart} onTableHistoryEnd={onHistoryEnd} onTableHeightChange={(height) => { if (Math.abs(item.height - height) >= 1) onLayoutChange({ height }); }}/>
+    <ElementContent item={item} pageSettings={pageSettings} record={record} source={source} sources={sources} formulaElements={formulaElements} virtualPageIndex={virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={runtimePageCount} virtualPageMode={virtualPageMode} onElementSelect={onSelect} onTableChange={(table) => onChange({ table })} onTableSelectionChange={onSelectionChange} onTableHistoryStart={onHistoryStart} onTableHistoryEnd={onHistoryEnd} onTableHeightChange={virtualPageMode ? undefined : (height) => { if (Math.abs(item.height - height) >= 1) onLayoutChange({ height }); }}/>
     {selected && (!virtualPageMode || virtualPageIndex === 0 || bandConstrained) && <>{!(region === 'body' && (item.layoutMode ?? 'floating') === 'flow') ? <span className="resize-handle" data-resize="true" onPointerDown={startResize}/> : null}<span className="selection-label">{repeatedBandElement ? `Global ${region === 'header' ? 'Header' : 'Footer'}` : labelFor(item.type)}</span></>}
   </div>;
 }
 
-function ElementContent({ item, pageSettings, record, source, sources, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange: (height: number) => void }) {
-  const bound = item.binding ? valueForField(record, item.binding) : undefined;
+function ElementContent({ item, pageSettings, record, source, sources, formulaElements, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
+  const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field);
+  const bound = item.binding ? resolveBuilderField(item.binding) : undefined;
   const hasMixedTokens = templateHasTokens(item.text);
   const rawRendered = !hasMixedTokens && item.binding && bound !== undefined ? displayValue(bound) : item.text;
-  const rendered = resolveTemplateTokens(rawRendered, (field) => {
-    if (!record) return undefined;
-    const matched = matchTemplateTokenField(source?.fields ?? [], field);
-    return valueForField(record, matched?.name ?? field);
-  }, { pageNumber: runtimePageIndex + 1, totalPages: runtimePageCount, preserveUnknown: !record });
+  const rendered = resolveTemplateTokens(rawRendered, resolveBuilderField, { pageNumber: runtimePageIndex + 1, totalPages: runtimePageCount, preserveUnknown: !record });
+  if (item.type === 'formula') {
+    const result = evaluateDocumentFormulaElement(item, record, formulaElements);
+    return <span className="text-content formula-field-result">{result == null ? '—' : displayValue(result)}</span>;
+  }
   if (item.type === 'image' || item.type === 'signature') return <ImageBackedContent item={item} bound={bound}/>;
   if (item.type === 'table' && item.table) {
     const tableSource = sources.find((candidate) => candidate.id === item.table?.binding?.sourceId) ?? source;
@@ -865,36 +916,38 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
   </div>;
 }
 
-function Inspector({ tab, selected, source, record, dataState, onDataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
-  tab: InspectorTab; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; dataState: BuilderDataState; onDataState: (state: BuilderDataState) => void; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
-  onPageSettings: (patch: Partial<PageSettings>) => void; onPageName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void;
-  onUpdate: (patch: Partial<BuilderElement>) => void; onDelete: () => void; onDuplicate: () => void; onArrange: (action: 'front' | 'forward' | 'backward' | 'back') => void; onMoveFlow: (direction: -1 | 1) => void; onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; relativeElements: BuilderElement[]; onSetInsertRegion: (region: PageRegion) => void; onEditTableConfiguration: (elementId: string) => void;
-}) {
-  const activeInspectorPage = pages.find((page) => page.id === activePageId) ?? pages[0];
-  const documentIdentityTable = source ? activeInspectorPage?.elements.find((item) => {
+function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, activeRecordIndex: number, pageElements: BuilderElement[]) {
+  const identityTable = pageElements.find((item) => {
     if (item.type !== 'table' || item.table?.mode !== 'dynamic' || item.table.binding?.sourceId !== source.id) return false;
     const parentKeys = item.table.binding.parentKeys?.filter(Boolean) ?? (item.table.binding.parentKey ? [item.table.binding.parentKey] : []);
     return parentKeys.length > 0;
-  }) : undefined;
-  const documentIdentityKeys = documentIdentityTable?.table?.binding?.parentKeys?.filter(Boolean)
-    ?? (documentIdentityTable?.table?.binding?.parentKey ? [documentIdentityTable.table.binding.parentKey] : []);
-  const documentPicker = source && documentIdentityKeys.length > 0 ? (() => {
-    const seen = new Map<string, { value: number; label: string }>();
-    source.records.forEach((sourceRecord, index) => {
-      const values = documentIdentityKeys.map((key) => displayValue(valueForField(sourceRecord, key)).trim());
-      const composite = values.join('\u241F');
-      if (!composite || values.every((value) => !value) || seen.has(composite)) return;
-      const fieldLabels = documentIdentityKeys.map((key) => source.fields.find((field) => field.name === key)?.label || key);
-      const label = documentIdentityKeys.length === 1
-        ? `${fieldLabels[0]}: ${values[0]}`
-        : `${fieldLabels.join(' + ')}: ${values.join(' · ')}`;
-      seen.set(composite, { value: index, label });
-    });
-    const currentValues = record ? documentIdentityKeys.map((key) => displayValue(valueForField(record, key)).trim()) : [];
-    const currentComposite = currentValues.join('\u241F');
-    const selectedOption = currentComposite ? seen.get(currentComposite) : undefined;
-    return { options: Array.from(seen.values()), value: selectedOption?.value ?? dataState.activeRecordIndex };
-  })() : null;
+  });
+  const identityKeys = identityTable?.table?.binding?.parentKeys?.filter(Boolean)
+    ?? (identityTable?.table?.binding?.parentKey ? [identityTable.table.binding.parentKey] : []);
+  if (identityKeys.length === 0) return null;
+
+  const seen = new Map<string, { value: number; label: string }>();
+  source.records.forEach((sourceRecord, index) => {
+    const values = identityKeys.map((key) => displayValue(valueForField(sourceRecord, key)).trim());
+    const composite = values.join('\u241F');
+    if (!composite || values.every((value) => !value) || seen.has(composite)) return;
+    const fieldLabels = identityKeys.map((key) => source.fields.find((field) => field.name === key)?.label || key);
+    const label = identityKeys.length === 1
+      ? `${fieldLabels[0]}: ${values[0]}`
+      : `${fieldLabels.join(' + ')}: ${values.join(' · ')}`;
+    seen.set(composite, { value: index, label });
+  });
+  const currentValues = record ? identityKeys.map((key) => displayValue(valueForField(record, key)).trim()) : [];
+  const currentComposite = currentValues.join('\u241F');
+  const selectedOption = currentComposite ? seen.get(currentComposite) : undefined;
+  return { options: Array.from(seen.values()), value: selectedOption?.value ?? activeRecordIndex };
+}
+
+function Inspector({ tab, selected, source, record, formulaElements, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
+  tab: InspectorTab; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
+  onPageSettings: (patch: Partial<PageSettings>) => void; onPageName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void;
+  onUpdate: (patch: Partial<BuilderElement>) => void; onDelete: () => void; onDuplicate: () => void; onArrange: (action: 'front' | 'forward' | 'backward' | 'back') => void; onMoveFlow: (direction: -1 | 1) => void; onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; relativeElements: BuilderElement[]; onSetInsertRegion: (region: PageRegion) => void; onEditTableConfiguration: (elementId: string) => void;
+}) {
 
   const assignRegion = (region: PageRegion) => {
     if (!selected || selected.type === 'table') return;
@@ -917,18 +970,16 @@ function Inspector({ tab, selected, source, record, dataState, onDataState, page
     onUpdate({ region, x, y, width, height });
   };
   const selectedBand = selected?.region === 'header' ? 'header' : selected?.region === 'footer' ? 'footer' : null;
-  const selectedContentPreview = selected && source ? resolveTemplateTokens(selected.text, (field) => {
-    if (!record) return undefined;
-    const matched = matchTemplateTokenField(source.fields, field);
-    return valueForField(record, matched?.name ?? field);
-  }, { pageNumber: activePreviewPageIndex + 1, totalPages: Math.max(1, virtualPageCount), preserveUnknown: !record }) : selected?.text ?? '';
+  const selectedContentPreview = selected ? resolveTemplateTokens(selected.text, (field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field), { pageNumber: activePreviewPageIndex + 1, totalPages: Math.max(1, virtualPageCount), preserveUnknown: !record }) : '';
+  const selectedFormulaPreview = selected?.type === 'formula' ? evaluateDocumentFormulaElement(selected, record, formulaElements) : null;
 
   if (tab === 'header') return <GlobalBandEditor region="header" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion}/>;
   if (tab === 'footer') return <GlobalBandEditor region="footer" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion}/>;
-  if (tab === 'binding') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? (source ? `Use ${source.name} as a whole-element binding or insert fields inside static content.` : 'Import a Data Source first, then choose a field.') : 'Select an element to configure data binding.'}</p>{source && <label>{documentPicker ? 'Preview document' : 'Preview record'}<RecordPicker count={source.records.length} value={documentPicker?.value ?? dataState.activeRecordIndex} options={documentPicker?.options} disabled={source.records.length === 0} compactLabel={documentPicker ? 'Document' : 'Record'} onChange={(index) => { const next = { ...dataState, activeRecordIndex: index }; onDataState(next); saveDataSelection(next); }}/></label>}<label>Whole element binding<select disabled={!selected || !source} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.map((field) => <option key={field.name} value={field.name}>{field.label} ({field.type})</option>)}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForField(record, selected.binding)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' ? <TokenInsertPanel fields={source?.fields ?? []} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
+  if (tab === 'binding') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
   if (tab === 'formatting') return <div className="inspector-body"><h3>Formatting</h3>{!selected ? <p>Select an element to edit document-safe formatting.</p> : <><label>Font family<select value={selected.fontFamily ?? 'Arial'} onChange={(e) => onUpdate({ fontFamily: e.target.value })}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label><div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e) => onUpdate({ fontSize: Math.max(6, Number(e.target.value) || 12) })}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight ?? 1.25} onChange={(e) => onUpdate({ lineHeight: Math.min(3, Math.max(0.8, Number(e.target.value) || 1.25)) })}/></label></div><div className="text-style-actions"><button type="button" className={(selected.fontWeight ?? 400) >= 700 ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ fontWeight: (selected.fontWeight ?? 400) >= 700 ? 400 : 700 })}><b>B</b></button><button type="button" className={selected.italic ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ italic: !selected.italic })}><i>I</i></button><button type="button" className={selected.underline ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ underline: !selected.underline })}><u>U</u></button></div><label>Text color<input type="color" value={selected.color} onChange={(e) => onUpdate({ color: e.target.value })}/></label>{selected.type === 'shape' && <label>Fill<input type="color" value={selected.fill} onChange={(e) => onUpdate({ fill: e.target.value })}/></label>}<div className="align-actions"><button className={selected.textAlign === 'left' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'left' })}><AlignLeft size={16}/></button><button className={selected.textAlign === 'center' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'center' })}><AlignCenter size={16}/></button><button className={selected.textAlign === 'right' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'right' })}><AlignRight size={16}/></button></div><p className="table-cell-help">Typography applies to static text and every resolved dynamic token in this content block.</p></>}</div>;
+  if (tab === 'properties' && selected?.type === 'formula') return <div className="inspector-body"><h3>Formula Field</h3><FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div>;
   if (tab === 'conditions') return <div className="inspector-body"><h3>Conditions</h3><p>Condition rules are planned for a later phase. The selected element remains schema-ready for them.</p><button className="secondary" disabled={!selected}>Add condition</button></div>;
-  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={source?.fields ?? []} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage}/>}</div>;
+  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage}/>}</div>;
 }
 
 
@@ -969,7 +1020,7 @@ function MixedContentEditor({ label, value, fields, onChange, compact = false, p
 }
 
 function elementDisplayName(element: BuilderElement) {
-  const typeLabel = element.type === 'table' ? 'Table' : element.type.charAt(0).toUpperCase() + element.type.slice(1);
+  const typeLabel = element.type === 'table' ? 'Table' : element.type === 'formula' ? `Formula Field${element.formulaName ? ` · ${element.formulaName}` : ''}` : element.type.charAt(0).toUpperCase() + element.type.slice(1);
   const raw = (element.text || '').replace(/\s+/g, ' ').trim();
   const suffix = raw ? ` · ${raw.slice(0, 28)}${raw.length > 28 ? '…' : ''}` : '';
   return `${typeLabel}${suffix}`;
@@ -1271,6 +1322,74 @@ function TableDataFormatEditor({ dataType, value, onChange }: { dataType: TableD
   return null;
 }
 
+
+function formulaTokenFieldsForElements(formulas: BuilderElement[]): TemplateTokenField[] {
+  const seen = new Set<string>();
+  return formulas.flatMap((item) => {
+    const name = item.formulaName?.trim();
+    if (!name) return [];
+    const key = name.toLocaleLowerCase();
+    if (seen.has(key)) return [];
+    seen.add(key);
+    return [{ name, label: name }];
+  });
+}
+
+function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], excludeId?: string) {
+  const context: Record<string, unknown> = record && typeof record === 'object' ? { ...(record as Record<string, unknown>) } : {};
+  const usable = formulas.filter((item) => item.id !== excludeId && item.formulaName?.trim() && item.formulaExpression?.trim());
+  const unresolved = new Set(usable.map((item) => item.id));
+  for (let pass = 0; pass < usable.length && unresolved.size; pass += 1) {
+    let progressed = false;
+    for (const formula of usable) {
+      if (!unresolved.has(formula.id)) continue;
+      const name = formula.formulaName!.trim();
+      const value = evaluateTableFormula(formula.formulaExpression, context);
+      if (value == null) continue;
+      context[name] = value;
+      unresolved.delete(formula.id);
+      progressed = true;
+    }
+    if (!progressed) break;
+  }
+  return context;
+}
+
+function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[]) {
+  if (item.type !== 'formula' || !item.formulaExpression?.trim()) return null;
+  return evaluateTableFormula(item.formulaExpression, buildDocumentFormulaContext(record, formulas, item.id));
+}
+
+function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string) {
+  const formula = formulas.find((item) => item.formulaName?.trim().toLocaleLowerCase() === field.trim().toLocaleLowerCase());
+  if (formula) return evaluateDocumentFormulaElement(formula, record, formulas);
+  if (!record) return undefined;
+  const matched = matchTemplateTokenField(sourceFields, field);
+  return valueForField(record, matched?.name ?? field);
+}
+
+function FormulaFieldProperties({ selected, source, formulaElements, preview, onUpdate }: { selected: BuilderElement; source: ReturnType<typeof activeSource>; formulaElements: BuilderElement[]; preview: number | null; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const name = selected.formulaName ?? '';
+  const duplicate = !!name.trim() && formulaElements.some((item) => item.id !== selected.id && item.formulaName?.trim().toLocaleLowerCase() === name.trim().toLocaleLowerCase());
+  const formulaRefs = formulaTokenFieldsForElements(formulaElements.filter((item) => item.id !== selected.id));
+  const insertRef = (value: string) => {
+    if (!value) return;
+    const ref = formulaFieldReference(value);
+    const current = selected.formulaExpression ?? '';
+    onUpdate({ formulaExpression: `${current}${current && !/\s$/.test(current) ? ' ' : ''}${ref}` });
+  };
+  return <section className="inspector-card formula-field-card">
+    <div className="inspector-card-title">Formula Field</div>
+    <p className="table-cell-help">This is a reusable field definition (it does not print by itself). Create it once, then use it from <b>Dynamic Field</b> anywhere as <b>{name ? `{{${name}}}` : '{{FormulaName}}'}</b>.</p>
+    <label>Field name<input value={name} placeholder="GrandTotal" onChange={(e) => onUpdate({ formulaName: e.target.value.replace(/[{}]/g, '') })}/></label>
+    {duplicate ? <div className="formula-field-warning">Use a unique field name.</div> : null}
+    <label>Formula<input value={selected.formulaExpression ?? ''} placeholder="[Taxable] + [Total GST]" onChange={(e) => onUpdate({ formulaExpression: e.target.value })}/></label>
+    <label>Insert field<select value="" onChange={(e) => insertRef(e.target.value)}><option value="">Choose field…</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`ff-src:${field.name}`} value={field.name}>{field.label || field.name}</option>)}</optgroup> : null}{formulaRefs.length ? <optgroup label="Formula Fields">{formulaRefs.map((field) => <option key={`ff-formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>
+    <div className="binding-value"><small>Preview</small><strong>{preview == null ? 'Enter a valid formula' : displayValue(preview)}</strong></div>
+    <p className="table-cell-help">Supported now: +, −, ×, ÷ and parentheses. Fields with spaces are inserted automatically as [Field Name].</p>
+  </section>;
+}
+
 function formulaFieldReference(fieldName: string) {
   return /^[A-Za-z_$][A-Za-z0-9_.$]*$/.test(fieldName) ? fieldName : `[${fieldName}]`;
 }
@@ -1460,6 +1579,7 @@ function defaultElement(type: ToolType, index: number): BuilderElement {
     case 'barcode': return { ...common, width: 190, height: 90, text: '1234567890' };
     case 'signature': return { ...common, width: 190, height: 80, text: '', imageFit: 'contain' };
     case 'divider': return { ...common, width: 360, height: 12, text: '' };
+    case 'formula': return { ...common, width: 220, height: 44, text: '', formulaName: `Formula${index + 1}`, formulaExpression: '' };
   }
 }
 
