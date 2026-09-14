@@ -243,7 +243,7 @@ async function layoutPdfDocument(template:TemplateDefinition,model:RenderModel):
     renderFlowBlock(ctx,body[index]!,left,contentWidth);
   }
   const footerMode=resolvePaginationPolicy(pageDef.pagination).footerMode;
-  if(footerMode!=='REPEAT_PAGE'){
+  if(footerMode==='FLOW'||footerMode==='LAST_PAGE_ONLY'){
     if(footerMode==='LAST_PAGE_ONLY' && ctx.footerHeight>0) ensureSpace(ctx,ctx.footerHeight);
     for(const block of model.footer ?? []) renderFlowBlock(ctx,block,left,contentWidth);
   }
@@ -266,18 +266,19 @@ function makePage(width:number,height:number,pageDef:NonNullable<RenderModel['pa
 function newPage(ctx:Ctx){
   const p=makePage(ctx.pageWidth,ctx.pageHeight,ctx.model.page!);ctx.pages.push(p);ctx.page=p;drawRepeatedRegions(ctx);ctx.y=ctx.pageHeight-ctx.top-headerSpace(ctx);
 }
-function headerSpace(ctx:Ctx){const p=resolvePaginationPolicy(ctx.model.page?.pagination);return (ctx.pages.length===1 || p.repeatHeader) ? ctx.headerHeight : 0;}
-function footerSpace(ctx:Ctx){return resolvePaginationPolicy(ctx.model.page?.pagination).footerMode==='REPEAT_PAGE' ? ctx.footerHeight : 0;}
+function headerRepeatsOnPage(ctx:Ctx){const policy=resolvePaginationPolicy(ctx.model.page?.pagination);const first=ctx.pages.length===1;return policy.headerMode==='EVERY_PAGE'||(policy.headerMode==='FIRST_PAGE_ONLY'&&first)||(policy.headerMode==='EXCEPT_FIRST'&&!first);}
+function footerRepeatsOnPage(ctx:Ctx){const mode=resolvePaginationPolicy(ctx.model.page?.pagination).footerMode;const first=ctx.pages.length===1;return mode==='REPEAT_PAGE'||(mode==='FIRST_PAGE_ONLY'&&first)||(mode==='EXCEPT_FIRST'&&!first);}
+function headerSpace(ctx:Ctx){return headerRepeatsOnPage(ctx)?ctx.headerHeight:0;}
+function footerSpace(ctx:Ctx){return footerRepeatsOnPage(ctx)?ctx.footerHeight:0;}
 function bodyBottom(ctx:Ctx){return ctx.bottom+footerSpace(ctx);}
 function ensureSpace(ctx:Ctx,height:number){ if(ctx.y-height<bodyBottom(ctx)) newPage(ctx); }
 
 function drawRepeatedRegions(ctx:Ctx){
-  const firstPage = ctx.pages.length===1;
-  if(firstPage || resolvePaginationPolicy(ctx.model.page?.pagination).repeatHeader){
+  if(headerRepeatsOnPage(ctx)){
     let y=ctx.pageHeight-ctx.top;
     for(const b of ctx.model.header ?? []) y=drawFixedBlock(ctx,b,ctx.left,y,ctx.contentWidth);
   }
-  if(resolvePaginationPolicy(ctx.model.page?.pagination).footerMode==='REPEAT_PAGE'){
+  if(footerRepeatsOnPage(ctx)){
     let fy=ctx.bottom+ctx.footerHeight;
     for(const b of ctx.model.footer ?? []) fy=drawFixedBlock(ctx,b,ctx.left,fy,ctx.contentWidth);
   }
@@ -416,6 +417,7 @@ function drawImageBlock(ctx:Ctx,source:string,altText:string,widthMm:number,heig
   }
   const ix=alignX(x,w,iw,alignment);
   if(asset){ drawPdfImage(ctx.page,asset,ix,y-ih,iw,ih); }
+  else if(source.startsWith('data:image/svg+xml')){ drawMonochromeSvgVector(ctx.page,source,ix,y-ih,iw,ih); }
   else { rect(ctx.page,ix,y-ih,iw,ih,'#F8FAFC','#94A3B8',0.5); drawText(ctx.page,altText,8,ix+3,y-ih/2,'#64748B','LEFT','F1',Math.max(1,iw-6)); }
   return y-ih;
 }
@@ -517,7 +519,7 @@ function drawTableHeader(ctx:Ctx,t:RenderTableBlock,x:number,y:number,_w:number,
   const leafH=h-((t.headerGroups?.length ?? 0)?measureTableGroupHeader(t,widths):0);let xx=x;t.columns.forEach((c,i)=>{cellBox(ctx.page,xx,yy-leafH,widths[i]!,leafH,t.showBorder,t.headerStyle.backgroundColor,t.border);drawCellText(ctx.page,c.label,c.headerStyle,xx,yy,widths[i]!,leafH,t.cellPadding,c.headerAlignment,'CENTER');xx+=widths[i]!;});return yy-leafH;
 }
 function drawTableRow(ctx:Ctx,t:RenderTableBlock,row:Array<string|number|boolean|null>,x:number,y:number,widths:number[],h:number){
-  let xx=x;row.forEach((v,i)=>{const c=t.columns[i]!;cellBox(ctx.page,xx,y-h,widths[i]!,h,t.showBorder,c.cellStyle.backgroundColor,t.border);const value=String(v??'');if((c.kind==='IMAGE'||c.kind==='QR')&&value){const asset=ctx.images.get(value);const innerW=Math.max(1,widths[i]!-mm(t.cellPadding.left+t.cellPadding.right));const iw=Math.min(innerW,mm(c.imageWidthMm ?? 18));let ih=Math.min(h-mm(t.cellPadding.top+t.cellPadding.bottom),mm(c.imageHeightMm ?? c.imageWidthMm ?? 18));if(asset&&c.kind==='IMAGE'&&asset.width>0)ih=Math.min(ih,iw*(asset.height/asset.width));const ix=alignX(xx+mm(t.cellPadding.left),innerW,iw,c.alignment);const iy=y-mm(t.cellPadding.top)-ih;if(asset)drawPdfImage(ctx.page,asset,ix,iy,iw,ih);else if(c.kind==='QR'&&value.startsWith('data:image/svg+xml'))drawQrSvgVector(ctx.page,value,ix,iy,iw,ih);else drawText(ctx.page,c.kind==='QR'?'QR':'Image',7,ix,iy+ih/2,'#64748B','LEFT','F1',iw);}else if(isNumericPdfValue(value))drawCellTextNoWrap(ctx.page,value,c.cellStyle,xx,y,widths[i]!,h,t.cellPadding,c.alignment,'CENTER');else drawCellText(ctx.page,value,c.cellStyle,xx,y,widths[i]!,h,t.cellPadding,c.alignment,'CENTER');xx+=widths[i]!;});return y-h;
+  let xx=x;row.forEach((v,i)=>{const c=t.columns[i]!;cellBox(ctx.page,xx,y-h,widths[i]!,h,t.showBorder,c.cellStyle.backgroundColor,t.border);const value=String(v??'');if((c.kind==='IMAGE'||c.kind==='QR')&&value){const asset=ctx.images.get(value);const innerW=Math.max(1,widths[i]!-mm(t.cellPadding.left+t.cellPadding.right));const iw=Math.min(innerW,mm(c.imageWidthMm ?? 18));let ih=Math.min(h-mm(t.cellPadding.top+t.cellPadding.bottom),mm(c.imageHeightMm ?? c.imageWidthMm ?? 18));if(asset&&c.kind==='IMAGE'&&asset.width>0)ih=Math.min(ih,iw*(asset.height/asset.width));const ix=alignX(xx+mm(t.cellPadding.left),innerW,iw,c.alignment);const iy=y-mm(t.cellPadding.top)-ih;if(asset)drawPdfImage(ctx.page,asset,ix,iy,iw,ih);else if(value.startsWith('data:image/svg+xml'))drawMonochromeSvgVector(ctx.page,value,ix,iy,iw,ih);else drawText(ctx.page,c.kind==='QR'?'QR':'Image',7,ix,iy+ih/2,'#64748B','LEFT','F1',iw);}else if(isNumericPdfValue(value))drawCellTextNoWrap(ctx.page,value,c.cellStyle,xx,y,widths[i]!,h,t.cellPadding,c.alignment,'CENTER');else drawCellText(ctx.page,value,c.cellStyle,xx,y,widths[i]!,h,t.cellPadding,c.alignment,'CENTER');xx+=widths[i]!;});return y-h;
 }
 function drawFooterRow(ctx:Ctx,t:RenderTableBlock,row:RenderTableBlock['footerRows'][number],x:number,y:number,widths:number[],h:number){
   let col=0;for(const cell of row.cells){const target=cell.columnId?Math.max(col,t.columns.findIndex(c=>c.id===cell.columnId)):col;if(target>col){const gap=widths.slice(col,target).reduce((a,b)=>a+b,0);const gx=x+widths.slice(0,col).reduce((a,b)=>a+b,0);cellBox(ctx.page,gx,y-h,gap,h,t.showBorder,row.backgroundColor,t.border);col=target;}const span=Math.min(Math.max(1,cell.colspan),Math.max(1,widths.length-col));const cw=widths.slice(col,col+span).reduce((a,b)=>a+b,0)||widths[col]||0;const xx=x+widths.slice(0,col).reduce((a,b)=>a+b,0);cellBox(ctx.page,xx,y-h,cw,h,t.showBorder,row.backgroundColor,t.border);const value=String(cell.value??'');if(isNumericPdfValue(value))drawCellTextNoWrap(ctx.page,value,cell.style,xx,y,cw,h,t.cellPadding,cell.alignment,'CENTER');else drawCellText(ctx.page,value,cell.style,xx,y,cw,h,t.cellPadding,cell.alignment,'CENTER');col+=span;}if(col<widths.length){const gx=x+widths.slice(0,col).reduce((a,b)=>a+b,0);cellBox(ctx.page,gx,y-h,widths.slice(col).reduce((a,b)=>a+b,0),h,t.showBorder,row.backgroundColor,t.border);}return y-h;
@@ -604,7 +606,7 @@ function drawCustomCellContent(ctx:Ctx,cell:RenderCustomGridCell,x:number,top:nu
   const innerX=x+mm(pad.left), innerW=Math.max(2,w-mm(pad.left+pad.right));
   if(cell.content.type==='BLANK')return;
   if(cell.content.type==='IMAGE'){
-    const asset=cell.content.source?ctx.images.get(cell.content.source):undefined;const iw=Math.min(innerW,mm(cell.content.width??25));let ih=cell.content.height?mm(cell.content.height):mm(Math.max(8,(cell.content.width??25)*.45));if(asset&&cell.content.maintainAspectRatio!==false&&!cell.content.height)ih=iw*(asset.height/asset.width);const ix=alignX(innerX,innerW,iw,cell.style.horizontalAlignment);const iy=verticalContentTop(top,h,ih,cell.style.verticalAlignment,mm(pad.top),mm(pad.bottom));if(asset)drawPdfImage(ctx.page,asset,ix,iy-ih,iw,ih);else drawText(ctx.page,cell.content.altText||'Image',8,ix,iy-ih/2,'#64748B','LEFT','F1',iw);return;
+    const asset=cell.content.source?ctx.images.get(cell.content.source):undefined;const iw=Math.min(innerW,mm(cell.content.width??25));let ih=cell.content.height?mm(cell.content.height):mm(Math.max(8,(cell.content.width??25)*.45));if(asset&&cell.content.maintainAspectRatio!==false&&!cell.content.height)ih=iw*(asset.height/asset.width);const ix=alignX(innerX,innerW,iw,cell.style.horizontalAlignment);const iy=verticalContentTop(top,h,ih,cell.style.verticalAlignment,mm(pad.top),mm(pad.bottom));if(asset)drawPdfImage(ctx.page,asset,ix,iy-ih,iw,ih);else if(cell.content.source?.startsWith('data:image/svg+xml'))drawMonochromeSvgVector(ctx.page,cell.content.source,ix,iy-ih,iw,ih);else drawText(ctx.page,cell.content.altText||'Image',8,ix,iy-ih/2,'#64748B','LEFT','F1',iw);return;
   }
   const style=cell.content.style;const text=String(cell.content.value??'');
   // Numeric cells must never degrade into character-per-line output. Shrink to fit
@@ -775,8 +777,22 @@ function drawRupeeGlyph(page:PdfPage,x:number,baseline:number,size:number,color:
   const [r,g,b]=rgb(color);const w=rupeeGlyphWidth(size);const top=baseline+size*.72;const upper=baseline+size*.53;const mid=baseline+size*.37;const bottom=baseline-size*.04;const left=x+size*.04;const right=x+w-size*.04;const stem=x+size*.23;
   page.ops.push(`${r} ${g} ${b} RG ${f(Math.max(.55,size*.065))} w ${f(left)} ${f(top)} m ${f(right)} ${f(top)} l S ${f(left)} ${f(upper)} m ${f(right-size*.08)} ${f(upper)} l S ${f(stem)} ${f(top)} m ${f(stem)} ${f(mid)} l ${f(right-size*.02)} ${f(bottom)} l S ${f(left)} ${f(mid)} m ${f(right-size*.08)} ${f(mid)} l S`);
 }
-function drawQrSvgVector(page:PdfPage,source:string,x:number,y:number,w:number,h:number){
-  try{const comma=source.indexOf(',');if(comma<0)return;const svg=decodeURIComponent(source.slice(comma+1));const vb=svg.match(/viewBox="0 0 ([0-9.]+) ([0-9.]+)"/);if(!vb)return;const sw=Number(vb[1]),sh=Number(vb[2]);if(!sw||!sh)return;const sx=w/sw,sy=h/sh;const rect=/<rect x="([0-9.]+)" y="([0-9.]+)" width="1" height="1" fill="#000"\/>/g;let m:RegExpExecArray|null;const ops:string[]=['0 0 0 rg'];while((m=rect.exec(svg))){const rx=x+Number(m[1])*sx;const ry=y+h-(Number(m[2])+1)*sy;ops.push(`${f(rx)} ${f(ry)} ${f(sx)} ${f(sy)} re f`);}page.ops.push(ops.join(' '));}catch{/* malformed QR source: leave cell blank rather than corrupting the PDF */}
+function drawMonochromeSvgVector(page:PdfPage,source:string,x:number,y:number,w:number,h:number){
+  try{
+    const comma=source.indexOf(',');if(comma<0)return;
+    const payload=source.slice(comma+1);
+    const svg=/;base64/i.test(source.slice(0,comma))?atob(payload):decodeURIComponent(payload);
+    const vb=svg.match(/viewBox="0 0 ([0-9.]+) ([0-9.]+)"/);if(!vb)return;
+    const sw=Number(vb[1]),sh=Number(vb[2]);if(!sw||!sh)return;const sx=w/sw,sy=h/sh;
+    // QR/barcode SVGs are intentionally rendered as vectors so Native PDF keeps
+    // them sharp without browser rasterization. Paint an opaque white quiet-zone
+    // first because the source SVGs include a white background rectangle.
+    page.ops.push(`1 1 1 rg ${f(x)} ${f(y)} ${f(w)} ${f(h)} re f`);
+    const rect=/<rect\s+[^>]*x="([0-9.]+)"[^>]*y="([0-9.]+)"[^>]*width="([0-9.]+)"[^>]*height="([0-9.]+)"[^>]*fill="(?:#000(?:000)?|black)"[^>]*\/?\s*>/g;
+    let m:RegExpExecArray|null;const ops:string[]=['0 0 0 rg'];
+    while((m=rect.exec(svg))){const rx=x+Number(m[1])*sx;const rw=Number(m[3])*sx;const rh=Number(m[4])*sy;const ry=y+h-(Number(m[2])*sy)-rh;ops.push(`${f(rx)} ${f(ry)} ${f(rw)} ${f(rh)} re f`);}
+    if(ops.length>1)page.ops.push(ops.join(' '));
+  }catch{/* malformed monochrome SVG: leave blank rather than corrupting the PDF */}
 }
 
 function drawPdfImage(page:PdfPage,image:PdfImage,x:number,y:number,w:number,h:number){page.ops.push(`q ${f(w)} 0 0 ${f(h)} ${f(x)} ${f(y)} cm /${image.name} Do Q`);}

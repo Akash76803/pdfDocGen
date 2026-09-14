@@ -37,8 +37,9 @@ export type BoxOverflowMode = 'EXPAND'|'CLIP'|'SHRINK_CONTENT';
 export interface PageMargins { top:number; right:number; bottom:number; left:number; }
 export interface PageBorder { enabled?:boolean; style?:BorderLineStyle; width?:number; color?:string; offset?:number; }
 export type PageNumberPosition = 'BOTTOM_LEFT'|'BOTTOM_CENTER'|'BOTTOM_RIGHT';
-export type FooterMode = 'REPEAT_PAGE'|'FLOW'|'LAST_PAGE_ONLY';
-export interface PaginationSettings { repeatHeader?:boolean; /** @deprecated use footerMode */ repeatFooter?:boolean; footerMode?:FooterMode; showPageNumbers?:boolean; pageNumberPosition?:PageNumberPosition; keepSummaryTogether?:boolean; keepCustomGridTogether?:boolean; }
+export type HeaderMode = 'EVERY_PAGE'|'FIRST_PAGE_ONLY'|'EXCEPT_FIRST';
+export type FooterMode = 'REPEAT_PAGE'|'FLOW'|'LAST_PAGE_ONLY'|'FIRST_PAGE_ONLY'|'EXCEPT_FIRST';
+export interface PaginationSettings { repeatHeader?:boolean; /** Explicit header policy; when omitted legacy repeatHeader is used. */ headerMode?:HeaderMode; /** @deprecated use footerMode */ repeatFooter?:boolean; footerMode?:FooterMode; showPageNumbers?:boolean; pageNumberPosition?:PageNumberPosition; keepSummaryTogether?:boolean; keepCustomGridTogether?:boolean; }
 export interface PageDefinition { size:PageSize; orientation:PageOrientation; margins:PageMargins; customWidthMm?:number; customHeightMm?:number; backgroundColor?:string; border?:PageBorder; pagination?:PaginationSettings; }
 
 export interface PageDimensions { widthMm:number; heightMm:number; }

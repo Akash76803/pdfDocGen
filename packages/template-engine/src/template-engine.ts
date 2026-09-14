@@ -53,7 +53,9 @@ export class TemplateEngine {
       group: { key: data.key, id: data.id },
       page: { number: 1, total: 1 },
       views: {},
-      calc: {},
+      calc: data.header && typeof data.header.calc === 'object' && data.header.calc !== null
+        ? { ...(data.header.calc as Record<string, unknown>) }
+        : {},
     };
 
     // Phase 4.13: derive reusable filtered collections without mutating DocumentGroup.items.

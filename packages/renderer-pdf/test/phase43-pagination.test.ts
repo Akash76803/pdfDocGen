@@ -40,3 +40,29 @@ describe('Phase 4.3 pagination hardening', () => {
     expect((pdf.match(/REPEAT FOOTER/g)||[]).length).toBe(1);
   });
 });
+
+describe('DB-5G header/footer repeat modes', () => {
+  it('renders FIRST_PAGE_ONLY regions only on page one', async () => {
+    const {template,model}=fixture(true,true);
+    model.page!.pagination={...model.page!.pagination,headerMode:'FIRST_PAGE_ONLY',footerMode:'FIRST_PAGE_ONLY'};
+    template.page.pagination={...template.page.pagination,headerMode:'FIRST_PAGE_ONLY',footerMode:'FIRST_PAGE_ONLY'};
+    const out=await new PdfRenderer().render(template,model);
+    const pdf=new TextDecoder('latin1').decode(out.content);
+    const pages=(pdf.match(/\/Type \/Page\b/g)||[]).length;
+    expect(pages).toBeGreaterThan(1);
+    expect((pdf.match(/REPEAT HEADER/g)||[]).length).toBe(1);
+    expect((pdf.match(/REPEAT FOOTER/g)||[]).length).toBe(1);
+  });
+
+  it('renders EXCEPT_FIRST regions on every continuation page', async () => {
+    const {template,model}=fixture(true,true);
+    model.page!.pagination={...model.page!.pagination,headerMode:'EXCEPT_FIRST',footerMode:'EXCEPT_FIRST'};
+    template.page.pagination={...template.page.pagination,headerMode:'EXCEPT_FIRST',footerMode:'EXCEPT_FIRST'};
+    const out=await new PdfRenderer().render(template,model);
+    const pdf=new TextDecoder('latin1').decode(out.content);
+    const pages=(pdf.match(/\/Type \/Page\b/g)||[]).length;
+    expect(pages).toBeGreaterThan(1);
+    expect((pdf.match(/REPEAT HEADER/g)||[]).length).toBe(pages-1);
+    expect((pdf.match(/REPEAT FOOTER/g)||[]).length).toBe(pages-1);
+  });
+});

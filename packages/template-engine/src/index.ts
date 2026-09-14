@@ -10,3 +10,5 @@ export * from './display-format.js';
 
 export * from './condition-evaluator.js';
 export * from './raw-source-path.js';
+
+export * from './qr-code.js';

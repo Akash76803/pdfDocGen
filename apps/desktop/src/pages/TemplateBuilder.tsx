@@ -2,7 +2,8 @@ import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as Rea
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
   Copy, Eye, Image, Minus, MousePointer2, QrCode, Save, Signature, Table2, Trash2, Calculator,
-  Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2, Download, FilePlus2,
+  Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2, Download, FilePlus2, Braces, Clipboard,
+  ChevronDown, HelpCircle, MoreHorizontal,
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
 import { RecordPicker } from '../components/RecordPicker.tsx';
@@ -23,6 +24,7 @@ import { buildEditablePreviewDocx } from '../lib/editableDocxExport.ts';
 import { amountToIndianWords } from '../lib/numberToWords.ts';
 import { getPdfRenderProfile } from '../lib/pdfRenderProfile.ts';
 import { appendGenerationHistory, clearGenerationProgress, clearGenerationRequest, GENERATION_REQUEST_EVENT, readGenerationRequest, writeGenerationProgress, type GenerationRequest } from '../lib/generationEngine.ts';
+import { buildCurrentDocumentJsonBody, type TemplateJsonBodyResult } from '../lib/templateJsonBody.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'binding' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -137,6 +139,8 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [templateHydrated, setTemplateHydrated] = useState(false);
   const [newTemplateOpen, setNewTemplateOpen] = useState(false);
   const [newTemplateUnsavedOpen, setNewTemplateUnsavedOpen] = useState(false);
+  const [jsonBodyResult, setJsonBodyResult] = useState<TemplateJsonBodyResult | null>(null);
+  const [jsonBodyCopied, setJsonBodyCopied] = useState(false);
   const [documentType, setDocumentType] = useState<TemplateDocumentType>('Document');
   const generationRunningRef = useRef(false);
   const [generationRequestVersion, setGenerationRequestVersion] = useState(0);
@@ -205,12 +209,44 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const formulaTokenFields: TemplateTokenField[] = formulaElements.map((item) => ({ name: item.formulaName!.trim(), label: item.formulaName!.trim() }));
   const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
   const selected = formulaElements.find((item) => item.id === selectedId) ?? masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
+  useEffect(() => {
+    if (!selected && (tab === 'binding' || tab === 'formatting' || tab === 'conditions')) setTab('properties');
+    if (selected?.type === 'text' && tab === 'binding') setTab('properties');
+  }, [selected, tab]);
   const globalDocumentPicker = source ? buildDocumentPreviewPicker(source, record, dataState.activeRecordIndex, activePage?.elements ?? []) : null;
   const selectPreviewRecord = (index: number) => {
     const next = { ...dataState, activeRecordIndex: index };
     setDataState(next);
     saveDataSelection(next);
     setActivePreviewPageIndex(0);
+  };
+
+  const openCurrentDocumentJsonBody = () => {
+    const result = buildCurrentDocumentJsonBody({ pages, source, record });
+    setJsonBodyResult(result);
+    setJsonBodyCopied(false);
+  };
+  const copyCurrentDocumentJsonBody = async () => {
+    if (!jsonBodyResult) return;
+    try {
+      await navigator.clipboard.writeText(jsonBodyResult.json);
+      setJsonBodyCopied(true);
+      window.setTimeout(() => setJsonBodyCopied(false), 1800);
+    } catch {
+      setJsonBodyCopied(false);
+    }
+  };
+  const downloadCurrentDocumentJsonBody = () => {
+    if (!jsonBodyResult) return;
+    const blob = new Blob([jsonBodyResult.json], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = `${sanitizeExportFileName(name || 'Document')}-input-body.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    URL.revokeObjectURL(url);
   };
 
   useEffect(() => {
@@ -1024,15 +1060,28 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
         </div>
         <div className="builder-actions">
           {source ? <div className="global-preview-picker"><span>{globalDocumentPicker ? 'Preview document' : 'Preview record'}</span><RecordPicker count={source.records.length} value={globalDocumentPicker?.value ?? dataState.activeRecordIndex} options={globalDocumentPicker?.options} disabled={source.records.length === 0} compactLabel={globalDocumentPicker ? 'Document' : 'Record'} searchable searchPlaceholder={globalDocumentPicker ? 'Search document ID…' : 'Search record…'} onChange={selectPreviewRecord}/></div> : null}
-          <button className="secondary" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span>Undo</span></button>
-          <button className="secondary" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" onClick={redo} disabled={redoStackRef.current.length === 0}><Redo2 size={16}/><span>Redo</span></button>
-          <button className="secondary"><Eye size={16}/><span>Preview</span></button>
-          <button className="secondary" onClick={() => { void exportPreviewPdf(); }} disabled={pdfExporting || docxExporting || editableDocxExporting} title="DB-4.5 exact Preview → PDF"><Download size={16}/><span>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</span></button>
-          <button className="secondary" onClick={() => { void exportPreviewDocx(); }} disabled={docxExporting || pdfExporting || editableDocxExporting} title="DOCX Exact: maximum Preview fidelity; content is page artwork"><FileText size={16}/><span>{docxExporting ? docxExportProgress || 'DOCX Exact…' : 'DOCX Exact'}</span></button>
-          <button className="secondary" onClick={() => { void exportEditableDocx(); }} disabled={editableDocxExporting || docxExporting || pdfExporting} title="DOCX Editable: native Word text and tables; Word may reflow slightly"><FileText size={16}/><span>{editableDocxExporting ? editableDocxExportProgress || 'DOCX Editable…' : 'DOCX Editable'}</span></button>
-          <button className="secondary" onClick={requestNewTemplate} title="Create a new draft template"><FilePlus2 size={16}/><span>New</span></button>
-          <button className="secondary" onClick={saveTemplate}><Save size={16}/><span>Save</span></button>
-          <button className="primary" onClick={() => onNavigate('generate')}>Generate</button>
+          <div className="toolbar-history" aria-label="History actions">
+            <button className="toolbar-icon-button" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span className="sr-only">Undo</span></button>
+            <button className="toolbar-icon-button" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" onClick={redo} disabled={redoStackRef.current.length === 0}><Redo2 size={16}/><span className="sr-only">Redo</span></button>
+          </div>
+          <button className="secondary toolbar-primary-action"><Eye size={16}/><span>Preview</span></button>
+          <details className="toolbar-menu">
+            <summary className="secondary"><Download size={16}/><span>Export</span><ChevronDown size={14}/></summary>
+            <div className="toolbar-menu-popover">
+              <button type="button" onClick={() => { void exportPreviewPdf(); }} disabled={pdfExporting || docxExporting || editableDocxExporting}><Download size={15}/><span><strong>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</strong><small>Portable document</small></span></button>
+              <button type="button" onClick={() => { void exportPreviewDocx(); }} disabled={docxExporting || pdfExporting || editableDocxExporting}><FileText size={15}/><span><strong>{docxExporting ? docxExportProgress || 'DOCX Exact…' : 'DOCX Exact'}</strong><small>Maximum Preview fidelity</small></span></button>
+              <button type="button" onClick={() => { void exportEditableDocx(); }} disabled={editableDocxExporting || docxExporting || pdfExporting}><FileText size={15}/><span><strong>{editableDocxExporting ? editableDocxExportProgress || 'DOCX Editable…' : 'DOCX Editable'}</strong><small>Editable Word content</small></span></button>
+            </div>
+          </details>
+          <details className="toolbar-menu">
+            <summary className="secondary toolbar-more"><MoreHorizontal size={17}/><span>More</span><ChevronDown size={14}/></summary>
+            <div className="toolbar-menu-popover toolbar-menu-popover-right">
+              <button type="button" onClick={openCurrentDocumentJsonBody}><Braces size={15}/><span><strong>JSON Body</strong><small>ERP / API input body</small></span></button>
+              <button type="button" onClick={requestNewTemplate}><FilePlus2 size={15}/><span><strong>New Template</strong><small>Create a new draft</small></span></button>
+            </div>
+          </details>
+          <button className="secondary toolbar-save" onClick={saveTemplate}><Save size={16}/><span>Save</span></button>
+          <button className="primary toolbar-generate" onClick={() => onNavigate('generate')}>Generate</button>
         </div>
       </header>
 
@@ -1045,6 +1094,23 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       </div>}
 
       {newTemplateOpen && <NewTemplateModal onCancel={() => setNewTemplateOpen(false)} onCreate={createNewTemplate} />}
+
+      {jsonBodyResult && <div className="table-modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setJsonBodyResult(null); }}>
+        <div className="table-modal json-body-modal" role="dialog" aria-modal="true" aria-label="Current document JSON body">
+          <div className="table-modal-title"><span><Braces size={18}/>Current Document JSON Body</span><button type="button" aria-label="Close JSON body" onClick={() => setJsonBodyResult(null)}>×</button></div>
+          <div className="json-body-summary">
+            <span><b>{jsonBodyResult.documentFields.length}</b> document fields</span>
+            <span><b>{jsonBodyResult.itemFields.length}</b> item fields</span>
+            <span><b>{jsonBodyResult.itemCount}</b> item rows</span>
+            <span><b>{jsonBodyResult.formulaFieldsExcluded.length}</b> formulas excluded</span>
+          </div>
+          <div className="table-modal-note">This is the external ERP/API request body for the currently selected document. Only imported/bound source fields are included. Formula Fields are calculated inside Document Builder and are intentionally excluded.</div>
+          {jsonBodyResult.formulaFieldsExcluded.length > 0 && <div className="json-body-excluded"><span>Calculated internally</span><code>{jsonBodyResult.formulaFieldsExcluded.join(', ')}</code></div>}
+          {jsonBodyResult.warnings.map((warning) => <div key={warning} className="json-body-warning">{warning}</div>)}
+          <textarea className="json-body-code" readOnly spellCheck={false} value={jsonBodyResult.json} aria-label="Generated JSON body" />
+          <div className="table-modal-actions json-body-actions"><button type="button" className="secondary" onClick={() => setJsonBodyResult(null)}>Close</button><div><button type="button" className="secondary" onClick={() => { void copyCurrentDocumentJsonBody(); }}><Clipboard size={15}/>{jsonBodyCopied ? 'Copied' : 'Copy JSON'}</button><button type="button" className="primary" onClick={downloadCurrentDocumentJsonBody}><Download size={15}/>Download .json</button></div></div>
+        </div>
+      </div>}
 
       {tableModalOpen && <TableCreateModal
         sources={dataState.sources}
@@ -1154,10 +1220,10 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
         {!rightOpen && <button className="panel-expand expand-right" title="Open inspector" onClick={() => setRightOpen(true)}><ChevronLeft size={16}/></button>}
         <aside className="builder-right">
           <button className="panel-collapse right" title="Collapse inspector" onClick={() => setRightOpen(false)}><ChevronRight size={15}/></button>
-          <div className="inspector-tabs">
-            {(['properties', 'binding', 'formatting', 'conditions', 'header', 'footer'] as const).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'binding' ? 'Dynamic Field' : item[0].toUpperCase() + item.slice(1)}</button>)}
+          <div className="inspector-tabs contextual">
+            {(selected ? (selected.type === 'text' ? (['properties', 'formatting', 'conditions'] as const) : (['properties', 'binding', 'formatting', 'conditions'] as const)) : (['properties'] as const)).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'binding' ? (selected?.type === 'table' ? 'Columns' : 'Data') : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
-          <Inspector tab={tab} selected={selected} source={source} record={record} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} dynamicTokenFields={dynamicTokenFields} dataState={dataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
+          <Inspector tab={tab} onInspectorTab={setTab} selected={selected} source={source} record={record} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} dynamicTokenFields={dynamicTokenFields} dataState={dataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
         </aside>
       </div>
     </div>
@@ -1340,7 +1406,7 @@ function PageGuides({ settings }: { settings: PageSettings }) {
   </>;
 }
 
-function PageProperties({ settings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onChange, onName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage }: { settings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void; onChange: (patch: Partial<PageSettings>) => void; onName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void }) {
+function PageProperties({ settings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onChange, onName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onEditHeader, onEditFooter }: { settings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void; onChange: (patch: Partial<PageSettings>) => void; onName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void; onEditHeader: () => void; onEditFooter: () => void }) {
   const [linkMargins, setLinkMargins] = useState(false);
   const [linkBleed, setLinkBleed] = useState(true);
   const size = pageSizeMm(settings);
@@ -1351,31 +1417,79 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
     onChange({ [key]: linked ? { top:mm,right:mm,bottom:mm,left:mm } : { ...current, [side]: mm } } as Partial<PageSettings>);
   };
   const presets: PagePreset[] = ['A3','A4','A5','Letter','Legal','Tabloid','Executive','Custom'];
-  return <div className="page-properties-stack">
-    <section className="inspector-card page-manager-card">
-      <div className="inspector-card-title"><span>▤ Pages</span><button type="button" className="mini-toggle active" onClick={onAddPage}>＋ Add</button></div>
-      <div className="page-manager-list">{pages.map((page, index) => <div key={page.id} className="page-manager-group"><button type="button" className={page.id === activePageId && activePreviewPageIndex === 0 ? 'page-manager-row active' : 'page-manager-row'} onClick={() => { onSelectPage(page.id); if (page.id === activePageId) onFocusPreviewPage(0); }}><span>{index + 1}</span><strong>{page.name}</strong><small>{page.settings.preset}</small></button>{page.id === activePageId && Array.from({ length: Math.max(0, virtualPageCount - 1) }, (_, continuationIndex) => { const previewIndex = continuationIndex + 1; return <button type="button" key={`${page.id}:auto:${previewIndex}`} className={activePreviewPageIndex === previewIndex ? 'page-manager-row auto-page active' : 'page-manager-row auto-page'} onClick={() => onFocusPreviewPage(previewIndex)} title="Automatically generated by table overflow"><span>{index + 1}.{previewIndex + 1}</span><strong>{page.name} · Continuation {previewIndex + 1}</strong><small><b className="auto-page-badge">Auto</b></small></button>; })}</div>)}</div>
-      <div className="page-manager-actions"><button type="button" onClick={onDuplicatePage} disabled={activePreviewPageIndex > 0} title={activePreviewPageIndex > 0 ? "Auto continuation pages cannot be duplicated" : "Duplicate page"}>⧉ Duplicate</button><button type="button" onClick={() => onMovePage(-1)} disabled={activePreviewPageIndex > 0} title={activePreviewPageIndex > 0 ? "Auto continuation pages cannot be reordered" : "Move page up"}>↑ Up</button><button type="button" onClick={() => onMovePage(1)} disabled={activePreviewPageIndex > 0} title={activePreviewPageIndex > 0 ? "Auto continuation pages cannot be reordered" : "Move page down"}>↓ Down</button><button type="button" className="danger-lite" onClick={onDeletePage} disabled={pages.length <= 1 || activePreviewPageIndex > 0} title={activePreviewPageIndex > 0 ? "Auto continuation pages disappear when overflow is removed" : "Delete page"}>× Delete</button></div>{activePreviewPageIndex > 0 ? <div className="auto-page-note">Auto continuation page · generated from table overflow</div> : null}
-    </section>
-    <section className="inspector-card"><div className="inspector-card-title">📄 Page</div>
-      <label>Page name<input value={pageName} onChange={(e) => onName(e.target.value)}/></label>
-      <label>Page size<select value={settings.preset} onChange={(e) => onChange({ preset: e.target.value as PagePreset })}>{presets.map((p) => <option key={p}>{p}</option>)}</select></label>
-      <div className="property-grid"><label>Orientation<select value={settings.orientation} onChange={(e) => onChange({ orientation: e.target.value as PageOrientation })}><option>Portrait</option><option>Landscape</option></select></label><label>Units<select value={unit} onChange={(e) => onChange({ unit: e.target.value as PageUnit })}><option value="mm">mm</option><option value="cm">cm</option><option value="in">inch</option></select></label></div>
-      {settings.preset === 'Custom' ? <div className="property-grid"><label>Width<input type="number" min="20" step="0.1" value={Number(mmToUnit(settings.customWidthMm, unit).toFixed(2))} onChange={(e) => onChange({ customWidthMm: unitToMm(Number(e.target.value)||20,unit) })}/></label><label>Height<input type="number" min="20" step="0.1" value={Number(mmToUnit(settings.customHeightMm, unit).toFixed(2))} onChange={(e) => onChange({ customHeightMm: unitToMm(Number(e.target.value)||20,unit) })}/></label></div> : <div className="page-size-readout">{mmToUnit(size.widthMm,unit).toFixed(1)} × {mmToUnit(size.heightMm,unit).toFixed(1)} {unit === 'in' ? 'in' : unit}</div>}
-    </section>
-    <section className="inspector-card"><div className="inspector-card-title"><span>↔ Margins</span><button className={linkMargins?'mini-toggle active':'mini-toggle'} onClick={() => setLinkMargins(!linkMargins)}>{linkMargins?'Linked':'Independent'}</button></div><div className="edge-grid">{(['top','right','bottom','left'] as const).map((side) => <label key={side}>{side[0].toUpperCase()+side.slice(1)}<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.marginsMm[side],unit).toFixed(2))} onChange={(e) => updateEdges('marginsMm',side,Number(e.target.value),linkMargins)}/></label>)}</div></section>
-    <section className="inspector-card page-band-card"><div className="inspector-card-title"><span>⇥ Header Zone</span><button type="button" className={settings.header.enabled?'mini-toggle active':'mini-toggle'} onClick={() => onChange({ header: { ...settings.header, enabled: !settings.header.enabled } })}>{settings.header.enabled?'Enabled':'Disabled'}</button></div>
-      <div className="property-grid"><label>Height<input type="number" min="0" step="0.5" disabled={!settings.header.enabled} value={Number(mmToUnit(settings.header.heightMm,unit).toFixed(2))} onChange={(e) => onChange({ header: { ...settings.header, heightMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label><label>Content gap<input type="number" min="0" step="0.5" disabled={!settings.header.enabled} value={Number(mmToUnit(settings.header.gapMm,unit).toFixed(2))} onChange={(e) => onChange({ header: { ...settings.header, gapMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label></div>
-      <label>Repeat<select disabled={!settings.header.enabled} value={settings.header.repeat} onChange={(e) => onChange({ header: { ...settings.header, repeat: e.target.value as PageRepeatMode } })}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label>
-      <div className="table-cell-help">Header is a content container. Text, Image, Shape, QR, Barcode, Signature and Divider elements assigned here repeat together according to this rule. Body/table content starts after Header height + gap.</div>
-    </section>
-    <section className="inspector-card page-band-card"><div className="inspector-card-title"><span>⇤ Footer Zone</span><button type="button" className={settings.footer.enabled?'mini-toggle active':'mini-toggle'} onClick={() => onChange({ footer: { ...settings.footer, enabled: !settings.footer.enabled } })}>{settings.footer.enabled?'Enabled':'Disabled'}</button></div>
-      <div className="property-grid"><label>Height<input type="number" min="0" step="0.5" disabled={!settings.footer.enabled} value={Number(mmToUnit(settings.footer.heightMm,unit).toFixed(2))} onChange={(e) => onChange({ footer: { ...settings.footer, heightMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label><label>Content gap<input type="number" min="0" step="0.5" disabled={!settings.footer.enabled} value={Number(mmToUnit(settings.footer.gapMm,unit).toFixed(2))} onChange={(e) => onChange({ footer: { ...settings.footer, gapMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label></div>
-      <label>Repeat<select disabled={!settings.footer.enabled} value={settings.footer.repeat} onChange={(e) => onChange({ footer: { ...settings.footer, repeat: e.target.value as PageRepeatMode } })}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label>
-      <div className="table-cell-help">Footer is a content container and repeats all assigned elements together. Use a Text element with <b>{'{{pageNumber}}'}</b> and <b>{'{{totalPages}}'}</b> for Page X of Y.</div>
-    </section>
-    <section className="inspector-card"><div className="inspector-card-title"><span>✂ Bleed</span><button className={linkBleed?'mini-toggle active':'mini-toggle'} onClick={() => setLinkBleed(!linkBleed)}>{linkBleed?'Linked':'Unlinked'}</button></div><div className="edge-grid">{(['top','right','bottom','left'] as const).map((side) => <label key={side}>{side[0].toUpperCase()+side.slice(1)}<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.bleedMm[side],unit).toFixed(2))} onChange={(e) => updateEdges('bleedMm',side,Number(e.target.value),linkBleed)}/></label>)}</div></section>
-    <section className="inspector-card"><div className="inspector-card-title">▱ Content Area & Appearance</div><label>Safe area inset<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.safeAreaMm,unit).toFixed(2))} onChange={(e) => onChange({ safeAreaMm: unitToMm(Number(e.target.value)||0,unit) })}/></label><div className="property-grid"><label>Background<input type="color" value={settings.background} onChange={(e) => onChange({ background:e.target.value })}/></label><label>Content border<input type="color" value={settings.borderColor} onChange={(e) => onChange({ borderColor:e.target.value })}/></label></div><label>Content border width<input type="number" min="0" max="10" value={settings.borderWidth} onChange={(e) => onChange({ borderWidth:Math.max(0,Number(e.target.value)||0) })}/></label><div className="property-grid"><label>Border alignment<select value={settings.borderAlignment ?? 'inside'} onChange={(e) => onChange({ borderAlignment:e.target.value as PageSettings['borderAlignment'] })}><option value="inside">Inside</option><option value="center">Center</option><option value="outside">Outside</option></select></label><label>Border offset ({unitLabel(unit)})<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.borderOffsetMm ?? 0,unit).toFixed(2))} onChange={(e) => onChange({ borderOffsetMm:Math.max(0,unitToMm(Number(e.target.value)||0,unit)) })}/></label></div><label className="check-row"><input type="checkbox" checked={settings.showGuides} onChange={(e) => onChange({ showGuides:e.target.checked })}/> Show margin / safe / bleed guides</label></section>
+  const help = (text: string) => <button type="button" className="property-help" title={text} aria-label={text}><HelpCircle size={14}/></button>;
+  const activePage = pages.find((page) => page.id === activePageId) ?? pages[0];
+  const marginLinkedValue = Number(mmToUnit(settings.marginsMm.top,unit).toFixed(2));
+  const bleedLinkedValue = Number(mmToUnit(settings.bleedMm.top,unit).toFixed(2));
+  return <div className="page-properties-stack professional-page-settings">
+    <div className="page-settings-intro"><div><strong>Page setup</strong><span>{activePage?.name ?? pageName} · {settings.preset} {settings.orientation}</span></div>{help('Configure physical page size, print margins, header/footer masters, bleed and appearance. Advanced sections stay collapsed until you need them.')}</div>
+
+    <details className="inspector-accordion" open>
+      <summary><span><span className="section-symbol">▤</span>Pages <small>{pages.length}</small></span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <div className="page-manager-toolbar"><button type="button" className="secondary compact" onClick={onAddPage}><Plus size={14}/>Add page</button><details className="page-action-menu"><summary title="Page actions"><MoreHorizontal size={16}/></summary><div><button type="button" onClick={onDuplicatePage} disabled={activePreviewPageIndex > 0}>Duplicate</button><button type="button" onClick={() => onMovePage(-1)} disabled={activePreviewPageIndex > 0}>Move up</button><button type="button" onClick={() => onMovePage(1)} disabled={activePreviewPageIndex > 0}>Move down</button><button type="button" className="danger-text" onClick={onDeletePage} disabled={pages.length <= 1 || activePreviewPageIndex > 0}>Delete</button></div></details></div>
+        <div className="page-manager-list compact-list">{pages.map((page, index) => <div key={page.id} className="page-manager-group"><button type="button" className={page.id === activePageId && activePreviewPageIndex === 0 ? 'page-manager-row active' : 'page-manager-row'} onClick={() => { onSelectPage(page.id); if (page.id === activePageId) onFocusPreviewPage(0); }}><span>{index + 1}</span><strong>{page.name}</strong><small>{page.settings.preset}</small></button>{page.id === activePageId && Array.from({ length: Math.max(0, virtualPageCount - 1) }, (_, continuationIndex) => { const previewIndex = continuationIndex + 1; return <button type="button" key={`${page.id}:auto:${previewIndex}`} className={activePreviewPageIndex === previewIndex ? 'page-manager-row auto-page active' : 'page-manager-row auto-page'} onClick={() => onFocusPreviewPage(previewIndex)} title="Automatically generated by table overflow"><span>{index + 1}.{previewIndex + 1}</span><strong>Continuation {previewIndex + 1}</strong><small><b className="auto-page-badge">Auto</b></small></button>; })}</div>)}</div>
+        {activePreviewPageIndex > 0 ? <div className="auto-page-note">Auto continuation page · page actions are disabled</div> : null}
+      </div>
+    </details>
+
+    <details className="inspector-accordion" open>
+      <summary><span><span className="section-symbol">▱</span>Size &amp; orientation</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <label>Page name<input value={pageName} onChange={(e) => onName(e.target.value)}/></label>
+        <div className="property-grid"><label>Page size<select value={settings.preset} onChange={(e) => onChange({ preset: e.target.value as PagePreset })}>{presets.map((p) => <option key={p}>{p}</option>)}</select></label><label>Units<select value={unit} onChange={(e) => onChange({ unit: e.target.value as PageUnit })}><option value="mm">mm</option><option value="cm">cm</option><option value="in">inch</option></select></label></div>
+        <label>Orientation<select value={settings.orientation} onChange={(e) => onChange({ orientation: e.target.value as PageOrientation })}><option>Portrait</option><option>Landscape</option></select></label>
+        {settings.preset === 'Custom' ? <div className="property-grid"><label>Width<input type="number" min="20" step="0.1" value={Number(mmToUnit(settings.customWidthMm, unit).toFixed(2))} onChange={(e) => onChange({ customWidthMm: unitToMm(Number(e.target.value)||20,unit) })}/></label><label>Height<input type="number" min="20" step="0.1" value={Number(mmToUnit(settings.customHeightMm, unit).toFixed(2))} onChange={(e) => onChange({ customHeightMm: unitToMm(Number(e.target.value)||20,unit) })}/></label></div> : <div className="page-size-readout">{mmToUnit(size.widthMm,unit).toFixed(1)} × {mmToUnit(size.heightMm,unit).toFixed(1)} {unit === 'in' ? 'in' : unit}</div>}
+      </div>
+    </details>
+
+    <details className="inspector-accordion">
+      <summary><span><span className="section-symbol">↔</span>Margins {help('Margins define the primary printable/content inset from the physical page edge.')}</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <div className="section-inline-control"><span>Values</span><button type="button" className={linkMargins?'mini-toggle active':'mini-toggle'} onClick={() => setLinkMargins(!linkMargins)}>{linkMargins?'Linked':'Independent'}</button></div>
+        {linkMargins ? <label>All sides<input type="number" min="0" step="0.5" value={marginLinkedValue} onChange={(e) => updateEdges('marginsMm','top',Number(e.target.value),true)}/></label> : <div className="edge-grid">{(['top','right','bottom','left'] as const).map((side) => <label key={side}>{side[0].toUpperCase()+side.slice(1)}<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.marginsMm[side],unit).toFixed(2))} onChange={(e) => updateEdges('marginsMm',side,Number(e.target.value),false)}/></label>)}</div>}
+      </div>
+    </details>
+
+    <details className="inspector-accordion">
+      <summary><span><span className="section-symbol">⇥</span>Header {settings.header.enabled ? <small>On · {settings.header.repeat === 'every' ? 'Every page' : settings.header.repeat === 'first' ? 'First only' : 'Except first'}</small> : <small>Off</small>} {help('Header is a document master. Elements assigned to it can repeat across generated pages according to the repeat policy.')}</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <div className="section-inline-control"><span>Header master</span><button type="button" className={settings.header.enabled?'mini-toggle active':'mini-toggle'} onClick={() => onChange({ header: { ...settings.header, enabled: !settings.header.enabled } })}>{settings.header.enabled?'Enabled':'Disabled'}</button></div>
+        <div className="property-grid"><label>Height<input type="number" min="0" step="0.5" disabled={!settings.header.enabled} value={Number(mmToUnit(settings.header.heightMm,unit).toFixed(2))} onChange={(e) => onChange({ header: { ...settings.header, heightMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label><label>Content gap<input type="number" min="0" step="0.5" disabled={!settings.header.enabled} value={Number(mmToUnit(settings.header.gapMm,unit).toFixed(2))} onChange={(e) => onChange({ header: { ...settings.header, gapMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label></div>
+        <label>Repeat<select disabled={!settings.header.enabled} value={settings.header.repeat} onChange={(e) => onChange({ header: { ...settings.header, repeat: e.target.value as PageRepeatMode } })}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label>
+        <button type="button" className="secondary section-editor-button" onClick={onEditHeader}>Edit header content</button>
+      </div>
+    </details>
+
+    <details className="inspector-accordion">
+      <summary><span><span className="section-symbol">⇤</span>Footer {settings.footer.enabled ? <small>On · {settings.footer.repeat === 'every' ? 'Every page' : settings.footer.repeat === 'first' ? 'First only' : 'Except first'}</small> : <small>Off</small>} {help('Footer is a document master. It is ideal for page numbers, legal text and repeating document information.')}</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <div className="section-inline-control"><span>Footer master</span><button type="button" className={settings.footer.enabled?'mini-toggle active':'mini-toggle'} onClick={() => onChange({ footer: { ...settings.footer, enabled: !settings.footer.enabled } })}>{settings.footer.enabled?'Enabled':'Disabled'}</button></div>
+        <div className="property-grid"><label>Height<input type="number" min="0" step="0.5" disabled={!settings.footer.enabled} value={Number(mmToUnit(settings.footer.heightMm,unit).toFixed(2))} onChange={(e) => onChange({ footer: { ...settings.footer, heightMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label><label>Content gap<input type="number" min="0" step="0.5" disabled={!settings.footer.enabled} value={Number(mmToUnit(settings.footer.gapMm,unit).toFixed(2))} onChange={(e) => onChange({ footer: { ...settings.footer, gapMm: Math.max(0,unitToMm(Number(e.target.value)||0,unit)) } })}/></label></div>
+        <label>Repeat<select disabled={!settings.footer.enabled} value={settings.footer.repeat} onChange={(e) => onChange({ footer: { ...settings.footer, repeat: e.target.value as PageRepeatMode } })}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label>
+        <button type="button" className="secondary section-editor-button" onClick={onEditFooter}>Edit footer content</button>
+      </div>
+    </details>
+
+    <details className="inspector-accordion">
+      <summary><span><span className="section-symbol">✂</span>Bleed {help('Bleed extends artwork beyond the trim edge so cutting does not leave white gaps. A common print bleed is 3 mm.')}</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <div className="section-inline-control"><span>Values</span><button type="button" className={linkBleed?'mini-toggle active':'mini-toggle'} onClick={() => setLinkBleed(!linkBleed)}>{linkBleed?'Linked':'Independent'}</button></div>
+        {linkBleed ? <label>All sides<input type="number" min="0" step="0.5" value={bleedLinkedValue} onChange={(e) => updateEdges('bleedMm','top',Number(e.target.value),true)}/></label> : <div className="edge-grid">{(['top','right','bottom','left'] as const).map((side) => <label key={side}>{side[0].toUpperCase()+side.slice(1)}<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.bleedMm[side],unit).toFixed(2))} onChange={(e) => updateEdges('bleedMm',side,Number(e.target.value),false)}/></label>)}</div>}
+        <div className="preset-row"><button type="button" className="secondary compact" onClick={() => onChange({ bleedMm:{top:0,right:0,bottom:0,left:0} })}>None</button><button type="button" className="secondary compact" onClick={() => onChange({ bleedMm:{top:3,right:3,bottom:3,left:3} })}>3 mm print</button></div>
+      </div>
+    </details>
+
+    <details className="inspector-accordion">
+      <summary><span><span className="section-symbol">◫</span>Appearance {help('Page appearance controls the background, safe-area inset, content border and design guides.')}</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <label>Safe area inset<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.safeAreaMm,unit).toFixed(2))} onChange={(e) => onChange({ safeAreaMm: unitToMm(Number(e.target.value)||0,unit) })}/></label>
+        <div className="property-grid"><label>Background<input type="color" value={settings.background} onChange={(e) => onChange({ background:e.target.value })}/></label><label>Border color<input type="color" value={settings.borderColor} onChange={(e) => onChange({ borderColor:e.target.value })}/></label></div>
+        <div className="property-grid"><label>Border width<input type="number" min="0" max="10" value={settings.borderWidth} onChange={(e) => onChange({ borderWidth:Math.max(0,Number(e.target.value)||0) })}/></label><label>Border alignment<select value={settings.borderAlignment ?? 'inside'} onChange={(e) => onChange({ borderAlignment:e.target.value as PageSettings['borderAlignment'] })}><option value="inside">Inside</option><option value="center">Center</option><option value="outside">Outside</option></select></label></div>
+        <label>Border offset ({unitLabel(unit)})<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.borderOffsetMm ?? 0,unit).toFixed(2))} onChange={(e) => onChange({ borderOffsetMm:Math.max(0,unitToMm(Number(e.target.value)||0,unit)) })}/></label>
+        <label className="check-row guide-toggle"><input type="checkbox" checked={settings.showGuides} onChange={(e) => onChange({ showGuides:e.target.checked })}/><span><strong>Show layout guides</strong><small>Margin, safe area and bleed</small></span></label>
+      </div>
+    </details>
   </div>;
 }
 
@@ -1406,8 +1520,8 @@ function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof active
   return { options: Array.from(seen.values()), value: selectedOption?.value ?? activeRecordIndex };
 }
 
-function Inspector({ tab, selected, source, record, formulaElements, formulaAggregateRows, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
-  tab: InspectorTab; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
+function Inspector({ tab, onInspectorTab, selected, source, record, formulaElements, formulaAggregateRows, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
+  tab: InspectorTab; onInspectorTab: (tab: InspectorTab) => void; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
   onPageSettings: (patch: Partial<PageSettings>) => void; onPageName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void;
   onUpdate: (patch: Partial<BuilderElement>) => void; onDelete: () => void; onDuplicate: () => void; onArrange: (action: 'front' | 'forward' | 'backward' | 'back') => void; onMoveFlow: (direction: -1 | 1) => void; onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; relativeElements: BuilderElement[]; onSetInsertRegion: (region: PageRegion) => void; onEditTableConfiguration: (elementId: string) => void;
 }) {
@@ -1436,13 +1550,18 @@ function Inspector({ tab, selected, source, record, formulaElements, formulaAggr
   const selectedContentPreview = selected ? resolveTemplateTokens(selected.text, (field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows), { pageNumber: activePreviewPageIndex + 1, totalPages: Math.max(1, virtualPageCount), preserveUnknown: !record }) : '';
   const selectedFormulaPreview = selected?.type === 'formula' ? evaluateDocumentFormulaElement(selected, record, formulaElements, formulaAggregateRows) : null;
 
-  if (tab === 'header') return <GlobalBandEditor region="header" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion}/>;
-  if (tab === 'footer') return <GlobalBandEditor region="footer" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion}/>;
+  if (tab === 'header') return <GlobalBandEditor region="header" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion} onBack={() => onInspectorTab('properties')}/>;
+  if (tab === 'footer') return <GlobalBandEditor region="footer" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion} onBack={() => onInspectorTab('properties')}/>;
+  if (selected?.type === 'table' && selected.table && tab === 'properties') return <TableElementProperties selected={selected} elements={relativeElements} pageSettings={pageSettings} sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction} onEditConfiguration={() => onEditTableConfiguration(selected.id)} onDuplicate={onDuplicate} onDelete={onDelete}/>;
+  if (selected?.type === 'table' && selected.table && tab === 'binding') return <div className="inspector-body table-ux3-panel"><div className="inspector-panel-heading"><div><h3>Columns</h3><small>Column values and cell overrides</small></div></div><TableProperties table={selected.table} view="columns" sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/></div>;
+  if (selected?.type === 'table' && selected.table && tab === 'formatting') return <div className="inspector-body table-ux3-panel"><div className="inspector-panel-heading"><div><h3>Formatting</h3><small>Table and cell appearance</small></div></div><TableProperties table={selected.table} view="formatting" sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/></div>;
   if (tab === 'binding') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
+  if (tab === 'formatting' && selected?.type === 'text') return <TextFormattingPanel selected={selected} onUpdate={onUpdate}/>;
   if (tab === 'formatting') return <div className="inspector-body"><h3>Formatting</h3>{!selected ? <p>Select an element to edit document-safe formatting.</p> : <><label>Font family<select value={selected.fontFamily ?? 'Arial'} onChange={(e) => onUpdate({ fontFamily: e.target.value })}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label><div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e) => onUpdate({ fontSize: Math.max(6, Number(e.target.value) || 12) })}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight ?? 1.25} onChange={(e) => onUpdate({ lineHeight: Math.min(3, Math.max(0.8, Number(e.target.value) || 1.25)) })}/></label></div><div className="text-style-actions"><button type="button" className={(selected.fontWeight ?? 400) >= 700 ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ fontWeight: (selected.fontWeight ?? 400) >= 700 ? 400 : 700 })}><b>B</b></button><button type="button" className={selected.italic ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ italic: !selected.italic })}><i>I</i></button><button type="button" className={selected.underline ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ underline: !selected.underline })}><u>U</u></button></div><label>Text color<input type="color" value={selected.color} onChange={(e) => onUpdate({ color: e.target.value })}/></label>{selected.type === 'shape' && <label>Fill<input type="color" value={selected.fill} onChange={(e) => onUpdate({ fill: e.target.value })}/></label>}<div className="align-actions"><button className={selected.textAlign === 'left' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'left' })}><AlignLeft size={16}/></button><button className={selected.textAlign === 'center' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'center' })}><AlignCenter size={16}/></button><button className={selected.textAlign === 'right' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'right' })}><AlignRight size={16}/></button></div><p className="table-cell-help">Typography applies to static text and every resolved dynamic token in this content block.</p></>}</div>;
+  if (tab === 'properties' && selected?.type === 'text') return <TextPropertiesPanel selected={selected} selectedBand={selectedBand} contentPreview={selectedContentPreview} dynamicTokenFields={dynamicTokenFields} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
   if (tab === 'properties' && selected?.type === 'formula') return <div className="inspector-body"><h3>Formula Field</h3><FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div>;
   if (tab === 'conditions') return <div className="inspector-body"><h3>Conditions</h3><p>Condition rules are planned for a later phase. The selected element remains schema-ready for them.</p><button className="secondary" disabled={!selected}>Add condition</button></div>;
-  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} elements={relativeElements} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage}/>}</div>;
+  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} elements={relativeElements} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage} onEditHeader={() => onInspectorTab('header')} onEditFooter={() => onInspectorTab('footer')}/>}</div>;
 }
 
 
@@ -1459,6 +1578,114 @@ function TokenInsertPanel({ fields, value, onChange }: { fields: TemplateTokenFi
   useEffect(() => { if (field && fields.some((item) => item.name === field)) return; setField(fields[0]?.name ?? ''); }, [fields, field]);
   const append = (token: string) => onChange(`${value}${value && !value.endsWith(' ') ? ' ' : ''}${token}`);
   return <section className="inspector-card mixed-token-card"><div className="inspector-card-title">Mixed static + dynamic content</div><p className="table-cell-help">Example: <b>Invoice No: {'{{InvoiceNo}}'}</b>. Static text and any number of field tokens can be combined.</p><div className="token-insert-row"><select value={field} disabled={!fields.length} onChange={(e) => setField(e.target.value)}><option value="">Select field…</option>{fields.map((item) => <option key={item.name} value={item.name}>{item.label || item.name}</option>)}</select><button type="button" className="secondary compact" disabled={!field} onClick={() => field && append(tokenForField(field))}>Insert field</button></div><div className="token-quick-actions"><button type="button" className="secondary compact" onClick={() => append('{{pageNumber}}')}>Page #</button><button type="button" className="secondary compact" onClick={() => append('{{totalPages}}')}>Total pages</button></div></section>;
+}
+
+function InspectorHelp({ text }: { text: string }) {
+  return <span className="inspector-help" title={text} aria-label={text}>?</span>;
+}
+
+function TextPropertiesPanel({ selected, selectedBand, contentPreview, dynamicTokenFields, pageSettings, relativeElements, onUpdate, onPageSettings, assignRegion, onMoveFlow, onFlowRowAction, onArrange, onDuplicate, onDelete }: {
+  selected: BuilderElement;
+  selectedBand: 'header'|'footer'|null;
+  contentPreview: string;
+  dynamicTokenFields: TemplateTokenField[];
+  pageSettings: PageSettings;
+  relativeElements: BuilderElement[];
+  onUpdate: (patch: Partial<BuilderElement>) => void;
+  onPageSettings: (patch: Partial<PageSettings>) => void;
+  assignRegion: (region: PageRegion) => void;
+  onMoveFlow: (direction: -1|1) => void;
+  onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void;
+  onArrange: (action: 'front'|'forward'|'backward'|'back') => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const isFlow = !selectedBand && (selected.layoutMode ?? 'floating') === 'flow';
+  return <div className="inspector-body text-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Text</h3><small>Content, placement and document flow</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Content <InspectorHelp text="Write static text and insert imported fields or Formula Fields as tokens. The current document selector at the top controls preview values."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <MixedContentEditor label="Text content" value={selected.text} fields={dynamicTokenFields} previewValue={contentPreview} onChange={(text) => onUpdate({ text })}/>
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Position & Size <span className="section-unit">px</span></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <div className="property-grid compact-geometry-grid">
+            <label>X<input type="number" disabled={isFlow} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label>
+            <label>Y<input type="number" disabled={isFlow} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label>
+            <label>Width<input type="number" min="20" disabled={isFlow && (selected.flowWidth ?? 'custom') === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label>
+            <label>Height<input type="number" min="4" value={Math.round(selected.height)} onChange={(e) => onUpdate({ height: Math.max(4, Number(e.target.value) || 4) })}/></label>
+          </div>
+          {isFlow ? <p className="field-hint">Flow owns X/Y automatically. Switch to Floating when exact X/Y placement is required.</p> : null}
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Layout <InspectorHelp text="Flow keeps document content moving automatically. Floating is for overlays, stamps and exact free placement."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          {selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <TextLayoutControls selected={selected} elements={relativeElements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>} 
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Region <InspectorHelp text="Choose Body for normal document content. Header/Footer are global document masters and repeat according to the selected master policy."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <label>Place in<select value={selected.region ?? 'body'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>
+          {selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Advanced</span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          {((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="nested-inspector-card arrange-card"><div className="nested-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div></section> : <p className="field-hint">Layer controls appear here when Text is Floating or assigned to a master region.</p>}
+          <div className="inspector-actions text-object-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div>
+        </div>
+      </details>
+    </div>
+  </div>;
+}
+
+function TextLayoutControls({ selected, elements, pageSettings, onUpdate, onMove, onRowAction }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void }) {
+  const isFlow=(selected.layoutMode ?? 'floating')==='flow';
+  const rowMembers=isFlow?elements.filter((item)=>(item.region??'body')==='body'&&(item.layoutMode??'floating')==='flow'&&flowRowKey(item)===flowRowKey(selected)):[];
+  const widthPct=Math.min(100,Math.max(5,selected.flowWidthPercent??100));
+  return <div className="text-layout-controls">
+    <div className="field-label-row"><span>Placement</span></div>
+    <div className="layout-mode-toggle segmented-control"><button type="button" className={isFlow?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({layoutMode:'flow',flowRowId:selected.flowRowId??newFlowRowId(),flowWidthPercent:selected.flowWidthPercent??100,flowGapBeforeMm:selected.flowGapBeforeMm??0,flowGapAfterMm:selected.flowGapAfterMm??4,flowColumnGapMm:selected.flowColumnGapMm??4,flowAlign:selected.flowAlign??'left',flowDistribution:selected.flowDistribution??'packed',flowWidth:'full'})}>Flow</button><button type="button" className={!isFlow?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({layoutMode:'floating'})}>Floating</button></div>
+    {isFlow ? <>
+      <div className="shared-row-summary"><div><strong>{rowMembers.length>1?'Shared row':'Single row'}</strong><small>{rowMembers.length>1?`${rowMembers.length} elements in this row`:'Automatic document flow'}</small></div>{rowMembers.length>1?<span className="shared-row-count">{rowMembers.length}</span>:null}</div>
+      <div className="property-grid"><label>Width (%)<input type="number" min="5" max="100" step="1" value={widthPct} onChange={(e)=>onUpdate({flowWidthPercent:Math.min(100,Math.max(5,Number(e.target.value)||100)),flowWidth:'custom'})}/></label><label>Row gap after<input type="number" min="0" step="0.5" value={selected.flowGapAfterMm??4} onChange={(e)=>onUpdate({flowGapAfterMm:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+      <label>Distribution<select value={selected.flowDistribution??'packed'} onChange={(e)=>onUpdate({flowDistribution:e.target.value as BodyFlowDistribution})}><option value="packed">Packed</option><option value="space-between">Space Between</option><option value="space-around">Space Around</option><option value="space-evenly">Space Evenly</option></select></label>
+      <div className="property-grid"><label>Gap before<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm??0} onChange={(e)=>onUpdate({flowGapBeforeMm:Math.max(0,Number(e.target.value)||0)})}/></label><label>Block gap<input type="number" min="0" step="0.5" disabled={(selected.flowDistribution??'packed')!=='packed'} value={selected.flowColumnGapMm??4} onChange={(e)=>onUpdate({flowColumnGapMm:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+      <label>Row alignment<select disabled={(selected.flowDistribution??'packed')!=='packed'} value={selected.flowAlign??'left'} onChange={(e)=>onUpdate({flowAlign:e.target.value as BodyFlowAlign})}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+      <details className="row-manager"><summary>Manage row <ChevronDown size={14}/></summary><div className="row-manager-content"><div className="row-action-grid"><button type="button" className="secondary compact" onClick={()=>onRowAction('left')}>← Move in row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('right')}>Move in row →</button><button type="button" className="secondary compact" onClick={()=>onMove(-1)}>↑ Move row</button><button type="button" className="secondary compact" onClick={()=>onMove(1)}>↓ Move row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinPrevious')}>Join previous</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinNext')}>Join next</button></div><button type="button" className="secondary compact full-width" onClick={()=>onRowAction('newRow')}>+ New row</button><p className="field-hint">Use Join to place elements on the same horizontal row. Width controls each block's share of that row.</p></div></details>
+    </> : <>
+      <p className="field-hint">Floating allows exact free placement for overlays, stamps and decorative text.</p>
+      <BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/>
+      <RelativePlacementControls selected={selected} elements={elements} settings={pageSettings} onUpdate={onUpdate}/>
+    </>}
+  </div>;
+}
+
+function TextFormattingPanel({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Formatting</h3><small>Typography and text appearance</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open><summary><span>Typography</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content">
+        <label>Font family<select value={selected.fontFamily??'Arial'} onChange={(e)=>onUpdate({fontFamily:e.target.value})}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label>
+        <div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e)=>onUpdate({fontSize:Math.max(6,Number(e.target.value)||12)})}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={(e)=>onUpdate({lineHeight:Math.min(3,Math.max(0.8,Number(e.target.value)||1.25))})}/></label></div>
+        <div className="text-style-actions compact-style-actions"><button type="button" title="Bold" className={(selected.fontWeight??400)>=700?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({fontWeight:(selected.fontWeight??400)>=700?400:700})}><b>B</b></button><button type="button" title="Italic" className={selected.italic?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({italic:!selected.italic})}><i>I</i></button><button type="button" title="Underline" className={selected.underline?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({underline:!selected.underline})}><u>U</u></button></div>
+      </div></details>
+      <details className="inspector-accordion text-accordion" open><summary><span>Text Alignment <InspectorHelp text="Text alignment controls text inside this text box. It is separate from Layout → Row alignment, which positions the whole block in a shared row."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="field-label-row"><span>Horizontal</span></div><div className="align-actions labeled-align-actions"><button title="Left" className={selected.textAlign==='left'?'active':''} onClick={()=>onUpdate({textAlign:'left'})}><AlignLeft size={16}/><span>Left</span></button><button title="Center" className={selected.textAlign==='center'?'active':''} onClick={()=>onUpdate({textAlign:'center'})}><AlignCenter size={16}/><span>Center</span></button><button title="Right" className={selected.textAlign==='right'?'active':''} onClick={()=>onUpdate({textAlign:'right'})}><AlignRight size={16}/><span>Right</span></button></div></div></details>
+      <details className="inspector-accordion text-accordion" open><summary><span>Color & Spacing</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Text color<div className="color-control"><input type="color" value={selected.color} onChange={(e)=>onUpdate({color:e.target.value})}/><code>{selected.color}</code></div></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={(e)=>onUpdate({lineHeight:Math.min(3,Math.max(.8,Number(e.target.value)||1.25))})}/></label></div></details>
+      <details className="inspector-accordion text-accordion"><summary><span>Effects & Auto Fit</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><p className="field-hint">Advanced text effects and auto-fit controls will stay grouped here as those renderer-safe options are enabled. Existing document formatting remains unchanged.</p></div></details>
+    </div>
+  </div>;
 }
 
 function MixedContentEditor({ label, value, fields, onChange, compact = false, previewValue }: { label: string; value: string; fields: TemplateTokenField[]; onChange: (value: string) => void; compact?: boolean; previewValue?: string }) {
@@ -1557,11 +1784,12 @@ function BandPositionControls({ selected, region, settings, onUpdate }: { select
 }
 
 
-function GlobalBandEditor({ region, settings, onPageSettings, onSetInsertRegion }: { region: 'header'|'footer'; settings: PageSettings; onPageSettings: (patch: Partial<PageSettings>) => void; onSetInsertRegion: (region: PageRegion) => void }) {
+function GlobalBandEditor({ region, settings, onPageSettings, onSetInsertRegion, onBack }: { region: 'header'|'footer'; settings: PageSettings; onPageSettings: (patch: Partial<PageSettings>) => void; onSetInsertRegion: (region: PageRegion) => void; onBack: () => void }) {
   const band = settings[region];
   const label = region === 'header' ? 'Header' : 'Footer';
   const patchBand = (patch: Partial<typeof band>) => onPageSettings({ [region]: { ...band, ...patch } } as Partial<PageSettings>);
   return <div className="inspector-body global-band-editor">
+    <button type="button" className="inspector-back" onClick={onBack}><ArrowLeft size={14}/>Page settings</button>
     <h3>{label} Master</h3>
     <p>{label} is global for the generated document. Its content projects to manual builder pages and automatic overflow continuation pages according to the repeat rule.</p>
     <section className="inspector-card page-band-card">
@@ -1574,7 +1802,23 @@ function GlobalBandEditor({ region, settings, onPageSettings, onSetInsertRegion 
   </div>;
 }
 
-function TableProperties({ table, sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
+
+function TableElementProperties({ selected, elements, pageSettings, sources, activeSourceId, formulaFields, onUpdate, onMove, onRowAction, onEditConfiguration, onDuplicate, onDelete }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; onEditConfiguration: () => void; onDuplicate: () => void; onDelete: () => void }) {
+  if (!selected.table) return null;
+  const isFlow = (selected.layoutMode ?? 'floating') === 'flow';
+  return <div className="inspector-body table-ux3-panel">
+    <div className="inspector-panel-heading"><div><h3>Table</h3><small>Structure, data source and pagination</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion table-ux3-accordion" open><summary><span>Position &amp; Size</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="property-grid"><label>X<input type="number" disabled={isFlow} value={Math.round(selected.x)} onChange={(e)=>onUpdate({x:Number(e.target.value)||0})}/></label><label>Y<input type="number" disabled={isFlow} value={Math.round(selected.y)} onChange={(e)=>onUpdate({y:Number(e.target.value)||0})}/></label><label>Width<input type="number" min="20" disabled={isFlow && (selected.flowWidth ?? 'full')==='full'} value={Math.round(selected.width)} onChange={(e)=>onUpdate({width:Math.max(20,Number(e.target.value)||20)})}/></label><label>Height<input type="text" disabled value={`Auto · ${Math.round(selected.height)}px`}/></label></div></div></details>
+      <details className="inspector-accordion table-ux3-accordion" open><summary><span>Layout</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><TextLayoutControls selected={selected} elements={elements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMove} onRowAction={onRowAction}/></div></details>
+      <details className="inspector-accordion table-ux3-accordion"><summary><span>Region</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="compact-info-row"><span>Place in</span><strong>Body / Content</strong></div><p className="field-hint">Tables remain in the document body so pagination respects header, footer and content bounds.</p></div></details>
+      <TableProperties table={selected.table} view="properties" sources={sources} activeSourceId={activeSourceId} formulaFields={formulaFields} onUpdate={(table)=>onUpdate({table})} onEditConfiguration={onEditConfiguration}/>
+      <details className="inspector-accordion table-ux3-accordion"><summary><span>Advanced</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div></details>
+    </div>
+  </div>;
+}
+
+function TableProperties({ table, view = 'properties', sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; view?: 'properties'|'columns'|'formatting'; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
   const cell = findTableCell(table, table.selectedCellId);
   const cellLocation = findTableCellLocation(table, table.selectedCellId);
   const selectedColumn = cellLocation ? table.columns[Math.min(cellLocation.columnIndex, table.columns.length - 1)] ?? null : null;
@@ -1596,10 +1840,10 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
     if (!selectedDynamicBodyCell) return;
     onUpdate(updateTableCell(table, selectedDynamicBodyCell.id, patch));
   };
-  return <div className="table-properties">
-    <div className="table-summary"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
-    <label>Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
-    <section className="table-inspector-card table-border-card">
+  return <div className={`table-properties table-view-${view}`}>
+    <div className="table-summary table-scope-properties"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
+    <label className="table-scope-properties">Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
+    <section className="table-inspector-card table-border-card table-scope-formatting">
       <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▦</span><span>Table Border</span></span><small className="table-inspector-badge">Style</small></div>
       <div className="property-grid">
         <label>Style<select value={table.borderStyle ?? 'solid'} onChange={(e) => onUpdate({ ...table, borderStyle: e.target.value as 'solid'|'dashed'|'dotted'|'double'|'none' })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option><option value="double">Double</option><option value="none">None</option></select></label>
@@ -1608,8 +1852,8 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
       <label>Color<input type="color" disabled={(table.borderStyle ?? 'solid') === 'none'} value={table.borderColor} onChange={(e) => onUpdate({ ...table, borderColor: e.target.value })}/></label>
       <div className="table-border-preview" style={{ borderWidth: (table.borderStyle ?? 'solid') === 'none' ? 0 : Math.max(1, table.borderWidth), borderStyle: table.borderStyle ?? 'solid', borderColor: table.borderColor }}><span>Border preview</span></div>
     </section>
-    {groupedSummary && <button type="button" className="secondary table-edit-configuration" onClick={onEditConfiguration}>Edit Grouped Summary Configuration</button>}
-    {table.mode === 'dynamic' && (() => {
+    {groupedSummary && <button type="button" className="secondary table-edit-configuration table-scope-properties" onClick={onEditConfiguration}>Edit Grouped Summary Configuration</button>}
+    {view === 'properties' && table.mode === 'dynamic' && (() => {
       const selectedSource = sources.find((item) => item.id === table.binding?.sourceId) ?? null;
       return <>
       <label>Repeat source<select value={table.binding?.sourceId ?? ''} disabled={groupedSummary} onChange={(e) => {
@@ -1632,32 +1876,32 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
         };
         return <div className="table-relation-editor">
           <div className="section-title"><span>Document / Row Identity</span><small>Same Data Source</small></div>
-          <label>Parent / Document ID<select value={parentKeys[0] ?? ''} onChange={(e) => updateParentKey(0, e.target.value)}><option value="">Select parent field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>
+          <label>Document ID<select value={parentKeys[0] ?? ''} onChange={(e) => updateParentKey(0, e.target.value)}><option value="">Select parent field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>
           {parentKeys.slice(1).map((key, i) => <label key={`parent-extra-${i}`}>Parent key {i + 2}<select value={key} onChange={(e) => updateParentKey(i + 1, e.target.value)}><option value="">Select field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>)}
-          <button type="button" className="secondary compact" onClick={() => onUpdate({ ...table, binding: { ...table.binding!, parentKeys: [...parentKeys, ''] } })}>+ Parent key field</button>
-          {!groupedSummary && <><label>Child / Row ID<select value={rowKeys[0] ?? ''} onChange={(e) => updateRowKey(0, e.target.value)}><option value="">Index fallback</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>
+          <button type="button" className="secondary compact" onClick={() => onUpdate({ ...table, binding: { ...table.binding!, parentKeys: [...parentKeys, ''] } })}>+ Additional document key</button>
+          {!groupedSummary && <><label>Row ID<select value={rowKeys[0] ?? ''} onChange={(e) => updateRowKey(0, e.target.value)}><option value="">Index fallback</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>
           {rowKeys.slice(1).map((key, i) => <label key={`row-extra-${i}`}>Row key {i + 2}<select value={key} onChange={(e) => updateRowKey(i + 1, e.target.value)}><option value="">Select field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>)}
-          <button type="button" className="secondary compact" onClick={() => onUpdate({ ...table, binding: { ...table.binding!, rowKeys: [...rowKeys, ''] } })}>+ Row key field</button></>}
+          <button type="button" className="secondary compact" onClick={() => onUpdate({ ...table, binding: { ...table.binding!, rowKeys: [...rowKeys, ''] } })}>+ Additional row key</button></>}
           <div className="table-schema-note"><span>{groupedSummary ? 'Grouped Summary' : 'Grouping'}</span><code>{groupedSummary ? `${(parentKeys.filter(Boolean).join(' + ') || '?')} → document; ${table.binding?.grouping?.groupBy.join(' + ')} → grouped rows` : `${(parentKeys.filter(Boolean).join(' + ') || recommendedParentKey(selectedSource.fields) || '?')} → rows; ${(rowKeys.filter(Boolean).join(' + ') || recommendedRowKey(selectedSource.fields) || 'index')} → row identity`}</code></div>
         </div>;
       })()}
       <section className="table-inspector-card pagination-card">
         <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon">↧</span><span>Pagination</span></span><small className="table-inspector-badge">DB-4.4</small></div>
-        <label className="check-row"><input type="checkbox" checked={table.pagination.enabled !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, enabled: e.target.checked } })}/>Automatic overflow pages</label>
-        <label className="check-row"><input type="checkbox" checked={table.pagination.repeatHeader} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, repeatHeader: e.target.checked } })}/>Repeat header on each page</label>
-        <label className="check-row"><input type="checkbox" checked={table.pagination.keepRowsTogether} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, keepRowsTogether: e.target.checked } })}/>Keep repeated row together</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.enabled !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, enabled: e.target.checked } })}/>Automatic overflow</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.repeatHeader} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, repeatHeader: e.target.checked } })}/>Repeat header</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.keepRowsTogether} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, keepRowsTogether: e.target.checked } })}/>Keep row together</label>
         <label className="check-row"><input type="checkbox" checked={table.pagination.keepSummaryTogether !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, keepSummaryTogether: e.target.checked } })}/>Keep summary block together</label>
-        <label className="check-row"><input type="checkbox" checked={table.pagination.allowRowSplit} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, allowRowSplit: e.target.checked } })}/>Allow oversized row split (renderer foundation)</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.allowRowSplit} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, allowRowSplit: e.target.checked } })}/>Allow oversized row split</label>
         <div className="table-cell-help">Overflow is calculated from the table's Y position to the page bottom margin. Summary rows move to the final continuation page when needed.</div>
       </section>
       {!groupedSummary && <button className="secondary table-add-summary" onClick={() => onUpdate(addCustomSummaryRow(table))}>+ Add custom total / summary row</button>}
       </>;
     })()}
-    <div className="table-schema-note"><span>Table ID</span><code>{table.id}</code></div>
+    <div className="table-schema-note table-scope-properties"><span>Table ID</span><code>{table.id}</code></div>
     {cellLocation && <div className="table-structure-editor">
-      <section className="table-inspector-card">
+      <section className="table-inspector-card table-row-structure">
         <div className="table-inspector-card-head">
-          <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">☷</span><span>Row Structure</span></span>
+          <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">☷</span><span>Row</span></span>
           <small className="table-inspector-badge">{cellLocation.row.kind}</small>
         </div>
         <details className="table-tech-details"><summary>Technical ID</summary><code title={cellLocation.row.id}>{cellLocation.row.id}</code></details>
@@ -1675,9 +1919,9 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
         </div>}
       </section>
 
-      {selectedColumn && <section className="table-inspector-card">
+      {selectedColumn && <section className="table-inspector-card table-column-structure">
         <div className="table-inspector-card-head">
-          <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▥</span><span>Column Structure</span></span>
+          <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▥</span><span>Column</span></span>
           <small className="table-inspector-badge">{cellLocation.columnIndex + 1} / {table.columns.length}</small>
         </div>
         <details className="table-tech-details"><summary>Technical ID</summary><code title={selectedColumn.id}>{selectedColumn.id}</code></details>
@@ -1691,7 +1935,7 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
         <p className="table-cell-help">Tip: drag a header column divider directly on the canvas. Total table width stays inside the page.</p>
         <label>Alignment<select value={selectedColumn.align} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { align: e.target.value as 'left'|'center'|'right' }))}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
         <div className="table-data-format-card">
-          <div className="section-title"><span>Data &amp; Format</span><small>Column default</small></div>
+          <div className="section-title"><span>Value &amp; Format</span><small>Column default</small></div>
           {table.mode === 'dynamic' && selectedDynamicBodyCell && !groupedSummary && <>
             <label>Body value type<select value={selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')} onChange={(e) => patchDynamicBodyCell({ valueMode: e.target.value as TableValueMode })}><option value="binding">Field binding</option><option value="formula">Formula</option><option value="custom">Custom value</option></select></label>
             {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={selectedDynamicBodyCell.binding} onChange={(binding) => patchDynamicBodyCell({ binding, valueMode: 'binding' })}/>}
@@ -1713,7 +1957,7 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
         {mergedColumns && <div className="table-cell-help">Column move is disabled while colSpan merges exist. Add/delete remains span-aware.</div>}
       </section>}
     </div>}
-    {cell ? <div className="table-cell-editor">
+    {cell ? <div className="table-cell-editor table-selected-cell-editor">
       <div className="table-inspector-card-head selected-cell-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▣</span><span>Selected Cell</span></span><small className="table-inspector-badge">{cell.type}</small></div>
       <details className="table-tech-details"><summary>Technical ID</summary><code title={cell.id}>{cell.id}</code></details>
       <label>Cell type<select value={cell.type} onChange={(e) => { const nextType = e.target.value as TableCellType; patchCell({ type: nextType, ...(nextType === 'image' && !cell.imageFit ? { imageFit: 'cover' as const } : {}) }); }}><option value="text">Text</option><option value="image">Image</option><option value="qr">QR Code</option><option value="barcode">Barcode</option></select></label>
@@ -1726,7 +1970,7 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
         {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={cell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Use imported fields with +, -, *, / and parentheses. Fields containing spaces are inserted safely as [Basic Value].</p><FormulaFieldPicker source={bindingSource} globalFormulaFields={formulaFields} table={table} currentColumnId={selectedColumn?.id} onInsert={(fieldRef) => patchCell({ formula: `${cell.formula ?? ''}${cell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
         </>}
         <div className="table-data-format-card">
-          <div className="section-title"><span>Data &amp; Format</span><small>Cell override</small></div>
+          <div className="section-title"><span>Cell Override</span><small>Advanced</small></div>
           <label>Data type<select value={cell.dataType ?? selectedColumn?.dataType ?? 'text'} onChange={(e) => patchCell({ dataType: e.target.value as TableDataType })}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <TableDataFormatEditor dataType={cell.dataType ?? selectedColumn?.dataType ?? 'text'} value={cell.format ?? selectedColumn?.format ?? {}} onChange={(format) => patchCell({ format })}/>
         </div>
@@ -1740,6 +1984,15 @@ function TableProperties({ table, sources, activeSourceId, formulaFields, onUpda
       <label>Alignment<select value={cell.style.align} onChange={(e) => patchCell({ style: { ...cell.style, align: e.target.value as 'left'|'center'|'right' } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
       <label>Background<input type="color" value={cell.style.background} onChange={(e) => patchCell({ style: { ...cell.style, background: e.target.value } })}/></label>
     </div> : <p className="table-cell-hint">Click a table cell on the canvas to edit its content, binding, type, row span and column span.</p>}
+    {view === 'formatting' && cell && <section className="table-inspector-card table-cell-formatting-card">
+      <div className="table-inspector-card-head selected-cell-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▣</span><span>Selected Cell Style</span></span><small className="table-inspector-badge">{cellLocation?.row.kind ?? cell.type}</small></div>
+      <div className="selected-cell-context"><strong>{selectedColumn?.label || 'Selected cell'}</strong><small>Local style override</small></div>
+      <div className="property-grid"><label>Padding<input type="number" min="0" max="40" value={cell.style.padding} onChange={(e) => patchCell({ style: { ...cell.style, padding: Math.max(0, Number(e.target.value) || 0) } })}/></label><label>Font size<input type="number" min="8" max="72" value={cell.style.fontSize} onChange={(e) => patchCell({ style: { ...cell.style, fontSize: Math.max(8, Number(e.target.value) || 11) } })}/></label></div>
+      <label>Alignment<select value={cell.style.align} onChange={(e) => patchCell({ style: { ...cell.style, align: e.target.value as 'left'|'center'|'right' } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+      <label>Background<input type="color" value={cell.style.background} onChange={(e) => patchCell({ style: { ...cell.style, background: e.target.value } })}/></label>
+      <details className="table-tech-details"><summary>Data format override</summary><div className="table-format-override-body"><label>Data type<select value={cell.dataType ?? selectedColumn?.dataType ?? 'text'} onChange={(e) => patchCell({ dataType: e.target.value as TableDataType })}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><TableDataFormatEditor dataType={cell.dataType ?? selectedColumn?.dataType ?? 'text'} value={cell.format ?? selectedColumn?.format ?? {}} onChange={(format) => patchCell({ format })}/></div></details>
+    </section>}
+    {view === 'formatting' && !cell && <p className="table-cell-hint">Select a table cell on the canvas to edit its local style. Table border settings remain available above.</p>}
   </div>;
 }
 

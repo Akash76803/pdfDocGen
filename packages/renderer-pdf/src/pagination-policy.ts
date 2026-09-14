@@ -1,9 +1,11 @@
 import type { PaginationSettings } from '@document-tool/contracts';
 
-export type ResolvedFooterMode = 'REPEAT_PAGE'|'FLOW'|'LAST_PAGE_ONLY';
+export type ResolvedHeaderMode = 'EVERY_PAGE'|'FIRST_PAGE_ONLY'|'EXCEPT_FIRST';
+export type ResolvedFooterMode = 'REPEAT_PAGE'|'FLOW'|'LAST_PAGE_ONLY'|'FIRST_PAGE_ONLY'|'EXCEPT_FIRST';
 
 export interface ResolvedPaginationPolicy {
   repeatHeader: boolean;
+  headerMode: ResolvedHeaderMode;
   footerMode: ResolvedFooterMode;
   showPageNumbers: boolean;
   keepSummaryTogether: boolean;
@@ -18,8 +20,11 @@ export interface ResolvedPaginationPolicy {
 export function resolvePaginationPolicy(settings?: PaginationSettings): ResolvedPaginationPolicy {
   const footerMode: ResolvedFooterMode = settings?.footerMode
     ?? ((settings?.repeatFooter ?? true) ? 'REPEAT_PAGE' : 'FLOW');
+  const headerMode: ResolvedHeaderMode = settings?.headerMode
+    ?? ((settings?.repeatHeader ?? true) ? 'EVERY_PAGE' : 'FIRST_PAGE_ONLY');
   return {
-    repeatHeader: settings?.repeatHeader ?? true,
+    repeatHeader: headerMode === 'EVERY_PAGE',
+    headerMode,
     footerMode,
     showPageNumbers: settings?.showPageNumbers ?? true,
     keepSummaryTogether: settings?.keepSummaryTogether ?? true,
