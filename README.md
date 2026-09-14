@@ -246,3 +246,9 @@ Examples:
 - `MIN([Amount])`
 - `MAX([Amount])`
 - `SUM([CGST]) + SUM([SGST]) + SUM([IGST])`
+
+## DB-5B — Single Document Generation Engine (2026-09-14)
+The Generate workspace is now functional for one-document output. It uses the saved template, imported Data Source, Parent / Document selection, pre-generation validation, dynamic filename rules, PDF / DOCX Exact / DOCX Editable selection, and local generation history. The workflow deliberately reuses the existing Template Builder materialized Preview/export paths rather than creating a second formula, pagination, or renderer engine. See `docs/DB5B_SINGLE_DOCUMENT_GENERATION_ENGINE.md`.
+
+## DB-2 Fix4 — Content Border Margin Box
+The configurable page/content border now follows the page margin box instead of the physical paper edge. See `docs/DB2_FIX4_CONTENT_BORDER_MARGIN_BOX.md`.

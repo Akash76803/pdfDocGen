@@ -12,18 +12,39 @@ export type ExactPdfExportProgress = {
   page: MaterializedRenderPage;
 };
 
+export type ExactPdfPageTiming = { decodeMs: number; captureMs: number; encodeMs: number; totalMs: number; dpi: number };
+
 export type ExactPdfExportOptions = {
   dpi?: number;
   quality?: number;
   onProgress?: (progress: ExactPdfExportProgress) => void;
+  onTiming?: (timing: ExactPdfPageTiming, page: MaterializedRenderPage) => void;
 };
+
+export type ExactPdfParts = {
+  pages: PdfPage[];
+  images: PdfImage[];
+  totalPages: number;
+};
+
+type ExactCombinedPdfSession = {
+  pages: PdfPage[];
+  images: PdfImage[];
+  requestIds: Set<string>;
+  expectedDocuments: number;
+};
+
+const combinedPdfSessions = new Map<string, ExactCombinedPdfSession>();
 
 export async function captureMaterializedPageAsJpeg(
   node: HTMLElement,
   page: MaterializedRenderPage,
   options: ExactPdfExportOptions = {},
 ): Promise<{ bytes: Uint8Array; width: number; height: number }> {
+  const startedAt = performance.now();
+  const decodeStartedAt = startedAt;
   await decodeImages(node);
+  const decodeMs = performance.now() - decodeStartedAt;
   const dpi = Math.max(96, options.dpi ?? 192);
   const scale = dpi / 96;
   const token = `db45-export-${Date.now()}-${Math.random().toString(36).slice(2)}`;
@@ -50,6 +71,7 @@ export async function captureMaterializedPageAsJpeg(
   // before html2canvas reads computed styles.
   await nextAnimationFrame();
   try {
+    const captureStartedAt = performance.now();
     const canvas = await html2canvas(node, {
       backgroundColor: '#ffffff',
       scale,
@@ -100,8 +122,13 @@ export async function captureMaterializedPageAsJpeg(
         clone.querySelectorAll<HTMLElement>('.selected-db-cell').forEach((item) => item.classList.remove('selected-db-cell'));
       },
     });
+    const captureMs = performance.now() - captureStartedAt;
+    const encodeStartedAt = performance.now();
     const blob = await new Promise<Blob>((resolve, reject) => canvas.toBlob((value) => value ? resolve(value) : reject(new Error('Unable to encode preview page.')), 'image/jpeg', options.quality ?? 0.96));
-    return { bytes: new Uint8Array(await blob.arrayBuffer()), width: canvas.width, height: canvas.height };
+    const bytes = new Uint8Array(await blob.arrayBuffer());
+    const encodeMs = performance.now() - encodeStartedAt;
+    options.onTiming?.({ decodeMs, captureMs, encodeMs, totalMs: performance.now() - startedAt, dpi }, page);
+    return { bytes, width: canvas.width, height: canvas.height };
   } finally {
     repeatedSnapshots.forEach(({ item, hadClass, dataValue }) => {
       if (hadClass) item.classList.add('repeated-region-projection');
@@ -112,25 +139,70 @@ export async function captureMaterializedPageAsJpeg(
   }
 }
 
-export async function buildExactPreviewPdf(
+export async function buildExactPreviewPdfParts(
   model: MaterializedRenderDocument,
   resolvePageNode: (page: MaterializedRenderPage) => Promise<HTMLElement>,
   options: ExactPdfExportOptions = {},
-): Promise<Uint8Array> {
+  imagePrefix = 'DB45Page',
+): Promise<ExactPdfParts> {
   const pdfPages: PdfPage[] = [];
   const images: PdfImage[] = [];
   for (let index = 0; index < model.pages.length; index += 1) {
     const page = model.pages[index]!;
     const node = await resolvePageNode(page);
     const raster = await captureMaterializedPageAsJpeg(node, page, options);
-    const imageName = `DB45Page${index + 1}`;
+    const imageName = `${imagePrefix}${index + 1}`.replace(/[^A-Za-z0-9_]/g, '_');
     images.push({ name: imageName, bytes: raster.bytes, width: raster.width, height: raster.height });
     const width = mmToPt(page.widthMm);
     const height = mmToPt(page.heightMm);
     pdfPages.push({ width, height, ops: [`q ${fixed(width)} 0 0 ${fixed(height)} 0 0 cm /${imageName} Do Q`] });
     options.onProgress?.({ current: index + 1, total: model.pages.length, page });
   }
-  return buildPdf(pdfPages, images);
+  return { pages: pdfPages, images, totalPages: pdfPages.length };
+}
+
+export async function buildExactPreviewPdf(
+  model: MaterializedRenderDocument,
+  resolvePageNode: (page: MaterializedRenderPage) => Promise<HTMLElement>,
+  options: ExactPdfExportOptions = {},
+): Promise<Uint8Array> {
+  const parts = await buildExactPreviewPdfParts(model, resolvePageNode, options);
+  return buildPdf(parts.pages, parts.images);
+}
+
+export function appendExactCombinedPdfParts(
+  batchId: string,
+  requestId: string,
+  expectedDocuments: number,
+  parts: ExactPdfParts,
+): { completedDocuments: number; totalPages: number } {
+  let session = combinedPdfSessions.get(batchId);
+  if (!session) {
+    session = { pages: [], images: [], requestIds: new Set<string>(), expectedDocuments };
+    combinedPdfSessions.set(batchId, session);
+  }
+  session.expectedDocuments = expectedDocuments;
+  if (!session.requestIds.has(requestId)) {
+    session.requestIds.add(requestId);
+    session.pages.push(...parts.pages);
+    session.images.push(...parts.images);
+  }
+  return { completedDocuments: session.requestIds.size, totalPages: session.pages.length };
+}
+
+export function finalizeExactCombinedPdf(batchId: string): Uint8Array {
+  const session = combinedPdfSessions.get(batchId);
+  if (!session) throw new Error('Combined PDF session is unavailable. Restart the combined batch.');
+  if (session.requestIds.size !== session.expectedDocuments) {
+    throw new Error(`Combined PDF is incomplete (${session.requestIds.size}/${session.expectedDocuments} documents captured). Restart the combined batch.`);
+  }
+  const bytes = buildPdf(session.pages, session.images);
+  combinedPdfSessions.delete(batchId);
+  return bytes;
+}
+
+export function clearExactCombinedPdfSession(batchId: string) {
+  combinedPdfSessions.delete(batchId);
 }
 
 export function downloadPdf(bytes: Uint8Array, fileName: string) {

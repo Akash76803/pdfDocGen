@@ -829,22 +829,49 @@ async function prepareImages(model:RenderModel){
   for(const source of sources){const prepared=await prepareImage(source,index);if(prepared){map.set(source,prepared);index++;}}
   return map;
 }
+type PreparedImagePayload={bytes:Uint8Array;width:number;height:number};
+const preparedImageCache=new Map<string,Promise<PreparedImagePayload|undefined>>();
+
 async function prepareImage(source:string,index:number):Promise<PdfImage|undefined>{
+  let pending=preparedImageCache.get(source);
+  if(!pending){pending=decodePreparedImage(source);preparedImageCache.set(source,pending);}
+  let payload:PreparedImagePayload|undefined;
+  try{payload=await pending;}catch{preparedImageCache.delete(source);return undefined;}
+  return payload?{name:`Im${index}`,...payload}:undefined;
+}
+
+async function decodePreparedImage(source:string):Promise<PreparedImagePayload|undefined>{
   try{
-    if(/^data:image\/jpeg;base64,/i.test(source)||/^data:image\/jpg;base64,/i.test(source)){const bytes=decodeDataUrl(source);const dims=jpegDimensions(bytes);if(dims)return{name:`Im${index}`,bytes,width:dims.width,height:dims.height};}
-    // Browser-side raster normalization: PNG/WEBP/etc -> JPEG, keeping renderer dependency-free.
-    if(typeof fetch==='function' && typeof createImageBitmap==='function'){
-      const blob=await (await fetch(source)).blob();const bitmap=await createImageBitmap(blob);let dataUrl='';
-      if(typeof OffscreenCanvas!=='undefined'){
-        const canvas=new OffscreenCanvas(bitmap.width,bitmap.height);const g=canvas.getContext('2d');if(!g)return;g.drawImage(bitmap,0,0);const jpg=await canvas.convertToBlob({type:'image/jpeg',quality:.94});dataUrl=await blobToDataUrl(jpg);
-      }else if(typeof document!=='undefined'){
-        const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;const g=canvas.getContext('2d');if(!g)return;g.drawImage(bitmap,0,0);dataUrl=canvas.toDataURL('image/jpeg',.94);
+    if(/^data:image\/jpeg;base64,/i.test(source)||/^data:image\/jpg;base64,/i.test(source)){
+      const bytes=decodeDataUrl(source);const dims=jpegDimensions(bytes);if(dims)return{bytes,width:dims.width,height:dims.height};
+    }
+    // PNG/WEBP and dynamic URL images are normalized to JPEG once and cached.
+    // createImageBitmap is preferred, but some desktop webviews do not expose it;
+    // the HTMLImageElement fallback keeps Native/Combined PDF image rendering reliable.
+    if(typeof fetch==='function'){
+      const blob=await (await fetch(source)).blob();
+      if(typeof createImageBitmap==='function'){
+        const bitmap=await createImageBitmap(blob);const width=bitmap.width,height=bitmap.height;let dataUrl='';
+        if(typeof OffscreenCanvas!=='undefined'){
+          const canvas=new OffscreenCanvas(width,height);const g=canvas.getContext('2d');if(g){g.drawImage(bitmap,0,0);const jpg=await canvas.convertToBlob({type:'image/jpeg',quality:.94});dataUrl=await blobToDataUrl(jpg);}
+        }else if(typeof document!=='undefined'){
+          const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const g=canvas.getContext('2d');if(g){g.drawImage(bitmap,0,0);dataUrl=canvas.toDataURL('image/jpeg',.94);}
+        }
+        bitmap.close?.();if(dataUrl)return{bytes:decodeDataUrl(dataUrl),width,height};
       }
-      bitmap.close?.();if(dataUrl){const bytes=decodeDataUrl(dataUrl);return{name:`Im${index}`,bytes,width:bitmap.width,height:bitmap.height};}
+      if(typeof document!=='undefined'){
+        const objectUrl=URL.createObjectURL(blob);
+        try{
+          const image=await loadHtmlImage(objectUrl);const width=image.naturalWidth||image.width,height=image.naturalHeight||image.height;
+          if(width>0&&height>0){const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const g=canvas.getContext('2d');if(g){g.drawImage(image,0,0);const dataUrl=canvas.toDataURL('image/jpeg',.94);return{bytes:decodeDataUrl(dataUrl),width,height};}}
+        }finally{URL.revokeObjectURL(objectUrl);}
+      }
     }
   }catch{return undefined;}
   return undefined;
 }
+function loadHtmlImage(source:string){return new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('Unable to decode image.'));image.src=source;});}
+
 function decodeDataUrl(source:string){const base64=source.slice(source.indexOf(',')+1);if(typeof atob==='function'){const raw=atob(base64);const bytes=new Uint8Array(raw.length);for(let i=0;i<raw.length;i++)bytes[i]=raw.charCodeAt(i);return bytes;}const B=(globalThis as any).Buffer;if(B)return new Uint8Array(B.from(base64,'base64'));return new Uint8Array();}
 function jpegDimensions(bytes:Uint8Array){if(bytes.length<4||bytes[0]!==0xff||bytes[1]!==0xd8)return;let i=2;while(i+8<bytes.length){if(bytes[i]!==0xff){i++;continue;}const marker=bytes[i+1]!;const len=(bytes[i+2]!<<8)+bytes[i+3]!;if([0xc0,0xc1,0xc2,0xc3,0xc5,0xc6,0xc7,0xc9,0xca,0xcb,0xcd,0xce,0xcf].includes(marker)){return{height:(bytes[i+5]!<<8)+bytes[i+6]!,width:(bytes[i+7]!<<8)+bytes[i+8]!};}i+=2+Math.max(0,len);}return;}
 async function blobToDataUrl(blob:Blob){return await new Promise<string>((resolve,reject)=>{const reader=new FileReader();reader.onerror=()=>reject(reader.error);reader.onload=()=>resolve(String(reader.result));reader.readAsDataURL(blob);});}

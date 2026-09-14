@@ -2,6 +2,7 @@ export type PagePreset = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | 'Tabloid' | '
 export type PageOrientation = 'Portrait' | 'Landscape';
 export type PageUnit = 'mm' | 'cm' | 'in';
 export type PageRepeatMode = 'every' | 'first' | 'exceptFirst';
+export type ContentBorderAlignment = 'inside' | 'center' | 'outside';
 
 export type EdgeValues = { top: number; right: number; bottom: number; left: number };
 export type PageBandSettings = { enabled: boolean; heightMm: number; gapMm: number; repeat: PageRepeatMode };
@@ -18,6 +19,8 @@ export type PageSettings = {
   background: string;
   borderColor: string;
   borderWidth: number;
+  borderAlignment: ContentBorderAlignment;
+  borderOffsetMm: number;
   showGuides: boolean;
   header: PageBandSettings;
   footer: PageBandSettings;
@@ -38,7 +41,7 @@ export function defaultPageSettings(): PageSettings {
     preset: 'A4', orientation: 'Portrait', unit: 'mm', customWidthMm: 210, customHeightMm: 297,
     marginsMm: { top: 15, right: 15, bottom: 15, left: 15 },
     bleedMm: { top: 0, right: 0, bottom: 0, left: 0 }, safeAreaMm: 5,
-    background: '#ffffff', borderColor: '#d2d8e0', borderWidth: 1, showGuides: true,
+    background: '#ffffff', borderColor: '#d2d8e0', borderWidth: 1, borderAlignment: 'inside', borderOffsetMm: 0, showGuides: true,
     header: { enabled: false, heightMm: 20, gapMm: 5, repeat: 'every' },
     footer: { enabled: false, heightMm: 15, gapMm: 5, repeat: 'every' },
   };

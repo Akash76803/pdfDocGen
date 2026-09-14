@@ -314,7 +314,15 @@ export function materializeBodyFlowPages<T extends BodyFlowElement>(
       bounds.height,
     ));
     const hasMultiPageSpan = spans.some((span) => span && span.pageCount > 1);
-    if (!hasMultiPageSpan && cursorY + rowHeight > bottom && cursorY > bounds.y) {
+    const materializedFitHeight = spans.some(Boolean)
+      ? Math.max(...row.map((element, index) => {
+          const span = spans[index];
+          return span
+            ? Math.max(element.type === 'divider' ? 4 : 20, span.lastPageUsedHeightPx)
+            : Math.max(element.type === 'divider' ? 4 : 20, element.height);
+        }))
+      : rowHeight;
+    if (!hasMultiPageSpan && cursorY + materializedFitHeight > bottom && cursorY > bounds.y) {
       pageIndex += 1;
       cursorY = bounds.y + gapBefore;
       spans = row.map((element) => resolvePageSpan?.(
@@ -326,8 +334,19 @@ export function materializeBodyFlowPages<T extends BodyFlowElement>(
       ));
     }
 
+    // Reserve the row from the materialized runtime span when a block provides
+    // one (not from a stale persisted/cached design height). This matters for
+    // Dynamic Tables in bulk generation: invoice A may make the logical table
+    // element very tall, while invoice B has only a few rows. Starting rowEndY
+    // at `cursorY + effectiveFlowRowHeight(row)` caused that old tall height to
+    // survive even though paginateDynamicTable() reported a much shorter final
+    // fragment, producing an ever-growing blank gap before the next Flow row.
+    //
+    // Normal non-materialized blocks still reserve their live/cached row height;
+    // rows containing a span-backed block instead take the max of the ACTUAL
+    // runtime span and any ordinary row member.
     let rowEndPage = pageIndex;
-    let rowEndY = cursorY + rowHeight;
+    let rowEndY = cursorY;
     row.forEach((element, index) => {
       const span = spans[index] ?? resolvePageSpan?.(
         element,
@@ -338,15 +357,26 @@ export function materializeBodyFlowPages<T extends BodyFlowElement>(
       );
       const spanPages = Math.max(1, span?.pageCount ?? 1);
       const endPageIndex = pageIndex + spanPages - 1;
+      const ordinaryHeight = Math.max(element.type === 'divider' ? 4 : 20, element.height);
+      const reservedHeight = span
+        ? Math.max(element.type === 'divider' ? 4 : 20, span.lastPageUsedHeightPx)
+        : ordinaryHeight;
       const endY = spanPages > 1
-        ? bounds.y + Math.max(0, span?.lastPageUsedHeightPx ?? element.height)
-        : cursorY + Math.max(element.type === 'divider' ? 4 : 20, span?.lastPageUsedHeightPx ?? element.height);
+        ? bounds.y + reservedHeight
+        : cursorY + reservedHeight;
       placements.set(element.id, { id: element.id, pageIndex, y: cursorY, endPageIndex, endY });
       if (endPageIndex > rowEndPage || (endPageIndex === rowEndPage && endY > rowEndY)) {
         rowEndPage = endPageIndex;
         rowEndY = endY;
       }
     });
+
+    // A row with no materialized span still needs to reserve the tallest shared
+    // Flow-row height (including the synchronized row cache). Do not apply that
+    // stale cache to runtime span-backed rows because the span is authoritative.
+    if (!spans.some(Boolean) && rowEndPage === pageIndex) {
+      rowEndY = Math.max(rowEndY, cursorY + rowHeight);
+    }
 
     pageIndex = rowEndPage;
     cursorY = rowEndY + gapAfter;

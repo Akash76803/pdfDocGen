@@ -116,6 +116,20 @@ describe('Phase 4.9 multi-invoice combined PDF',()=>{
     expect(new Set(mediaBoxes).size).toBeGreaterThan(1);
   });
 
+
+
+  it('renders and namespaces repeated images across combined documents',async()=>{
+    const jpeg='data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////////////////////////////////////////////////2wBDAf//////////////////////////////////////////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAAAAF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABBQJ//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPwF//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPwF//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQAGPwJ//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPyF//9oADAMBAAIAAwAAABAf/8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAwEBPxB//8QAFBEBAAAAAAAAAAAAAAAAAAAAAP/aAAgBAgEBPxB//8QAFBABAAAAAAAAAAAAAAAAAAAAAP/aAAgBAQABPxB//9k=';
+    const a=fixture('img-a','IMG-A'), b=fixture('img-b','IMG-B');
+    a.model.body=[{id:'logo-a',type:'IMAGE',sourceType:'DATA_URL',source:jpeg,altText:'Logo',width:20,height:10,maintainAspectRatio:true,alignment:'LEFT',layout}];
+    b.model.body=[{id:'logo-b',type:'IMAGE',sourceType:'DATA_URL',source:jpeg,altText:'Logo',width:20,height:10,maintainAspectRatio:true,alignment:'LEFT',layout}];
+    const result=await new CombinedPdfRenderer().render([a,b]);
+    const pdf=pdfText(result.content);
+    expect(result.totalPages).toBe(2);
+    expect((pdf.match(/\/Subtype \/Image/g)||[]).length).toBe(2);
+    expect(pdf).toContain('/D1_Im1');
+    expect(pdf).toContain('/D2_Im1');
+  });
   it('rejects an empty selection',async()=>{
     await expect(new CombinedPdfRenderer().render([])).rejects.toMatchObject({code:'EMPTY_DOCUMENT_SELECTION'});
   });

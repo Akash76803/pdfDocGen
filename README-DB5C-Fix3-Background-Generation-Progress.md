@@ -1,0 +1,1 @@
+DB-5C Fix3 implements background/off-screen generation from the Generate screen, a large blinking circular progress overlay, same-tab generation event coordination, persistent bulk advancement without Builder route cycling, and additional stale-manifest DOM page-count validation.

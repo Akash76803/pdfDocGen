@@ -56,6 +56,31 @@ describe('materializeBodyFlowPages', () => {
     expect(result.pageCount).toBe(2);
   });
 
+  it('uses runtime span height instead of stale logical table height for the following row', () => {
+    const settings = defaultPageSettings();
+    const bounds = contentBoundsPx(settings);
+    const table = { id: 'table-runtime-short', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-table', x: 0, y: 0, width: 500, height: 620, flowRowHeightPx: 620, flowGapAfterMm: 4 };
+    const summary = { id: 'summary-after-short', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-summary', x: 0, y: 0, width: 500, height: 70, flowGapAfterMm: 0 };
+    const result = materializeBodyFlowPages([table, summary], settings, (element) => element.id === table.id ? { pageCount: 1, lastPageUsedHeightPx: 120 } : undefined);
+    const tablePlacement = result.placements.get(table.id)!;
+    const summaryPlacement = result.placements.get(summary.id)!;
+    expect(tablePlacement.pageIndex).toBe(0);
+    expect(summaryPlacement.pageIndex).toBe(0);
+    expect(summaryPlacement.y).toBeGreaterThan(bounds.y + 120);
+    expect(summaryPlacement.y).toBeLessThan(bounds.y + 200);
+  });
+
+  it('uses runtime span height for fit checks so a short invoice table does not jump to a phantom next page', () => {
+    const settings = defaultPageSettings();
+    const bounds = contentBoundsPx(settings);
+    const lead = { id: 'lead', type: 'text', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-lead', x: 0, y: 0, width: 500, height: Math.max(40, bounds.height - 250), flowGapAfterMm: 0 };
+    const table = { id: 'table-stale-fit', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-table-fit', x: 0, y: 0, width: 500, height: 500, flowRowHeightPx: 500, flowGapAfterMm: 0 };
+    const result = materializeBodyFlowPages([lead, table], settings, (element) => element.id === table.id ? { pageCount: 1, lastPageUsedHeightPx: 100 } : undefined);
+    const placement = result.placements.get(table.id)!;
+    expect(placement.pageIndex).toBe(0);
+    expect(placement.y).toBeLessThan(bounds.y + bounds.height);
+  });
+
   it('moves the next block to another page when the final table fragment leaves insufficient body space', () => {
     const settings = defaultPageSettings();
     const bounds = contentBoundsPx(settings);

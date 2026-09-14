@@ -2,23 +2,27 @@ import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as Rea
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
   Copy, Eye, Image, Minus, MousePointer2, QrCode, Save, Signature, Table2, Trash2, Calculator,
-  Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2, Download,
+  Type, ZoomIn, ZoomOut, Plus, FileText, Undo2, Redo2, Download, FilePlus2,
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
 import { RecordPicker } from '../components/RecordPicker.tsx';
 import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState } from '../lib/dataSourceStore.ts';
 import { loadImageAsset, saveImageAsset } from '../lib/imageAssetStore.ts';
 import { TableCreateModal } from '../components/TableCreateModal.tsx';
+import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
-import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode } from '../lib/pageModel.ts';
+import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode } from '../lib/pageModel.ts';
 import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
+import { beginNewTemplate, consumeTemplateBuilderAction, migrateLegacyTemplateToLibrary, saveTemplateToLibrary, TEMPLATE_STORAGE_KEY, type NewTemplateRequest, type TemplateDocumentType } from '../lib/templateLibrary.ts';
 import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowDistribution, type BodyFlowWidth } from '../lib/bodyFlow.ts';
 import { buildMaterializedRenderDocument, type MaterializedRenderPage } from '../lib/materializedRenderModel.ts';
-import { buildExactPreviewPdf, downloadPdf } from '../lib/exactPdfExport.ts';
+import { appendExactCombinedPdfParts, buildExactPreviewPdf, buildExactPreviewPdfParts, clearExactCombinedPdfSession, downloadPdf, finalizeExactCombinedPdf } from '../lib/exactPdfExport.ts';
 import { buildExactPreviewDocx, downloadDocx } from '../lib/exactDocxExport.ts';
 import { buildEditablePreviewDocx } from '../lib/editableDocxExport.ts';
 import { amountToIndianWords } from '../lib/numberToWords.ts';
+import { getPdfRenderProfile } from '../lib/pdfRenderProfile.ts';
+import { appendGenerationHistory, clearGenerationProgress, clearGenerationRequest, GENERATION_REQUEST_EVENT, readGenerationRequest, writeGenerationProgress, type GenerationRequest } from '../lib/generationEngine.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'binding' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -75,9 +79,11 @@ type SavedTemplate = {
   orientation?: 'Portrait' | 'Landscape';
   elements?: BuilderElement[];
   updatedAt: string;
+  documentType?: TemplateDocumentType;
+  status?: 'Draft' | 'Saved';
 };
 
-const STORAGE_KEY = 'document-builder.template.db2.v1';
+const STORAGE_KEY = TEMPLATE_STORAGE_KEY;
 const tools: Array<{ label: string; type: ToolType; icon: typeof Type }> = [
   { label: 'Text', type: 'text', icon: Type },
   { label: 'Image', type: 'image', icon: Image },
@@ -128,6 +134,13 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [docxExportProgress, setDocxExportProgress] = useState('');
   const [editableDocxExporting, setEditableDocxExporting] = useState(false);
   const [editableDocxExportProgress, setEditableDocxExportProgress] = useState('');
+  const [templateHydrated, setTemplateHydrated] = useState(false);
+  const [newTemplateOpen, setNewTemplateOpen] = useState(false);
+  const [newTemplateUnsavedOpen, setNewTemplateUnsavedOpen] = useState(false);
+  const [documentType, setDocumentType] = useState<TemplateDocumentType>('Document');
+  const generationRunningRef = useRef(false);
+  const [generationRequestVersion, setGenerationRequestVersion] = useState(0);
+  const lastRendererErrorRef = useRef<string | null>(null);
   const undoStackRef = useRef<EditorSnapshot[]>([]);
   const redoStackRef = useRef<EditorSnapshot[]>([]);
   const historyGestureRef = useRef<EditorSnapshot | null>(null);
@@ -201,12 +214,34 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   };
 
   useEffect(() => {
+    // DB-2 Fix2 Template Library: New Template must start with a truly blank
+    // document; opening an existing library card first syncs that item into
+    // the legacy active-template key so all existing Builder/Generate logic
+    // stays backward compatible.
+    const builderAction = consumeTemplateBuilderAction(window.localStorage);
+    if (builderAction) {
+      const settings = defaultPageSettings();
+      settings.preset = builderAction.pageSize;
+      settings.orientation = builderAction.orientation;
+      const starterElements = buildStarterElements(builderAction.starter, settings);
+      const page: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings, elements: starterElements };
+      setName(builderAction.name);
+      setDocumentType(builderAction.documentType);
+      setPages([page]);
+      setActivePageId(page.id);
+      setSelectedId(null);
+      setStatus('Draft');
+      setTemplateHydrated(true);
+      return;
+    }
+    migrateLegacyTemplateToLibrary(window.localStorage);
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return;
+    if (!raw) { setTemplateHydrated(true); return; }
     try {
       const saved = JSON.parse(raw) as SavedTemplate;
       if ((Array.isArray(saved.pages) && saved.pages.length) || Array.isArray(saved.elements)) {
         setName(saved.name || 'Untitled Document');
+        setDocumentType(saved.documentType ?? 'Document');
         if (Array.isArray(saved.pages) && saved.pages.length) {
           const normalizedPages = saved.pages.map((page) => ({ ...page, settings: normalizePageSettings(page.settings), elements: (page.elements ?? []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowDistribution: element.flowDistribution ?? 'packed', flowWidth: element.flowWidth ?? 'full' })) }));
           const globalHeader = normalizedPages[0].settings.header;
@@ -228,6 +263,8 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       }
     } catch {
       // Ignore invalid legacy/local data and continue with a clean template.
+    } finally {
+      setTemplateHydrated(true);
     }
   }, []);
 
@@ -238,6 +275,81 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     window.addEventListener('storage', refresh);
     return () => { window.removeEventListener(DATA_EVENT, refresh); window.removeEventListener('storage', refresh); };
   }, []);
+
+  useEffect(() => {
+    const onGenerationRequest = () => setGenerationRequestVersion((value) => value + 1);
+    window.addEventListener(GENERATION_REQUEST_EVENT, onGenerationRequest);
+    return () => window.removeEventListener(GENERATION_REQUEST_EVENT, onGenerationRequest);
+  }, []);
+
+  useEffect(() => {
+    if (!templateHydrated || generationRunningRef.current || pdfExporting || docxExporting || editableDocxExporting) return;
+    const request = readGenerationRequest(window.localStorage);
+    if (!request) return;
+    if (dataState.activeSourceId !== request.sourceId || dataState.activeRecordIndex !== request.activeRecordIndex) return;
+    generationRunningRef.current = true;
+    writeGenerationProgress(window.localStorage, { requestId: request.id, percent: 4, message: 'Preparing your document…' });
+    setStatus('Generating requested document…');
+    setSelectedId(null);
+    setActivePreviewPageIndex(0);
+    const run = async (generationRequest: GenerationRequest) => {
+      await waitForBuilderPaint();
+      await waitForBuilderPaint();
+      let success = false;
+      let error: string | undefined;
+      try {
+        if (generationRequest.format === 'pdf' && generationRequest.combinedPdf) {
+          const combined = generationRequest.combinedPdf;
+          setPdfExporting(true);
+          setPdfExportProgress(`Combined PDF ${combined.index + 1} / ${combined.total} · preparing ${generationRequest.documentLabel}`);
+          writeGenerationProgress(window.localStorage, { requestId: generationRequest.id, percent: 8, message: `Preparing ${generationRequest.documentLabel}…` });
+          try {
+            const model = await waitForStableRenderModel();
+            const pdfProfile = getPdfRenderProfile(generationRequest.pdfRenderProfile);
+            const parts = await buildExactPreviewPdfParts(model, resolveMaterializedPageNode, {
+              dpi: pdfProfile.dpi,
+              quality: pdfProfile.jpegQuality,
+              onProgress: ({ current, total }) => {
+                setPdfExportProgress(`Combined PDF ${combined.index + 1} / ${combined.total} · page ${current} / ${total}`);
+                writeGenerationProgress(window.localStorage, { requestId: generationRequest.id, percent: 10 + Math.round((current / Math.max(1, total)) * 85), current, total, message: `Rendering page ${current} of ${total}…` });
+              },
+            }, `DB5C_${combined.batchId}_${combined.index + 1}_`);
+            const progress = appendExactCombinedPdfParts(combined.batchId, generationRequest.id, combined.total, parts);
+            if (combined.index === combined.total - 1) {
+              const bytes = finalizeExactCombinedPdf(combined.batchId);
+              downloadPdf(bytes, sanitizeExportFileName(combined.finalFileName || 'Combined_Invoices'));
+              setPdfExportProgress(`Combined PDF ready · ${progress.completedDocuments} documents · ${progress.totalPages} pages`);
+              setStatus('Combined PDF generated');
+            } else {
+              setPdfExportProgress(`Captured ${combined.index + 1} / ${combined.total} documents`);
+              setStatus('Invoice added to combined PDF');
+            }
+            success = true;
+          } finally {
+            setPdfExporting(false);
+          }
+        } else if (generationRequest.format === 'pdf') success = await exportPreviewPdf(generationRequest.fileName, generationRequest.pdfRenderProfile);
+        else if (generationRequest.format === 'docx-exact') success = await exportPreviewDocx(generationRequest.fileName);
+        else success = await exportEditableDocx(generationRequest.fileName);
+        if (!success) error = lastRendererErrorRef.current || 'Renderer reported a generation failure.';
+      } catch (caught) {
+        if (generationRequest.combinedPdf) clearExactCombinedPdfSession(generationRequest.combinedPdf.batchId);
+        error = caught instanceof Error ? caught.message : 'Unable to generate document.';
+      } finally {
+        clearGenerationRequest(window.localStorage);
+        clearGenerationProgress(window.localStorage);
+        appendGenerationHistory(window.localStorage, {
+          ...generationRequest,
+          status: success ? 'success' : 'failed',
+          completedAt: new Date().toISOString(),
+          error,
+        });
+        generationRunningRef.current = false;
+        onNavigate('generate');
+      }
+    };
+    void run(request);
+  }, [templateHydrated, dataState.activeSourceId, dataState.activeRecordIndex, pdfExporting, docxExporting, editableDocxExporting, generationRequestVersion]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -562,56 +674,206 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   function movePage(direction: -1 | 1) { const index = pages.findIndex((p) => p.id === activePageId); const target = index + direction; if (index < 0 || target < 0 || target >= pages.length) return; recordHistory(); const next = [...pages]; [next[index], next[target]] = [next[target], next[index]]; setPages(next); setStatus('Unsaved changes'); }
   function renamePage(value: string) { recordHistory(); setPages((c) => c.map((p) => p.id === activePageId ? { ...p, name: value } : p)); setStatus('Unsaved changes'); }
 
+  function requestNewTemplate() {
+    if (status === 'Unsaved changes') {
+      setNewTemplateUnsavedOpen(true);
+      return;
+    }
+    setNewTemplateOpen(true);
+  }
+
+  function createNewTemplate(request: NewTemplateRequest) {
+    beginNewTemplate(window.localStorage, request);
+    // This Builder instance applies the request immediately; consume the one-shot
+    // action so reopening Builder later cannot reset the draft a second time.
+    consumeTemplateBuilderAction(window.localStorage);
+    const settings = defaultPageSettings();
+    settings.preset = request.pageSize;
+    settings.orientation = request.orientation;
+    const page: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings, elements: buildStarterElements(request.starter, settings) };
+    recordHistory();
+    setName(request.name);
+    setDocumentType(request.documentType);
+    setPages([page]);
+    setActivePageId(page.id);
+    setSelectedId(null);
+    setStatus('Draft');
+    setNewTemplateOpen(false);
+  }
+
   function saveTemplate() {
-    const payload: SavedTemplate = { name, pages, activePageId, updatedAt: new Date().toISOString() };
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(payload));
+    const payload: SavedTemplate = { name, pages, activePageId, documentType, status: 'Saved', updatedAt: new Date().toISOString() };
+    saveTemplateToLibrary(window.localStorage, payload);
     setStatus('Saved locally');
   }
 
-  async function exportPreviewPdf() {
-    if (pdfExporting) return;
+  async function waitForStableRenderModel(): Promise<ReturnType<typeof buildMaterializedRenderDocument>> {
+    // DB-5B Fix2: auto-height Body Flow blocks can still update persisted
+    // element heights for a few paints after Generate opens Builder. If the
+    // render manifest is frozen before those commits settle, it can request a
+    // continuation page that React has already collapsed away (for example,
+    // manifest says page 2 while the settled Preview has only page 1). Build
+    // the manifest from the latest page refs only after output-page counts
+    // remain stable across several observations.
+    // DB-5D Fix1: keep generation fast and make the DOM the final authority.
+    // The old 5s/4-observation guard could spend several seconds per invoice
+    // and still freeze a stale model count (for example model=2 while React
+    // had already settled to one physical Preview page).
+    const deadline = Date.now() + 1800;
+    let previousSignature = '';
+    let stableObservations = 0;
+    let latestCounts: number[] = [];
+
+    while (Date.now() < deadline) {
+      await waitForBuilderPaint();
+      const currentPages = pagesRef.current;
+      latestCounts = currentPages.map((page, index) => {
+        const currentMaster = currentPages[0];
+        const header = currentMaster?.settings.header ?? page.settings.header;
+        const footer = currentMaster?.settings.footer ?? page.settings.footer;
+        const effectiveSettings = { ...page.settings, header: { ...header }, footer: { ...footer } };
+        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
+      });
+      const signature = latestCounts.join(',');
+      if (signature === previousSignature) stableObservations += 1;
+      else { previousSignature = signature; stableObservations = 1; }
+
+      // Two matching observations plus real DOM agreement are enough here: the
+      // hidden render host already stays mounted and each observation spans a
+      // paint. Before freezing the manifest, verify that React has
+      // actually materialized the same number of physical Preview pages for
+      // every builder page. This closes the stale-manifest gap where model
+      // math still said 2 pages but the settled DOM had already collapsed to 1.
+      if (stableObservations >= 2) {
+        let domMatchesManifest = true;
+        for (let pageIndex = 0; pageIndex < currentPages.length; pageIndex += 1) {
+          const page = currentPages[pageIndex]!;
+          if (activePageIdRef.current !== page.id) {
+            setActivePageId(page.id);
+            setActivePreviewPageIndex(0);
+            await waitForBuilderPaint();
+          }
+          await waitForBuilderPaint();
+          const nodes = Array.from(document.querySelectorAll<HTMLElement>(`.document-page[data-builder-page-id="${page.id}"]`));
+          const expected = latestCounts[pageIndex] ?? 1;
+          const measurableNodes = nodes.filter((node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; });
+          if (measurableNodes.length !== expected) {
+            domMatchesManifest = false;
+            break;
+          }
+        }
+        if (domMatchesManifest) break;
+        stableObservations = 0;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 30));
+    }
+
+    const currentPages = pagesRef.current;
+
+    // DB-5D Fix1: final reconciliation. If model math and the settled Preview
+    // disagree at timeout, export what is actually materialized in the DOM.
+    // This prevents a stale phantom continuation page from poisoning the PDF
+    // manifest and removes the recurring "Preview output page 2" failure.
+    const reconciledCounts: number[] = [];
+    for (let pageIndex = 0; pageIndex < currentPages.length; pageIndex += 1) {
+      const page = currentPages[pageIndex]!;
+      if (activePageIdRef.current !== page.id) {
+        setActivePageId(page.id);
+        setActivePreviewPageIndex(0);
+        await waitForBuilderPaint();
+      }
+      const measurableNodes = Array.from(document.querySelectorAll<HTMLElement>(`.document-page[data-builder-page-id="${page.id}"]`))
+        .filter((node) => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0; });
+      reconciledCounts[pageIndex] = Math.max(1, measurableNodes.length || latestCounts[pageIndex] || 1);
+    }
+    latestCounts = reconciledCounts;
+
+    if (latestCounts.length !== currentPages.length) {
+      latestCounts = currentPages.map((page) => {
+        const currentMaster = currentPages[0];
+        const header = currentMaster?.settings.header ?? page.settings.header;
+        const footer = currentMaster?.settings.footer ?? page.settings.footer;
+        return buildBodyMaterialization(page.elements, { ...page.settings, header: { ...header }, footer: { ...footer } }).pageCount;
+      });
+    }
+    return buildMaterializedRenderDocument(nameRef.current, currentPages.map((page, index) => ({
+      id: page.id,
+      name: page.name,
+      settings: {
+        ...page.settings,
+        header: { ...(currentPages[0]?.settings.header ?? page.settings.header) },
+        footer: { ...(currentPages[0]?.settings.footer ?? page.settings.footer) },
+      },
+      outputPageCount: latestCounts[index] ?? 1,
+    })));
+  }
+
+  async function resolveMaterializedPageNode(renderPage: MaterializedRenderPage): Promise<HTMLElement> {
+    if (activePageIdRef.current !== renderPage.builderPageId) {
+      setActivePageId(renderPage.builderPageId);
+      setActivePreviewPageIndex(0);
+    }
+
+    // DB-5B Fix1: Generation is launched from another route. Large/multi-page
+    // documents can need more than two animation frames for Flow/table
+    // measurement and continuation-page projection to settle. Poll for the
+    // exact materialized page instead of failing immediately while React is
+    // still committing the selected document context.
+    const selector = `.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`;
+    const deadline = Date.now() + 1800;
+    let lastNode: HTMLElement | null = null;
+    while (Date.now() < deadline) {
+      await waitForBuilderPaint();
+      const node = document.querySelector<HTMLElement>(selector);
+      if (node) {
+        lastNode = node;
+        const rect = node.getBoundingClientRect();
+        if (rect.width > 0 && rect.height > 0) {
+          // One extra paint lets auto-height/table measurements that were
+          // triggered by the current commit settle before html2canvas reads it.
+          await waitForBuilderPaint();
+          return node;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (lastNode) return lastNode;
+    throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable after waiting for layout.`);
+  }
+
+  async function exportPreviewPdf(fileNameOverride?: string, requestedProfile?: GenerationRequest['pdfRenderProfile']): Promise<boolean> {
+    if (pdfExporting) return false;
     const originalPageId = activePageId;
     const originalPreviewPage = activePreviewPageIndex;
     const originalSelectedId = selectedId;
+    lastRendererErrorRef.current = null;
     setPdfExporting(true);
     setPdfExportProgress('Preparing render model…');
     setSelectedId(null);
     try {
-      const counts = pages.map((page) => {
-        const effectiveSettings = { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } };
-        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
-      });
-      const model = buildMaterializedRenderDocument(name, pages.map((page, index) => ({
-        id: page.id,
-        name: page.name,
-        settings: { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } },
-        outputPageCount: counts[index] ?? 1,
-      })));
-      const resolvePageNode = async (renderPage: MaterializedRenderPage) => {
-        if (activePageIdRef.current !== renderPage.builderPageId) {
-          setActivePageId(renderPage.builderPageId);
-          setActivePreviewPageIndex(0);
-          await waitForBuilderPaint();
-          await waitForBuilderPaint();
-        } else {
-          await waitForBuilderPaint();
-        }
-        const node = document.querySelector<HTMLElement>(`.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`);
-        if (!node) throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable.`);
-        return node;
-      };
+      const model = await waitForStableRenderModel();
+      const resolvePageNode = resolveMaterializedPageNode;
+      const pdfProfile = getPdfRenderProfile(requestedProfile);
       const bytes = await buildExactPreviewPdf(model, resolvePageNode, {
-        dpi: 192,
-        quality: 0.96,
-        onProgress: ({ current, total }) => setPdfExportProgress(`Rendering PDF ${current} / ${total}`),
+        dpi: pdfProfile.dpi,
+        quality: pdfProfile.jpegQuality,
+        onProgress: ({ current, total }) => {
+          setPdfExportProgress(`Rendering PDF ${current} / ${total}`);
+          const request = readGenerationRequest(window.localStorage);
+          if (request) writeGenerationProgress(window.localStorage, { requestId: request.id, percent: 10 + Math.round((current / Math.max(1, total)) * 85), current, total, message: `Rendering PDF page ${current} of ${total}…` });
+        },
       });
-      downloadPdf(bytes, sanitizeExportFileName(name || 'Document'));
+      downloadPdf(bytes, sanitizeExportFileName(fileNameOverride || name || 'Document'));
       setStatus('PDF generated');
       setPdfExportProgress(`PDF ready • ${model.totalPages} page${model.totalPages === 1 ? '' : 's'}`);
+      return true;
     } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unable to generate PDF';
+      lastRendererErrorRef.current = detail;
       console.error('DB-4.5 exact PDF export failed', error);
       setStatus('PDF export failed');
-      setPdfExportProgress(error instanceof Error ? error.message : 'Unable to generate PDF');
+      setPdfExportProgress(detail);
+      return false;
     } finally {
       setActivePageId(originalPageId);
       setActivePreviewPageIndex(originalPreviewPage);
@@ -621,50 +883,38 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     }
   }
 
-  async function exportPreviewDocx() {
-    if (docxExporting) return;
+  async function exportPreviewDocx(fileNameOverride?: string): Promise<boolean> {
+    if (docxExporting) return false;
     const originalPageId = activePageId;
     const originalPreviewPage = activePreviewPageIndex;
     const originalSelectedId = selectedId;
+    lastRendererErrorRef.current = null;
     setDocxExporting(true);
     setDocxExportProgress('Preparing render model…');
     setSelectedId(null);
     try {
-      const counts = pages.map((page) => {
-        const effectiveSettings = { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } };
-        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
-      });
-      const model = buildMaterializedRenderDocument(name, pages.map((page, index) => ({
-        id: page.id,
-        name: page.name,
-        settings: { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } },
-        outputPageCount: counts[index] ?? 1,
-      })));
-      const resolvePageNode = async (renderPage: MaterializedRenderPage) => {
-        if (activePageIdRef.current !== renderPage.builderPageId) {
-          setActivePageId(renderPage.builderPageId);
-          setActivePreviewPageIndex(0);
-          await waitForBuilderPaint();
-          await waitForBuilderPaint();
-        } else {
-          await waitForBuilderPaint();
-        }
-        const node = document.querySelector<HTMLElement>(`.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`);
-        if (!node) throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable.`);
-        return node;
-      };
+      const model = await waitForStableRenderModel();
+      const resolvePageNode = resolveMaterializedPageNode;
       const bytes = await buildExactPreviewDocx(model, resolvePageNode, {
         dpi: 192,
         quality: 0.96,
-        onProgress: ({ current, total }) => setDocxExportProgress(`Rendering DOCX ${current} / ${total}`),
+        onProgress: ({ current, total }) => {
+          setDocxExportProgress(`Rendering DOCX ${current} / ${total}`);
+          const request = readGenerationRequest(window.localStorage);
+          if (request) writeGenerationProgress(window.localStorage, { requestId: request.id, percent: 10 + Math.round((current / Math.max(1, total)) * 85), current, total, message: `Rendering DOCX page ${current} of ${total}…` });
+        },
       });
-      downloadDocx(bytes, sanitizeExportFileName(name || 'Document'));
+      downloadDocx(bytes, sanitizeExportFileName(fileNameOverride || name || 'Document'));
       setStatus('DOCX generated');
       setDocxExportProgress(`DOCX ready • ${model.totalPages} page${model.totalPages === 1 ? '' : 's'}`);
+      return true;
     } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unable to generate DOCX';
+      lastRendererErrorRef.current = detail;
       console.error('DB-4.5C exact DOCX export failed', error);
       setStatus('DOCX export failed');
-      setDocxExportProgress(error instanceof Error ? error.message : 'Unable to generate DOCX');
+      setDocxExportProgress(detail);
+      return false;
     } finally {
       setActivePageId(originalPageId);
       setActivePreviewPageIndex(originalPreviewPage);
@@ -675,48 +925,36 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   }
 
 
-  async function exportEditableDocx() {
-    if (editableDocxExporting) return;
+  async function exportEditableDocx(fileNameOverride?: string): Promise<boolean> {
+    if (editableDocxExporting) return false;
     const originalPageId = activePageId;
     const originalPreviewPage = activePreviewPageIndex;
     const originalSelectedId = selectedId;
+    lastRendererErrorRef.current = null;
     setEditableDocxExporting(true);
     setEditableDocxExportProgress('Preparing editable render model…');
     setSelectedId(null);
     try {
-      const counts = pages.map((page) => {
-        const effectiveSettings = { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } };
-        return buildBodyMaterialization(page.elements, effectiveSettings).pageCount;
-      });
-      const model = buildMaterializedRenderDocument(name, pages.map((page, index) => ({
-        id: page.id,
-        name: page.name,
-        settings: { ...page.settings, header: { ...masterHeader }, footer: { ...masterFooter } },
-        outputPageCount: counts[index] ?? 1,
-      })));
-      const resolvePageNode = async (renderPage: MaterializedRenderPage) => {
-        if (activePageIdRef.current !== renderPage.builderPageId) {
-          setActivePageId(renderPage.builderPageId);
-          setActivePreviewPageIndex(0);
-          await waitForBuilderPaint();
-          await waitForBuilderPaint();
-        } else {
-          await waitForBuilderPaint();
-        }
-        const node = document.querySelector<HTMLElement>(`.document-page[data-builder-page-id="${renderPage.builderPageId}"][data-continuation-index="${renderPage.continuationIndex}"]`);
-        if (!node) throw new Error(`Preview output page ${renderPage.documentPageIndex + 1} is unavailable.`);
-        return node;
-      };
+      const model = await waitForStableRenderModel();
+      const resolvePageNode = resolveMaterializedPageNode;
       const bytes = await buildEditablePreviewDocx(model, resolvePageNode, {
-        onProgress: ({ current, total }) => setEditableDocxExportProgress(`Building editable DOCX ${current} / ${total}`),
+        onProgress: ({ current, total }) => {
+          setEditableDocxExportProgress(`Building editable DOCX ${current} / ${total}`);
+          const request = readGenerationRequest(window.localStorage);
+          if (request) writeGenerationProgress(window.localStorage, { requestId: request.id, percent: 10 + Math.round((current / Math.max(1, total)) * 85), current, total, message: `Building editable DOCX page ${current} of ${total}…` });
+        },
       });
-      downloadDocx(bytes, `${sanitizeExportFileName(name || 'Document')}-editable`);
+      downloadDocx(bytes, fileNameOverride ? sanitizeExportFileName(fileNameOverride) : `${sanitizeExportFileName(name || 'Document')}-editable`);
       setStatus('Editable DOCX generated');
       setEditableDocxExportProgress(`Editable DOCX ready • ${model.totalPages} page${model.totalPages === 1 ? '' : 's'}`);
+      return true;
     } catch (error) {
+      const detail = error instanceof Error ? error.message : 'Unable to generate editable DOCX';
+      lastRendererErrorRef.current = detail;
       console.error('DB-4.5C v2 editable DOCX export failed', error);
       setStatus('Editable DOCX export failed');
-      setEditableDocxExportProgress(error instanceof Error ? error.message : 'Unable to generate editable DOCX');
+      setEditableDocxExportProgress(detail);
+      return false;
     } finally {
       setActivePageId(originalPageId);
       setActivePreviewPageIndex(originalPreviewPage);
@@ -789,13 +1027,24 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <button className="secondary" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span>Undo</span></button>
           <button className="secondary" title="Redo (Ctrl+Y / Ctrl+Shift+Z)" onClick={redo} disabled={redoStackRef.current.length === 0}><Redo2 size={16}/><span>Redo</span></button>
           <button className="secondary"><Eye size={16}/><span>Preview</span></button>
-          <button className="secondary" onClick={exportPreviewPdf} disabled={pdfExporting || docxExporting || editableDocxExporting} title="DB-4.5 exact Preview → PDF"><Download size={16}/><span>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</span></button>
-          <button className="secondary" onClick={exportPreviewDocx} disabled={docxExporting || pdfExporting || editableDocxExporting} title="DOCX Exact: maximum Preview fidelity; content is page artwork"><FileText size={16}/><span>{docxExporting ? docxExportProgress || 'DOCX Exact…' : 'DOCX Exact'}</span></button>
-          <button className="secondary" onClick={exportEditableDocx} disabled={editableDocxExporting || docxExporting || pdfExporting} title="DOCX Editable: native Word text and tables; Word may reflow slightly"><FileText size={16}/><span>{editableDocxExporting ? editableDocxExportProgress || 'DOCX Editable…' : 'DOCX Editable'}</span></button>
+          <button className="secondary" onClick={() => { void exportPreviewPdf(); }} disabled={pdfExporting || docxExporting || editableDocxExporting} title="DB-4.5 exact Preview → PDF"><Download size={16}/><span>{pdfExporting ? pdfExportProgress || 'PDF…' : 'PDF'}</span></button>
+          <button className="secondary" onClick={() => { void exportPreviewDocx(); }} disabled={docxExporting || pdfExporting || editableDocxExporting} title="DOCX Exact: maximum Preview fidelity; content is page artwork"><FileText size={16}/><span>{docxExporting ? docxExportProgress || 'DOCX Exact…' : 'DOCX Exact'}</span></button>
+          <button className="secondary" onClick={() => { void exportEditableDocx(); }} disabled={editableDocxExporting || docxExporting || pdfExporting} title="DOCX Editable: native Word text and tables; Word may reflow slightly"><FileText size={16}/><span>{editableDocxExporting ? editableDocxExportProgress || 'DOCX Editable…' : 'DOCX Editable'}</span></button>
+          <button className="secondary" onClick={requestNewTemplate} title="Create a new draft template"><FilePlus2 size={16}/><span>New</span></button>
           <button className="secondary" onClick={saveTemplate}><Save size={16}/><span>Save</span></button>
           <button className="primary" onClick={() => onNavigate('generate')}>Generate</button>
         </div>
       </header>
+
+      {newTemplateUnsavedOpen && <div className="table-modal-backdrop" onPointerDown={(event) => { if (event.target === event.currentTarget) setNewTemplateUnsavedOpen(false); }}>
+        <div className="table-modal unsaved-template-modal" role="dialog" aria-modal="true" aria-label="Unsaved template changes">
+          <div className="table-modal-title"><span>Unsaved changes</span></div>
+          <div className="table-modal-note">Your current template has changes that have not been saved. What would you like to do before creating a new template?</div>
+          <div className="table-modal-actions three-way"><button className="secondary" onClick={() => setNewTemplateUnsavedOpen(false)}>Cancel</button><button className="secondary danger-soft" onClick={() => { setNewTemplateUnsavedOpen(false); setNewTemplateOpen(true); }}>Discard</button><button className="primary" onClick={() => { saveTemplate(); setNewTemplateUnsavedOpen(false); setNewTemplateOpen(true); }}>Save &amp; Continue</button></div>
+        </div>
+      </div>}
+
+      {newTemplateOpen && <NewTemplateModal onCancel={() => setNewTemplateOpen(false)} onCreate={createNewTemplate} />}
 
       {tableModalOpen && <TableCreateModal
         sources={dataState.sources}
@@ -848,6 +1097,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
               <div className={`virtual-page-frame${activePreviewPageIndex === virtualPageIndex ? ' active-preview-page' : ''}`} data-virtual-page-index={virtualPageIndex} key={`virtual-page-${virtualPageIndex}`} style={{ width: previewPagePixels.width * previewScale, height: previewPagePixels.height * previewScale }} onPointerDown={() => setActivePreviewPageIndex(virtualPageIndex)}>
                 <div className="virtual-page-label">{activePage?.name || 'Page'}{virtualPageIndex > 0 ? ` · Continuation ${virtualPageIndex + 1}` : ''}<span>{virtualPageIndex + 1} / {virtualPageCount}</span></div>
                 <div className="document-page" data-export-page="true" data-builder-page-id={activePage?.id} data-continuation-index={virtualPageIndex} data-document-page-index={documentPageOffset + virtualPageIndex} style={{ ...pageCanvasStyle(pageSettings), transform: `scale(${zoom / 100})` }} onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
+                  <PageContentBorder settings={pageSettings}/>
                   {pageSettings.showGuides && <PageGuides settings={pageSettings}/>} 
                   {virtualPageIndex === 0 && elements.length === 0 && <div className="page-empty"><span>{pageSettings.preset} DOCUMENT</span><strong>Start building your template</strong><small>Click an element from the left panel. You can then move, resize and edit it.</small></div>}
                   {elements.map((item) => {
@@ -1048,7 +1298,35 @@ function isImageSource(value: string) {
 
 function pageCanvasStyle(settings: PageSettings) {
   const size = pagePixelSize(settings);
-  return { width: `${size.width}px`, height: `${size.height}px`, background: settings.background, borderColor: settings.borderColor, borderWidth: `${settings.borderWidth}px` };
+  // DB-2 Fix4: the configurable document border belongs to the printable
+  // content/margin box, not to the physical paper edge. Keep the paper
+  // itself borderless so Preview/PDF/DOCX never get a cut-to-cut border.
+  return { width: `${size.width}px`, height: `${size.height}px`, background: settings.background };
+}
+
+function PageContentBorder({ settings }: { settings: PageSettings }) {
+  const m = settings.marginsMm;
+  if (settings.borderWidth <= 0) return null;
+  const alignment = settings.borderAlignment ?? 'inside';
+  const requestedOffsetMm = Math.max(0, settings.borderOffsetMm ?? 0);
+  const borderMm = settings.borderWidth * 25.4 / 96;
+  const edge = (marginMm: number) => {
+    if (alignment === 'inside') return mmToPx(marginMm + requestedOffsetMm);
+    if (alignment === 'center') return mmToPx(Math.max(0, marginMm - requestedOffsetMm)) - settings.borderWidth / 2;
+    // Outside is clamped to the physical page edge. This keeps a printable
+    // content border from escaping the paper unless a future bleed mode opts in.
+    const outward = Math.min(requestedOffsetMm, Math.max(0, marginMm - borderMm));
+    return Math.max(0, mmToPx(marginMm - outward) - settings.borderWidth);
+  };
+  return <div
+    className="page-content-border"
+    aria-hidden="true"
+    style={{
+      top: edge(m.top), right: edge(m.right), bottom: edge(m.bottom), left: edge(m.left),
+      borderColor: settings.borderColor,
+      borderWidth: `${settings.borderWidth}px`,
+    }}
+  />;
 }
 
 function PageGuides({ settings }: { settings: PageSettings }) {
@@ -1097,7 +1375,7 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
       <div className="table-cell-help">Footer is a content container and repeats all assigned elements together. Use a Text element with <b>{'{{pageNumber}}'}</b> and <b>{'{{totalPages}}'}</b> for Page X of Y.</div>
     </section>
     <section className="inspector-card"><div className="inspector-card-title"><span>✂ Bleed</span><button className={linkBleed?'mini-toggle active':'mini-toggle'} onClick={() => setLinkBleed(!linkBleed)}>{linkBleed?'Linked':'Unlinked'}</button></div><div className="edge-grid">{(['top','right','bottom','left'] as const).map((side) => <label key={side}>{side[0].toUpperCase()+side.slice(1)}<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.bleedMm[side],unit).toFixed(2))} onChange={(e) => updateEdges('bleedMm',side,Number(e.target.value),linkBleed)}/></label>)}</div></section>
-    <section className="inspector-card"><div className="inspector-card-title">▱ Safe Area & Appearance</div><label>Safe area inset<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.safeAreaMm,unit).toFixed(2))} onChange={(e) => onChange({ safeAreaMm: unitToMm(Number(e.target.value)||0,unit) })}/></label><div className="property-grid"><label>Background<input type="color" value={settings.background} onChange={(e) => onChange({ background:e.target.value })}/></label><label>Border color<input type="color" value={settings.borderColor} onChange={(e) => onChange({ borderColor:e.target.value })}/></label></div><label>Border width<input type="number" min="0" max="10" value={settings.borderWidth} onChange={(e) => onChange({ borderWidth:Math.max(0,Number(e.target.value)||0) })}/></label><label className="check-row"><input type="checkbox" checked={settings.showGuides} onChange={(e) => onChange({ showGuides:e.target.checked })}/> Show margin / safe / bleed guides</label></section>
+    <section className="inspector-card"><div className="inspector-card-title">▱ Content Area & Appearance</div><label>Safe area inset<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.safeAreaMm,unit).toFixed(2))} onChange={(e) => onChange({ safeAreaMm: unitToMm(Number(e.target.value)||0,unit) })}/></label><div className="property-grid"><label>Background<input type="color" value={settings.background} onChange={(e) => onChange({ background:e.target.value })}/></label><label>Content border<input type="color" value={settings.borderColor} onChange={(e) => onChange({ borderColor:e.target.value })}/></label></div><label>Content border width<input type="number" min="0" max="10" value={settings.borderWidth} onChange={(e) => onChange({ borderWidth:Math.max(0,Number(e.target.value)||0) })}/></label><div className="property-grid"><label>Border alignment<select value={settings.borderAlignment ?? 'inside'} onChange={(e) => onChange({ borderAlignment:e.target.value as PageSettings['borderAlignment'] })}><option value="inside">Inside</option><option value="center">Center</option><option value="outside">Outside</option></select></label><label>Border offset ({unitLabel(unit)})<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.borderOffsetMm ?? 0,unit).toFixed(2))} onChange={(e) => onChange({ borderOffsetMm:Math.max(0,unitToMm(Number(e.target.value)||0,unit)) })}/></label></div><label className="check-row"><input type="checkbox" checked={settings.showGuides} onChange={(e) => onChange({ showGuides:e.target.checked })}/> Show margin / safe / bleed guides</label></section>
   </div>;
 }
 
@@ -1892,4 +2170,18 @@ function defaultElement(type: ToolType, index: number): BuilderElement {
 
 function labelFor(type: ToolType) {
   return tools.find((tool) => tool.type === type)?.label ?? type;
+}
+
+
+function buildStarterElements(starter: NewTemplateRequest['starter'], settings: PageSettings): BuilderElement[] {
+  if (starter !== 'invoice') return [];
+  const bounds = contentBoundsPx(settings);
+  const titleY = bounds.y;
+  return [
+    { id: crypto.randomUUID(), type: 'text', x: bounds.x, y: titleY, width: bounds.width, height: 42, text: 'INVOICE', fontSize: 24, fontFamily: 'Arial', fontWeight: 700, textAlign: 'center', fill: 'transparent', color: '#111827', region: 'body', layoutMode: 'floating' },
+    { id: crypto.randomUUID(), type: 'text', x: bounds.x, y: titleY + 58, width: Math.max(160, bounds.width * .45), height: 28, text: 'Invoice No:', fontSize: 11, fontFamily: 'Arial', fontWeight: 600, textAlign: 'left', fill: 'transparent', color: '#111827', region: 'body', layoutMode: 'floating' },
+    { id: crypto.randomUUID(), type: 'text', x: bounds.x + bounds.width * .55, y: titleY + 58, width: Math.max(160, bounds.width * .45), height: 28, text: 'Invoice Date:', fontSize: 11, fontFamily: 'Arial', fontWeight: 600, textAlign: 'right', fill: 'transparent', color: '#111827', region: 'body', layoutMode: 'floating' },
+    { id: crypto.randomUUID(), type: 'divider', x: bounds.x, y: titleY + 96, width: bounds.width, height: 2, text: '', fontSize: 10, textAlign: 'left', fill: '#94a3b8', color: '#94a3b8', region: 'body', layoutMode: 'floating' },
+    { id: crypto.randomUUID(), type: 'text', x: bounds.x, y: titleY + 112, width: bounds.width, height: 30, text: 'Bill To', fontSize: 12, fontFamily: 'Arial', fontWeight: 700, textAlign: 'left', fill: 'transparent', color: '#111827', region: 'body', layoutMode: 'floating' },
+  ];
 }
