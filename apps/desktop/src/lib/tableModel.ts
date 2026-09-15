@@ -1258,10 +1258,11 @@ export function dynamicRows(
   // Primary flat-source model: restrict both Detail and Grouped Summary tables to the
   // currently selected Parent / Document before any grouping or aggregation happens.
   const parentKeys = configuredKeys(table.binding.parentKey, table.binding.parentKeys);
-  if (parentKeys.length > 0 && !table.binding.childForeignKey && source && record) {
+  if (parentKeys.length > 0 && source && record) {
     const selectedParentKey = compositeKey(record, parentKeys);
     if (!selectedParentKey) return [];
-    filtered = raw.filter((item) => compositeKey(item, parentKeys) === selectedParentKey);
+    const childKeys = table.binding.childForeignKey ? configuredKeys(table.binding.childForeignKey, undefined) : parentKeys;
+    filtered = raw.filter((item) => compositeKey(item, childKeys) === selectedParentKey);
   } else {
     // Backward compatibility for the earlier separate Parent Source / Child Foreign Key schema.
     const { parentSourceId, parentKey, childForeignKey } = table.binding;
@@ -1284,7 +1285,7 @@ export function dynamicRows(
   const rowKeys = configuredKeys(table.binding.rowKey, table.binding.rowKeys);
   return filtered.map((item, index) => {
     const configured = compositeKey(item, rowKeys);
-    return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: item };
+    return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: (item && typeof item === 'object' ? item : {}) as NormalizedRecord };
   });
 }
 

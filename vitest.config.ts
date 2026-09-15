@@ -25,13 +25,9 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     exclude: [
-      '**/node_modules/**',
-      '**/dist/**',
-      'reference/**',
-      'packages/persistence/test/phase6*.test.ts',
-      'packages/persistence/test/phase7*.test.ts',
-      'packages/persistence/test/phase91*.test.ts',
-      'packages/persistence/test/vector-ux2*.test.ts',
+      '**/node_modules/**', '**/dist/**', 'reference/**',
+      'packages/persistence/test/phase6*.test.ts', 'packages/persistence/test/phase7*.test.ts',
+      'packages/persistence/test/phase91*.test.ts', 'packages/persistence/test/vector-ux2*.test.ts',
       'packages/renderer-pdf/test/phase650-card-pdf-export.test.ts',
       'packages/renderer-image/test/phase650-card-image-export.test.ts',
       'packages/renderer-image/test/phase4192-png-renderer.test.ts',

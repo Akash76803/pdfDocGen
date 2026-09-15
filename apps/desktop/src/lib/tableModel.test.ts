@@ -33,19 +33,25 @@ describe('DB-4 table model', () => {
 });
 
 it('DB-4.1 Fix1 recommends stable row keys but does not guess arbitrary fields', () => {
+  const { recommendedRowKey } = requireTableModelForTest();
   expect(recommendedRowKey([{ name: 'Name', label: 'Name', type: 'string' }, { name: 'lineItemId', label: 'Line Item Id', type: 'string' }] as never)).toBe('lineItemId');
   expect(recommendedRowKey([{ name: 'Name', label: 'Name', type: 'string' }] as never)).toBe('');
 });
 
 it('DB-4.1 Fix1 repeats a selected loaded Data Source and uses the chosen header as row key', () => {
+  const { createDynamicTable: createDynamic, dynamicRows: rowsForTable } = requireTableModelForTest();
   const source = {
     id: 'source-1', name: 'Line Items.csv', sourceType: 'csv', warnings: [], importedAt: '2026-09-09T00:00:00Z',
     fields: [{ name: 'LineId', label: 'LineId', type: 'string' }],
     records: [{ LineId: 'L-1', Product: 'A' }, { LineId: 'L-2', Product: 'B' }],
   } as never;
-  const table = createDynamicTable(4, 'Line Items.csv', 1, { sourceId: 'source-1', rowKey: 'LineId' });
-  expect(dynamicRows(table, null, source).map((row: { key: string }) => row.key)).toEqual([`${table.id}::L-1`, `${table.id}::L-2`]);
+  const table = createDynamic(4, 'Line Items.csv', 1, { sourceId: 'source-1', rowKey: 'LineId' });
+  expect(rowsForTable(table, null, source).map((row: { key: string }) => row.key)).toEqual([`${table.id}::L-1`, `${table.id}::L-2`]);
 });
+
+function requireTableModelForTest() {
+  return { recommendedRowKey, createDynamicTable, dynamicRows };
+}
 
 it('DB-4.1 Fix3 filters child rows by the selected parent record while keeping row identity separate', () => {
   const childSource = {
@@ -72,6 +78,23 @@ it('DB-4.1 Fix3 filters child rows by the selected parent record while keeping r
 });
 
 it('DB-4.1 Fix4 groups a flat source by a selected parent/document field', () => {
+  const source = {
+    id: 'invoice-flat', name: 'Invoice Export', sourceType: 'csv', warnings: [], importedAt: '2026-09-09T00:00:00Z',
+    fields: [
+      { name: 'InvoiceNo', label: 'Invoice No', type: 'string' },
+      { name: 'LineItemNo', label: 'Line Item No', type: 'string' },
+    ],
+    records: [
+      { InvoiceNo: 'INV-001', LineItemNo: '10', Product: 'A' },
+      { InvoiceNo: 'INV-001', LineItemNo: '20', Product: 'B' },
+      { InvoiceNo: 'INV-002', LineItemNo: '10', Product: 'X' },
+    ],
+  } as never;
+  const table = createDynamicTable(4, 'Invoice Export', 1, {
+    sourceId: 'invoice-flat', parentKey: 'InvoiceNo', parentKeys: ['InvoiceNo'], rowKey: 'LineItemNo', rowKeys: ['LineItemNo'],
+  });
+  const rows = dynamicRows(table, { InvoiceNo: 'INV-001', LineItemNo: '10' } as never, source);
+  expect(rows.map((row) => row.key)).toEqual([`${table.id}::10`, `${table.id}::20`]);
 });
 
 it('DB-4.1 Fix4 supports composite parent and child row identities in one source', () => {

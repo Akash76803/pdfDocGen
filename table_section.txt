@@ -1,0 +1,386 @@
+        <summary><span>Advanced</span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          {((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="nested-inspector-card arrange-card"><div className="nested-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div></section> : <p className="field-hint">Layer controls appear here when Text is Floating or assigned to a master region.</p>}
+          <div className="inspector-actions text-object-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div>
+        </div>
+      </details>
+    </div>
+  </div>;
+}
+
+function TextLayoutControls({ selected, elements, pageSettings, onUpdate, onMove, onRowAction }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void }) {
+  const isFlow=(selected.layoutMode ?? 'floating')==='flow';
+  const rowMembers=isFlow?elements.filter((item)=>(item.region??'body')==='body'&&(item.layoutMode??'floating')==='flow'&&flowRowKey(item)===flowRowKey(selected)):[];
+  const widthPct=Math.min(100,Math.max(5,selected.flowWidthPercent??100));
+  return <div className="text-layout-controls">
+    <div className="field-label-row"><span>Placement</span></div>
+    <div className="layout-mode-toggle segmented-control"><button type="button" className={isFlow?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({layoutMode:'flow',flowRowId:selected.flowRowId??newFlowRowId(),flowWidthPercent:selected.flowWidthPercent??100,flowGapBeforeMm:selected.flowGapBeforeMm??0,flowGapAfterMm:selected.flowGapAfterMm??4,flowColumnGapMm:selected.flowColumnGapMm??4,flowAlign:selected.flowAlign??'left',flowDistribution:selected.flowDistribution??'packed',flowWidth:'full'})}>Flow</button><button type="button" className={!isFlow?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({layoutMode:'floating'})}>Floating</button></div>
+    {isFlow ? <>
+      <div className="shared-row-summary"><div><strong>{rowMembers.length>1?'Shared row':'Single row'}</strong><small>{rowMembers.length>1?`${rowMembers.length} elements in this row`:'Automatic document flow'}</small></div>{rowMembers.length>1?<span className="shared-row-count">{rowMembers.length}</span>:null}</div>
+      <div className="property-grid"><label>Width (%)<input type="number" min="5" max="100" step="1" value={widthPct} onChange={(e)=>onUpdate({flowWidthPercent:Math.min(100,Math.max(5,Number(e.target.value)||100)),flowWidth:'custom'})}/></label><label>Row gap after<input type="number" min="0" step="0.5" value={selected.flowGapAfterMm??4} onChange={(e)=>onUpdate({flowGapAfterMm:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+      <label>Distribution<select value={selected.flowDistribution??'packed'} onChange={(e)=>onUpdate({flowDistribution:e.target.value as BodyFlowDistribution})}><option value="packed">Packed</option><option value="space-between">Space Between</option><option value="space-around">Space Around</option><option value="space-evenly">Space Evenly</option></select></label>
+      <div className="property-grid"><label>Gap before<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm??0} onChange={(e)=>onUpdate({flowGapBeforeMm:Math.max(0,Number(e.target.value)||0)})}/></label><label>Block gap<input type="number" min="0" step="0.5" disabled={(selected.flowDistribution??'packed')!=='packed'} value={selected.flowColumnGapMm??4} onChange={(e)=>onUpdate({flowColumnGapMm:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+      <label>Row alignment<select disabled={(selected.flowDistribution??'packed')!=='packed'} value={selected.flowAlign??'left'} onChange={(e)=>onUpdate({flowAlign:e.target.value as BodyFlowAlign})}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+      <details className="row-manager"><summary>Manage row <ChevronDown size={14}/></summary><div className="row-manager-content"><div className="row-action-grid"><button type="button" className="secondary compact" onClick={()=>onRowAction('left')}>← Move in row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('right')}>Move in row →</button><button type="button" className="secondary compact" onClick={()=>onMove(-1)}>↑ Move row</button><button type="button" className="secondary compact" onClick={()=>onMove(1)}>↓ Move row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinPrevious')}>Join previous</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinNext')}>Join next</button></div><button type="button" className="secondary compact full-width" onClick={()=>onRowAction('newRow')}>+ New row</button><p className="field-hint">Use Join to place elements on the same horizontal row. Width controls each block's share of that row.</p></div></details>
+    </> : <>
+      <p className="field-hint">Floating allows exact free placement for overlays, stamps and decorative text.</p>
+      <BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/>
+      <RelativePlacementControls selected={selected} elements={elements} settings={pageSettings} onUpdate={onUpdate}/>
+    </>}
+  </div>;
+}
+
+function TextFormattingPanel({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Formatting</h3><small>Typography and text appearance</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open><summary><span>Typography</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content">
+        <label>Font family<select value={selected.fontFamily??'Arial'} onChange={(e)=>onUpdate({fontFamily:e.target.value})}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label>
+        <div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e)=>onUpdate({fontSize:Math.max(6,Number(e.target.value)||12)})}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={(e)=>onUpdate({lineHeight:Math.min(3,Math.max(0.8,Number(e.target.value)||1.25))})}/></label></div>
+        <div className="text-style-actions compact-style-actions"><button type="button" title="Bold" className={(selected.fontWeight??400)>=700?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({fontWeight:(selected.fontWeight??400)>=700?400:700})}><b>B</b></button><button type="button" title="Italic" className={selected.italic?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({italic:!selected.italic})}><i>I</i></button><button type="button" title="Underline" className={selected.underline?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({underline:!selected.underline})}><u>U</u></button></div>
+      </div></details>
+      <details className="inspector-accordion text-accordion" open><summary><span>Text Alignment <InspectorHelp text="Text alignment controls text inside this text box. It is separate from Layout → Row alignment, which positions the whole block in a shared row."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="field-label-row"><span>Horizontal</span></div><div className="align-actions labeled-align-actions"><button title="Left" className={selected.textAlign==='left'?'active':''} onClick={()=>onUpdate({textAlign:'left'})}><AlignLeft size={16}/><span>Left</span></button><button title="Center" className={selected.textAlign==='center'?'active':''} onClick={()=>onUpdate({textAlign:'center'})}><AlignCenter size={16}/><span>Center</span></button><button title="Right" className={selected.textAlign==='right'?'active':''} onClick={()=>onUpdate({textAlign:'right'})}><AlignRight size={16}/><span>Right</span></button></div></div></details>
+      <details className="inspector-accordion text-accordion" open><summary><span>Color & Spacing</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Text color<div className="color-control"><input type="color" value={selected.color} onChange={(e)=>onUpdate({color:e.target.value})}/><code>{selected.color}</code></div></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={(e)=>onUpdate({lineHeight:Math.min(3,Math.max(.8,Number(e.target.value)||1.25))})}/></label></div></details>
+      <details className="inspector-accordion text-accordion"><summary><span>Effects & Auto Fit</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><p className="field-hint">Advanced text effects and auto-fit controls will stay grouped here as those renderer-safe options are enabled. Existing document formatting remains unchanged.</p></div></details>
+    </div>
+  </div>;
+}
+
+function MixedContentEditor({ label, value, fields, onChange, compact = false, previewValue }: { label: string; value: string; fields: TemplateTokenField[]; onChange: (value: string) => void; compact?: boolean; previewValue?: string }) {
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const [field, setField] = useState(fields[0]?.name ?? '');
+  useEffect(() => { if (field && fields.some((item) => item.name === field)) return; setField(fields[0]?.name ?? ''); }, [fields, field]);
+  const insert = (token: string) => {
+    const textarea = textareaRef.current;
+    const start = textarea?.selectionStart ?? value.length;
+    const end = textarea?.selectionEnd ?? start;
+    const next = insertTokenAtSelection(value, token, textarea);
+    onChange(next);
+    requestAnimationFrame(() => {
+      const target = textareaRef.current;
+      if (!target) return;
+      target.focus();
+      const caret = start + token.length;
+      target.setSelectionRange(caret, caret);
+    });
+  };
+  return <div className={`mixed-content-editor${compact ? ' compact' : ''}`}><label>{label}<textarea ref={textareaRef} value={value} onChange={(e) => onChange(e.target.value)} placeholder="Static text + {{DynamicField}}"/></label><div className="token-insert-row"><select value={field} disabled={!fields.length} onChange={(e) => setField(e.target.value)}><option value="">Dynamic field…</option>{fields.map((item) => <option key={item.name} value={item.name}>{item.label || item.name}</option>)}</select><button type="button" className="secondary compact" disabled={!field} onClick={() => field && insert(tokenForField(field))}>+ Insert</button></div><div className="token-quick-actions"><button type="button" className="secondary compact" onClick={() => insert('{{pageNumber}}')}>Page #</button><button type="button" className="secondary compact" onClick={() => insert('{{totalPages}}')}>Total pages</button></div><p className="table-cell-help">Tokens can be combined with static text anywhere this Content editor is available.</p>{previewValue !== undefined && templateHasTokens(value) ? <div className="binding-value mixed-content-preview"><small>Resolved preview</small><strong>{previewValue || 'Empty / null'}</strong></div> : null}</div>;
+}
+
+function elementDisplayName(element: BuilderElement) {
+  const typeLabel = element.type === 'table' ? 'Table' : element.type === 'formula' ? `Formula Field${element.formulaName ? ` · ${element.formulaName}` : ''}` : element.type.charAt(0).toUpperCase() + element.type.slice(1);
+  const raw = (element.text || '').replace(/\s+/g, ' ').trim();
+  const suffix = raw ? ` · ${raw.slice(0, 28)}${raw.length > 28 ? '…' : ''}` : '';
+  return `${typeLabel}${suffix}`;
+}
+
+function BodyFlowControls({ selected, elements, onUpdate, onMove, onRowAction }: { selected: BuilderElement; elements: BuilderElement[]; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1 | 1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void }) {
+  const mode = selected.layoutMode ?? 'floating';
+  if ((selected.region ?? 'body') !== 'body') return null;
+  const isFlow = mode === 'flow';
+  const widthPct = Math.round(selected.flowWidthPercent ?? 100);
+  const rowMembers = isFlow ? elements.filter((item) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === flowRowKey(selected)) : [];
+  const reservedRowHeight = rowMembers.length ? Math.max(...rowMembers.map((item) => Math.max(item.height, item.flowRowHeightPx ?? 0))) : selected.height;
+  return <section className="inspector-card body-flow-card"><div className="inspector-card-title">Body Block Layout</div>
+    <div className="layout-mode-toggle"><button type="button" className={isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'flow', flowRowId: selected.flowRowId ?? newFlowRowId(), flowWidthPercent: selected.flowWidthPercent ?? 100, flowGapBeforeMm: selected.flowGapBeforeMm ?? 0, flowGapAfterMm: selected.flowGapAfterMm ?? 4, flowColumnGapMm: selected.flowColumnGapMm ?? 4, flowAlign: selected.flowAlign ?? 'left', flowDistribution: selected.flowDistribution ?? 'packed', flowWidth: 'full' })}>Flow Block</button><button type="button" className={!isFlow ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ layoutMode: 'floating' })}>Floating</button></div>
+    {isFlow ? <>
+      <p className="table-cell-help"><strong>Simple document flow:</strong> Body starts at the usable top. Every new block gets a new row by default. Row height follows its tallest block; when Text/Table grows, every following row shifts automatically.</p>
+      {rowMembers.length > 1 ? <div className="flow-row-status"><strong>Shared row</strong><span>{rowMembers.length} blocks · selected measures {Math.round(selected.height)}px · tallest reserves {Math.round(reservedRowHeight)}px</span></div> : <div className="flow-row-status"><strong>Measured height</strong><span>{Math.round(selected.height)}px</span></div>}
+      <div className="property-grid"><label>Width (%)<input type="number" min="5" max="100" step="1" value={widthPct} onChange={(e) => onUpdate({ flowWidthPercent: Math.min(100, Math.max(5, Number(e.target.value) || 100)), flowWidth: 'custom' })}/></label><label>Row gap after (mm)<input type="number" min="0" step="0.5" value={selected.flowGapAfterMm ?? 4} onChange={(e) => onUpdate({ flowGapAfterMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
+      <label>Row distribution<select value={selected.flowDistribution ?? 'packed'} onChange={(e) => onUpdate({ flowDistribution: e.target.value as BodyFlowDistribution })}><option value="packed">Packed</option><option value="space-between">Space Between</option><option value="space-around">Space Around</option><option value="space-evenly">Space Evenly</option></select></label>
+      <div className="property-grid"><label>Gap before (mm)<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm ?? 0} onChange={(e) => onUpdate({ flowGapBeforeMm: Math.max(0, Number(e.target.value) || 0) })}/></label><label>Block gap in row (mm)<input type="number" min="0" step="0.5" disabled={(selected.flowDistribution ?? 'packed') !== 'packed'} value={selected.flowColumnGapMm ?? 4} onChange={(e) => onUpdate({ flowColumnGapMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
+      <label>Row alignment<select disabled={(selected.flowDistribution ?? 'packed') !== 'packed'} value={selected.flowAlign ?? 'left'} onChange={(e) => onUpdate({ flowAlign: e.target.value as BodyFlowAlign })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+      {(selected.flowDistribution ?? 'packed') !== 'packed' ? <p className="table-cell-help"><strong>Distributed row:</strong> leftover usable width is automatic. Space Between pins the first block to the left edge and the last block to the right edge; no spacer block is required.</p> : null}
+      <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onMove(-1)}>↑ {rowMembers.length > 1 ? 'Move Row Up' : 'Move Up'}</button><button type="button" className="secondary compact" onClick={() => onMove(1)}>↓ {rowMembers.length > 1 ? 'Move Row Down' : 'Move Down'}</button></div>
+      <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onRowAction('joinPrevious')}>Join Previous Row</button><button type="button" className="secondary compact" onClick={() => onRowAction('joinNext')}>Join Next Row</button><button type="button" className="secondary compact" onClick={() => onRowAction('newRow')}>New Row</button></div>
+      <div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={() => onRowAction('left')}>← In Row</button><button type="button" className="secondary compact" onClick={() => onRowAction('right')}>In Row →</button></div>
+      <p className="table-cell-help">Default width is 100%. Set 50% + 50%, 35% + 35%, etc. and use Join Previous/Next Row to place blocks on the same horizontal line. Use Space Between when the first block must touch the left edge and the last block must touch the right edge with automatic blank space in the middle. Move Up/Down moves the complete logical row together; use In Row ←/→ only to reorder blocks inside that row. Flow owns X/Y; use Floating only for intentional overlays.</p>
+    </> : <p className="table-cell-help">Floating is an explicit escape hatch for watermarks, stamps, decorative overlays and free X/Y placement. Switch back to Flow Block to rejoin automatic document flow.</p>}
+  </section>;
+}
+
+function RelativePlacementControls({ selected, elements, settings, onUpdate }: { selected: BuilderElement; elements: BuilderElement[]; settings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const candidates = elements.filter((item) => item.id !== selected.id && (item.region ?? 'body') === 'body');
+  const [referenceId, setReferenceId] = useState(candidates[0]?.id ?? '');
+  const [gapMm, setGapMm] = useState(4);
+  useEffect(() => { if (referenceId && candidates.some((item) => item.id === referenceId)) return; setReferenceId(candidates[0]?.id ?? ''); }, [referenceId, candidates.map((item) => item.id).join('|')]);
+  const reference = candidates.find((item) => item.id === referenceId) ?? null;
+  if (!reference) return null;
+  const bounds = contentBoundsPx(settings);
+  const gap = mmToPx(Math.max(0, gapMm));
+  const clampX = (x: number, width = selected.width) => Math.min(Math.max(x, bounds.x), Math.max(bounds.x, bounds.x + bounds.width - width));
+  const clampY = (y: number, height = selected.height) => Math.min(Math.max(y, bounds.y), Math.max(bounds.y, bounds.y + bounds.height - height));
+  const placeAbove = () => onUpdate({ x: clampX(reference.x), y: clampY(reference.y - gap - selected.height) });
+  const placeBelow = () => onUpdate({ x: clampX(reference.x), y: clampY(reference.y + reference.height + gap) });
+  const alignLeft = () => onUpdate({ x: clampX(reference.x) });
+  const alignCenter = () => onUpdate({ x: clampX(reference.x + (reference.width - selected.width) / 2) });
+  const alignRight = () => onUpdate({ x: clampX(reference.x + reference.width - selected.width) });
+  const matchWidth = () => { const width = Math.min(Math.max(20, reference.width), bounds.width); onUpdate({ width, x: clampX(reference.x, width) }); };
+  return <section className="inspector-card relative-placement-card"><div className="inspector-card-title">Relative Placement</div><label>Reference block<select value={referenceId} onChange={(e) => setReferenceId(e.target.value)}>{candidates.map((item) => <option key={item.id} value={item.id}>{elementDisplayName(item)}</option>)}</select></label><label>Gap (mm)<input type="number" min="0" step="0.5" value={gapMm} onChange={(e) => setGapMm(Math.max(0, Number(e.target.value) || 0))}/></label><div className="relative-placement-actions"><button type="button" className="secondary compact" onClick={placeAbove}>Place Above</button><button type="button" className="secondary compact" onClick={placeBelow}>Place Below</button></div><div className="band-position-actions"><button type="button" className="secondary compact" onClick={alignLeft}>Align Left</button><button type="button" className="secondary compact" onClick={alignCenter}>Align Center</button><button type="button" className="secondary compact" onClick={alignRight}>Align Right</button></div><button type="button" className="secondary compact full-width" onClick={matchWidth}>Match Reference Width</button><p className="table-cell-help">Use this when a block must sit directly above or below another block. Gap is preserved in physical mm. Manual drag and overlap remain available after placement.</p></section>;
+}
+
+function BodyPositionControls({ selected, settings, onUpdate }: { selected: BuilderElement; settings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const bounds = contentBoundsPx(settings);
+  const left = () => onUpdate({ x: bounds.x });
+  const center = () => onUpdate({ x: bounds.x + Math.max(0, (bounds.width - selected.width) / 2) });
+  const right = () => onUpdate({ x: bounds.x + Math.max(0, bounds.width - selected.width) });
+  const top = () => onUpdate({ y: bounds.y });
+  const middle = () => onUpdate({ y: bounds.y + Math.max(0, (bounds.height - selected.height) / 2) });
+  const bottom = () => onUpdate({ y: bounds.y + Math.max(0, bounds.height - selected.height) });
+  return <section className="inspector-card band-position-card body-position-card"><div className="inspector-card-title">Position in Body / Content</div><div className="band-position-actions"><button type="button" className="secondary compact" onClick={left}>Left</button><button type="button" className="secondary compact" onClick={center}>Center</button><button type="button" className="secondary compact" onClick={right}>Right</button></div><div className="band-position-actions"><button type="button" className="secondary compact" onClick={top}>Top</button><button type="button" className="secondary compact" onClick={middle}>Middle</button><button type="button" className="secondary compact" onClick={bottom}>Bottom</button></div><p className="table-cell-help">Alignment uses the usable Body area after margins, Header and Footer. New Body elements use Smart Insert to avoid accidental overlap; manual overlap is still allowed when you drag elements.</p></section>;
+}
+
+function BandPositionControls({ selected, region, settings, onUpdate }: { selected: BuilderElement; region: 'header'|'footer'; settings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const bounds = region === 'header' ? headerBoundsPx(settings) : footerBoundsPx(settings);
+  const left = () => onUpdate({ x: bounds.x });
+  const center = () => onUpdate({ x: bounds.x + Math.max(0, (bounds.width - selected.width) / 2) });
+  const right = () => onUpdate({ x: bounds.x + Math.max(0, bounds.width - selected.width) });
+  const top = () => onUpdate({ y: bounds.y });
+  const middle = () => onUpdate({ y: bounds.y + Math.max(0, (bounds.height - selected.height) / 2) });
+  const bottom = () => onUpdate({ y: bounds.y + Math.max(0, bounds.height - selected.height) });
+  return <section className="inspector-card band-position-card"><div className="inspector-card-title">Position in {region === 'header' ? 'Header' : 'Footer'}</div><div className="band-position-actions"><button type="button" className="secondary compact" onClick={left}>Left</button><button type="button" className="secondary compact" onClick={center}>Center</button><button type="button" className="secondary compact" onClick={right}>Right</button></div><div className="band-position-actions"><button type="button" className="secondary compact" onClick={top}>Top</button><button type="button" className="secondary compact" onClick={middle}>Middle</button><button type="button" className="secondary compact" onClick={bottom}>Bottom</button></div><p className="table-cell-help">You can also drag/resize this global master directly on any page projection. The change is synchronized to every output page.</p></section>;
+}
+
+
+function GlobalBandEditor({ region, settings, onPageSettings, onSetInsertRegion, onBack }: { region: 'header'|'footer'; settings: PageSettings; onPageSettings: (patch: Partial<PageSettings>) => void; onSetInsertRegion: (region: PageRegion) => void; onBack: () => void }) {
+  const band = settings[region];
+  const label = region === 'header' ? 'Header' : 'Footer';
+  const patchBand = (patch: Partial<typeof band>) => onPageSettings({ [region]: { ...band, ...patch } } as Partial<PageSettings>);
+  return <div className="inspector-body global-band-editor">
+    <button type="button" className="inspector-back" onClick={onBack}><ArrowLeft size={14}/>Page settings</button>
+    <h3>{label} Master</h3>
+    <p>{label} is global for the generated document. Its content projects to manual builder pages and automatic overflow continuation pages according to the repeat rule.</p>
+    <section className="inspector-card page-band-card">
+      <div className="inspector-card-title"><span>{label} Zone</span><button type="button" className={band.enabled?'mini-toggle active':'mini-toggle'} onClick={() => patchBand({ enabled: !band.enabled })}>{band.enabled?'Enabled':'Disabled'}</button></div>
+      <div className="property-grid"><label>Height (mm)<input type="number" min="0" value={band.heightMm} onChange={(e) => patchBand({ heightMm: Math.max(0, Number(e.target.value) || 0) })}/></label><label>Content gap (mm)<input type="number" min="0" value={band.gapMm} onChange={(e) => patchBand({ gapMm: Math.max(0, Number(e.target.value) || 0) })}/></label></div>
+      <label>Repeat<select value={band.repeat} onChange={(e) => patchBand({ repeat: e.target.value as PageRepeatMode })}><option value="every">Every output page</option><option value="first">First output page only</option><option value="exceptFirst">Except first output page</option></select></label>
+      <button className="secondary global-band-add" type="button" onClick={() => { if (!band.enabled) patchBand({ enabled: true }); onSetInsertRegion(region); }}>Add new content to {label}</button>
+      <div className="table-cell-help">Use the Elements panel to add Text, Image, Shape, QR, Barcode, Signature or Divider. Tables remain Body-only. Page-number tokens such as Page {'{{pageNumber}}'} of {'{{totalPages}}'} resolve against the complete document output page count.</div>
+    </section>
+  </div>;
+}
+
+function TableProperties({ table, sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
+  const cell = findTableCell(table, table.selectedCellId);
+  const cellLocation = findTableCellLocation(table, table.selectedCellId);
+  const selectedColumn = cellLocation ? table.columns[Math.min(cellLocation.columnIndex, table.columns.length - 1)] ?? null : null;
+  const selectedDynamicBodyCell = table.mode === 'dynamic' && cellLocation
+    ? (table.bodyRows[0]?.cells[Math.min(cellLocation.columnIndex, Math.max(0, table.columns.length - 1))] ?? null)
+    : null;
+  const rowStructureLocked = Boolean(table.mode === 'dynamic' && cellLocation?.section === 'bodyRows');
+  const groupedSummary = Boolean(table.binding?.grouping?.groupBy?.length);
+  const mergedColumns = tableHasMergedColumns(table);
+  const bindingSource = table.mode === 'dynamic'
+    ? (sources.find((item) => item.id === table.binding?.sourceId) ?? null)
+    : (sources.find((item) => item.id === activeSourceId) ?? sources[0] ?? null);
+  const tableContentFields: TemplateTokenField[] = [...(bindingSource?.fields ?? []), ...formulaFields.filter((formula) => !(bindingSource?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
+  const patchCell = (patch: Parameters<typeof updateTableCell>[2]) => {
+    if (!cell) return;
+    onUpdate(updateTableCell(table, cell.id, patch));
+  };
+  const patchDynamicBodyCell = (patch: Parameters<typeof updateTableCell>[2]) => {
+    if (!selectedDynamicBodyCell) return;
+    onUpdate(updateTableCell(table, selectedDynamicBodyCell.id, patch));
+  };
+  return <div className="table-properties">
+    <div className="table-summary"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
+    <label>Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
+    <section className="table-inspector-card table-border-card">
+      <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▦</span><span>Table Border</span></span><small className="table-inspector-badge">Style</small></div>
+      <div className="property-grid">
+        <label>Style<select value={table.borderStyle ?? 'solid'} onChange={(e) => onUpdate({ ...table, borderStyle: e.target.value as 'solid'|'dashed'|'dotted'|'double'|'none' })}><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option><option value="double">Double</option><option value="none">None</option></select></label>
+        <label>Width<input type="number" min="0" max="10" step="0.5" disabled={(table.borderStyle ?? 'solid') === 'none'} value={table.borderWidth} onChange={(e) => onUpdate({ ...table, borderWidth: Math.max(0, Number(e.target.value) || 0) })}/></label>
+      </div>
+      <label>Color<input type="color" disabled={(table.borderStyle ?? 'solid') === 'none'} value={table.borderColor} onChange={(e) => onUpdate({ ...table, borderColor: e.target.value })}/></label>
+      <div className="table-border-preview" style={{ borderWidth: (table.borderStyle ?? 'solid') === 'none' ? 0 : Math.max(1, table.borderWidth), borderStyle: table.borderStyle ?? 'solid', borderColor: table.borderColor }}><span>Border preview</span></div>
+    </section>
+    {groupedSummary && <button type="button" className="secondary table-edit-configuration" onClick={onEditConfiguration}>Edit Grouped Summary Configuration</button>}
+    {table.mode === 'dynamic' && (() => {
+      const selectedSource = sources.find((item) => item.id === table.binding?.sourceId) ?? null;
+      return <>
+      <label>Repeat source<select value={table.binding?.sourceId ?? ''} disabled={groupedSummary} onChange={(e) => {
+        const nextSource = sources.find((item) => item.id === e.target.value) ?? null;
+        onUpdate({ ...table, binding: { ...table.binding!, sourceId: nextSource?.id, repeatSource: nextSource?.name ?? '', rowKey: recommendedRowKey(nextSource?.fields ?? []) || undefined } });
+      }}><option value="">Select Data Source</option>{sources.map((item) => <option key={item.id} value={item.id}>{item.name} ({item.records.length} records)</option>)}</select></label>
+      {groupedSummary ? <div className="table-schema-note"><span>Group By</span><code>{table.binding?.grouping?.groupBy.join(' + ')}</code></div> : <label>Row key<select value={table.binding?.rowKey ?? ''} disabled={!selectedSource} onChange={(e) => onUpdate({ ...table, binding: { ...table.binding!, rowKey: e.target.value || undefined } })}><option value="">Index fallback</option>{selectedSource?.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>}
+      {selectedSource && (() => {
+        const parentKeys = table.binding?.parentKeys?.length ? table.binding.parentKeys : (table.binding?.parentKey ? [table.binding.parentKey] : []);
+        const rowKeys = table.binding?.rowKeys?.length ? table.binding.rowKeys : (table.binding?.rowKey ? [table.binding.rowKey] : []);
+        const updateParentKey = (index: number, value: string) => {
+          const next = [...(parentKeys.length ? parentKeys : [''])]; next[index] = value;
+          const clean = next.filter(Boolean);
+          onUpdate({ ...table, binding: { ...table.binding!, parentKey: clean[0], parentKeys: clean } });
+        };
+        const updateRowKey = (index: number, value: string) => {
+          const next = [...(rowKeys.length ? rowKeys : [''])]; next[index] = value;
+          const clean = next.filter(Boolean);
+          onUpdate({ ...table, binding: { ...table.binding!, rowKey: clean[0], rowKeys: clean } });
+        };
+        return <div className="table-relation-editor">
+          <div className="section-title"><span>Document / Row Identity</span><small>Same Data Source</small></div>
+          <label>Parent / Document ID<select value={parentKeys[0] ?? ''} onChange={(e) => updateParentKey(0, e.target.value)}><option value="">Select parent field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>
+          {parentKeys.slice(1).map((key, i) => <label key={`parent-extra-${i}`}>Parent key {i + 2}<select value={key} onChange={(e) => updateParentKey(i + 1, e.target.value)}><option value="">Select field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>)}
+          <button type="button" className="secondary compact" onClick={() => onUpdate({ ...table, binding: { ...table.binding!, parentKeys: [...parentKeys, ''] } })}>+ Parent key field</button>
+          {!groupedSummary && <><label>Child / Row ID<select value={rowKeys[0] ?? ''} onChange={(e) => updateRowKey(0, e.target.value)}><option value="">Index fallback</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>
+          {rowKeys.slice(1).map((key, i) => <label key={`row-extra-${i}`}>Row key {i + 2}<select value={key} onChange={(e) => updateRowKey(i + 1, e.target.value)}><option value="">Select field</option>{selectedSource.fields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name} ({field.name})</option>)}</select></label>)}
+          <button type="button" className="secondary compact" onClick={() => onUpdate({ ...table, binding: { ...table.binding!, rowKeys: [...rowKeys, ''] } })}>+ Row key field</button></>}
+          <div className="table-schema-note"><span>{groupedSummary ? 'Grouped Summary' : 'Grouping'}</span><code>{groupedSummary ? `${(parentKeys.filter(Boolean).join(' + ') || '?')} → document; ${table.binding?.grouping?.groupBy.join(' + ')} → grouped rows` : `${(parentKeys.filter(Boolean).join(' + ') || recommendedParentKey(selectedSource.fields) || '?')} → rows; ${(rowKeys.filter(Boolean).join(' + ') || recommendedRowKey(selectedSource.fields) || 'index')} → row identity`}</code></div>
+        </div>;
+      })()}
+      <section className="table-inspector-card pagination-card">
+        <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon">↧</span><span>Pagination</span></span><small className="table-inspector-badge">DB-4.4</small></div>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.enabled !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, enabled: e.target.checked } })}/>Automatic overflow pages</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.repeatHeader} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, repeatHeader: e.target.checked } })}/>Repeat header on each page</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.keepRowsTogether} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, keepRowsTogether: e.target.checked } })}/>Keep repeated row together</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.keepSummaryTogether !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, keepSummaryTogether: e.target.checked } })}/>Keep summary block together</label>
+        <label className="check-row"><input type="checkbox" checked={table.pagination.allowRowSplit} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, allowRowSplit: e.target.checked } })}/>Allow oversized row split (renderer foundation)</label>
+        <div className="table-cell-help">Overflow is calculated from the table's Y position to the page bottom margin. Summary rows move to the final continuation page when needed.</div>
+      </section>
+      {!groupedSummary && <button className="secondary table-add-summary" onClick={() => onUpdate(addCustomSummaryRow(table))}>+ Add custom total / summary row</button>}
+      </>;
+    })()}
+    <div className="table-schema-note"><span>Table ID</span><code>{table.id}</code></div>
+    {cellLocation && <div className="table-structure-editor">
+      <section className="table-inspector-card">
+        <div className="table-inspector-card-head">
+          <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">☷</span><span>Row Structure</span></span>
+          <small className="table-inspector-badge">{cellLocation.row.kind}</small>
+        </div>
+        <details className="table-tech-details"><summary>Technical ID</summary><code title={cellLocation.row.id}>{cellLocation.row.id}</code></details>
+        <div className="property-grid"><label>Height<input type="number" min="18" max="400" disabled={cellLocation.row.autoHeight} value={cellLocation.row.height} onChange={(e) => onUpdate(updateTableRow(table, cellLocation.row.id, { height: Math.max(18, Number(e.target.value) || 30) }))}/></label><label className="check-row table-auto-height"><input type="checkbox" checked={cellLocation.row.autoHeight} onChange={(e) => onUpdate(updateTableRow(table, cellLocation.row.id, { autoHeight: e.target.checked }))}/>Auto height</label></div>
+        <label className="check-row"><input type="checkbox" checked={cellLocation.row.keepTogether} onChange={(e) => onUpdate(updateTableRow(table, cellLocation.row.id, { keepTogether: e.target.checked }))}/>Keep row together</label>
+        <label className="check-row"><input type="checkbox" checked={Boolean(cellLocation.row.pageBreakBefore)} onChange={(e) => onUpdate(updateTableRow(table, cellLocation.row.id, { pageBreakBefore: e.target.checked }))}/>Page break before this row</label>
+        {cellLocation.row.kind === 'header' && <label className="check-row"><input type="checkbox" checked={cellLocation.row.repeatOnEveryPage} onChange={(e) => onUpdate(updateTableRow(table, cellLocation.row.id, { repeatOnEveryPage: e.target.checked }))}/>Repeat this header row</label>}
+        {rowStructureLocked ? <div className="table-cell-help">Dynamic body rows are data-driven. Edit columns or add custom summary rows instead of manually adding body rows.</div> : <div className="table-structure-actions compact-actions">
+          <button type="button" className="secondary compact" title="Add row above" onClick={() => onUpdate(addTableRow(table, cellLocation.cell.id, 'above'))}><span aria-hidden="true">＋↑</span><span>Above</span></button>
+          <button type="button" className="secondary compact" title="Add row below" onClick={() => onUpdate(addTableRow(table, cellLocation.cell.id, 'below'))}><span aria-hidden="true">＋↓</span><span>Below</span></button>
+          <button type="button" className="secondary compact" title="Duplicate row" onClick={() => onUpdate(duplicateTableRow(table, cellLocation.cell.id))}><span aria-hidden="true">⧉</span><span>Duplicate</span></button>
+          <button type="button" className="secondary compact" title="Move row up" onClick={() => onUpdate(moveTableRow(table, cellLocation.cell.id, -1))}><span aria-hidden="true">↑</span><span>Move</span></button>
+          <button type="button" className="secondary compact" title="Move row down" onClick={() => onUpdate(moveTableRow(table, cellLocation.cell.id, 1))}><span aria-hidden="true">↓</span><span>Move</span></button>
+          <button type="button" className="secondary compact danger" title="Delete row" onClick={() => onUpdate(deleteTableRow(table, cellLocation.cell.id))}><span aria-hidden="true">×</span><span>Delete</span></button>
+        </div>}
+      </section>
+
+      {selectedColumn && <section className="table-inspector-card">
+        <div className="table-inspector-card-head">
+          <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▥</span><span>Column Structure</span></span>
+          <small className="table-inspector-badge">{cellLocation.columnIndex + 1} / {table.columns.length}</small>
+        </div>
+        <details className="table-tech-details"><summary>Technical ID</summary><code title={selectedColumn.id}>{selectedColumn.id}</code></details>
+        <label>Header / Label<input value={selectedColumn.label} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { label: e.target.value }))}/></label>
+        <div className="property-grid"><label>Width<input type="number" min="30" max="1000" value={selectedColumn.width} onChange={(e) => onUpdate(setTableColumnManualWidth(table, selectedColumn.id, Math.max(30, Number(e.target.value) || 120)))}/></label><label>Min width<input type="number" min="20" max="1000" value={selectedColumn.minWidth} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { minWidth: Math.max(20, Number(e.target.value) || 40) }))}/></label></div>
+        <div className="column-sizing-actions">
+          <button type="button" className="secondary compact" onClick={() => onUpdate(resetTableColumnAutoWidth(table, selectedColumn.id))}>↔ Fit Content</button>
+          <button type="button" className="secondary compact" onClick={() => onUpdate(equalizeTableColumnWidths(table))}>≡ Equal Width</button>
+          <button type="button" className="secondary compact" onClick={() => onUpdate(resetTableColumnAutoWidth(table))}>↺ Reset Auto</button>
+        </div>
+        <p className="table-cell-help">Tip: drag a header column divider directly on the canvas. Total table width stays inside the page.</p>
+        <label>Alignment<select value={selectedColumn.align} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { align: e.target.value as 'left'|'center'|'right' }))}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+        <div className="table-data-format-card">
+          <div className="section-title"><span>Data &amp; Format</span><small>Column default</small></div>
+          {table.mode === 'dynamic' && selectedDynamicBodyCell && !groupedSummary && <>
+            <label>Body value type<select value={selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')} onChange={(e) => patchDynamicBodyCell({ valueMode: e.target.value as TableValueMode })}><option value="binding">Field binding</option><option value="formula">Formula</option><option value="custom">Custom value</option></select></label>
+            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={selectedDynamicBodyCell.binding} onChange={(binding) => patchDynamicBodyCell({ binding, valueMode: 'binding' })}/>}
+            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={selectedDynamicBodyCell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchDynamicBodyCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Formula applies to every repeated body row in this column.</p><FormulaFieldPicker source={bindingSource} globalFormulaFields={formulaFields} table={table} currentColumnId={selectedColumn.id} onInsert={(fieldRef) => patchDynamicBodyCell({ formula: `${selectedDynamicBodyCell.formula ?? ''}${selectedDynamicBodyCell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
+            {(selectedDynamicBodyCell.valueMode ?? (selectedDynamicBodyCell.binding ? 'binding' : 'custom')) === 'custom' && <MixedContentEditor label="Body custom value" value={selectedDynamicBodyCell.content ?? ''} fields={tableContentFields} compact onChange={(content) => patchDynamicBodyCell({ content, valueMode: 'custom' })}/>}
+          </>}
+          {groupedSummary && cellLocation?.section === 'bodyRows' && <p className="table-cell-help">Grouped values are produced by the Group By + aggregate mapping configured when the table is created. You can still format the output column here.</p>}
+          <label>Data type<select value={selectedColumn.dataType ?? 'text'} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { dataType: e.target.value as TableDataType }))}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+          <TableDataFormatEditor dataType={selectedColumn.dataType ?? 'text'} value={selectedColumn.format ?? {}} onChange={(format) => onUpdate(updateTableColumn(table, selectedColumn.id, { format }))}/>
+        </div>
+        <div className="table-structure-actions compact-actions">
+          <button type="button" className="secondary compact" title="Add column left" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'left'))}><span aria-hidden="true">＋←</span><span>Left</span></button>
+          <button type="button" className="secondary compact" title="Add column right" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'right'))}><span aria-hidden="true">＋→</span><span>Right</span></button>
+          <button type="button" className="secondary compact" title="Duplicate column" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'right', true))}><span aria-hidden="true">⧉</span><span>Duplicate</span></button>
+          <button type="button" className="secondary compact" disabled={mergedColumns} title={mergedColumns ? 'Split merged cells before reordering columns.' : 'Move column left'} onClick={() => onUpdate(moveTableColumn(table, cellLocation.cell.id, -1))}><span aria-hidden="true">←</span><span>Move</span></button>
+          <button type="button" className="secondary compact" disabled={mergedColumns} title={mergedColumns ? 'Split merged cells before reordering columns.' : 'Move column right'} onClick={() => onUpdate(moveTableColumn(table, cellLocation.cell.id, 1))}><span aria-hidden="true">→</span><span>Move</span></button>
+          <button type="button" className="secondary compact danger" disabled={table.columns.length <= 1} title="Delete column" onClick={() => onUpdate(deleteTableColumn(table, cellLocation.cell.id))}><span aria-hidden="true">×</span><span>Delete</span></button>
+        </div>
+        {mergedColumns && <div className="table-cell-help">Column move is disabled while colSpan merges exist. Add/delete remains span-aware.</div>}
+      </section>}
+    </div>}
+    {cell ? <div className="table-cell-editor">
+      <div className="table-inspector-card-head selected-cell-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▣</span><span>Selected Cell</span></span><small className="table-inspector-badge">{cell.type}</small></div>
+      <details className="table-tech-details"><summary>Technical ID</summary><code title={cell.id}>{cell.id}</code></details>
+      <label>Cell type<select value={cell.type} onChange={(e) => { const nextType = e.target.value as TableCellType; patchCell({ type: nextType, ...(nextType === 'image' && !cell.imageFit ? { imageFit: 'cover' as const } : {}) }); }}><option value="text">Text</option><option value="image">Image</option><option value="qr">QR Code</option><option value="barcode">Barcode</option></select></label>
+      {cell.type === 'text' ? <>
+        {table.mode === 'dynamic' && cellLocation?.section === 'customRows' ? <SummaryCellEditor table={table} cell={cell} source={bindingSource} formulaFields={formulaFields} onPatch={patchCell}/> : groupedSummary && cellLocation?.section === 'bodyRows' ? <p className="table-cell-help">This body cell is generated by the Grouped Summary configuration. Use Edit Grouped Summary Configuration above to change Group By, aggregate operations or formulas; formatting remains editable here.</p> : <>
+        <label>Value mode<select value={cell.valueMode ?? (cell.binding ? 'binding' : 'custom')} onChange={(e) => patchCell({ valueMode: e.target.value as TableValueMode })}><option value="custom">Custom value</option><option value="binding">Field binding</option><option value="formula" disabled={cellLocation?.row.kind === 'header'}>Formula</option></select></label>
+        {cellLocation?.row.kind === 'header' && table.mode === 'dynamic' && <p className="table-cell-help">Header cells are labels. Set this column's repeated Field Binding / Formula from Column Structure → Body value type.</p>}
+        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'custom' && <MixedContentEditor label="Content" value={cell.content} fields={tableContentFields} compact onChange={(content) => patchCell({ content })}/>}
+        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'binding' && <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={cell.binding} onChange={(binding) => patchCell({ binding, valueMode: 'binding' })}/>}
+        {(cell.valueMode ?? (cell.binding ? 'binding' : 'custom')) === 'formula' && <div className="table-formula-editor"><label>Formula<input value={cell.formula ?? ''} placeholder="Quantity * Rate - Discount" onChange={(e) => patchCell({ formula: e.target.value, valueMode: 'formula' })}/></label><p className="table-cell-help">Use imported fields with +, -, *, / and parentheses. Fields containing spaces are inserted safely as [Basic Value].</p><FormulaFieldPicker source={bindingSource} globalFormulaFields={formulaFields} table={table} currentColumnId={selectedColumn?.id} onInsert={(fieldRef) => patchCell({ formula: `${cell.formula ?? ''}${cell.formula ? ' ' : ''}${fieldRef}`, valueMode: 'formula' })}/></div>}
+        </>}
+        <div className="table-data-format-card">
+          <div className="section-title"><span>Data &amp; Format</span><small>Cell override</small></div>
+          <label>Data type<select value={cell.dataType ?? selectedColumn?.dataType ?? 'text'} onChange={(e) => patchCell({ dataType: e.target.value as TableDataType })}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
+          <TableDataFormatEditor dataType={cell.dataType ?? selectedColumn?.dataType ?? 'text'} value={cell.format ?? selectedColumn?.format ?? {}} onChange={(format) => patchCell({ format })}/>
+        </div>
+      </> : cell.type === 'image' ? <TableCellImageProperties cell={cell} source={bindingSource} formulaFields={formulaFields} onPatch={patchCell}/> : <>
+        <MixedContentEditor label={cell.type === 'qr' ? 'Custom QR value' : 'Custom barcode value'} value={cell.content} fields={tableContentFields} compact onChange={(content) => patchCell({ content })}/>
+        <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={cell.binding} onChange={(binding) => patchCell({ binding })}/>
+        <p className="table-cell-help">Field binding overrides the custom value during preview/generation.</p>
+      </>}
+      <div className="property-grid"><label>Row span<input type="number" min="1" max="50" value={cell.rowSpan} onChange={(e) => patchCell({ rowSpan: Math.max(1, Number(e.target.value) || 1) })}/></label><label>Col span<input type="number" min="1" max={Math.max(1, table.columns.length)} value={cell.colSpan} onChange={(e) => patchCell({ colSpan: Math.max(1, Math.min(table.columns.length, Number(e.target.value) || 1)) })}/></label></div>
+      <div className="property-grid"><label>Padding<input type="number" min="0" max="40" value={cell.style.padding} onChange={(e) => patchCell({ style: { ...cell.style, padding: Math.max(0, Number(e.target.value) || 0) } })}/></label><label>Font size<input type="number" min="8" max="72" value={cell.style.fontSize} onChange={(e) => patchCell({ style: { ...cell.style, fontSize: Math.max(8, Number(e.target.value) || 11) } })}/></label></div>
+      <label>Alignment<select value={cell.style.align} onChange={(e) => patchCell({ style: { ...cell.style, align: e.target.value as 'left'|'center'|'right' } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+      <label>Background<input type="color" value={cell.style.background} onChange={(e) => patchCell({ style: { ...cell.style, background: e.target.value } })}/></label>
+    </div> : <p className="table-cell-hint">Click a table cell on the canvas to edit its content, binding, type, row span and column span.</p>}
+  </div>;
+}
+
+
+
+function SummaryCellEditor({ table, cell, source, formulaFields, onPatch }: { table: TableDefinition; cell: NonNullable<ReturnType<typeof findTableCell>>; source: BuilderDataState['sources'][number] | null; formulaFields: TemplateTokenField[]; onPatch: (patch: Parameters<typeof updateTableCell>[2]) => void }) {
+  const mode = cell.summaryMode ?? 'custom';
+  const fieldOptions = summaryFieldOptions(table, source);
+  const summaryContentFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
+  const summaryRefs = summaryValueReferences(table, cell.id);
+  const [insertValue, setInsertValue] = useState('');
+  const append = (token: string) => onPatch({ summaryFormula: `${cell.summaryFormula ?? ''}${cell.summaryFormula ? ' ' : ''}${token}`, summaryMode: 'formula' });
+  return <div className="table-summary-cell-editor">
+    <div className="section-title"><span>Summary Value</span><small>Document group</small></div>
+    <label>Summary mode<select value={mode} onChange={(e) => onPatch({ summaryMode: e.target.value as 'custom'|'aggregate'|'formula' })}><option value="custom">Custom value</option><option value="aggregate">Aggregate</option><option value="formula">Formula</option></select></label>
+    {mode === 'custom' && <MixedContentEditor label="Content" value={cell.content} fields={summaryContentFields} compact onChange={(content) => onPatch({ content, summaryMode: 'custom' })}/>}
+    {mode === 'aggregate' && <>
+      <label>Aggregate<select value={cell.aggregate?.operation ?? 'sum'} onChange={(e) => onPatch({ summaryMode: 'aggregate', aggregate: { operation: e.target.value as TableAggregateOperation, field: cell.aggregate?.field ?? '' } })}><option value="sum">SUM</option><option value="count">COUNT</option><option value="avg">AVG</option><option value="min">MIN</option><option value="max">MAX</option></select></label>
+      <label>Field / formula column<select value={cell.aggregate?.field ?? ''} onChange={(e) => onPatch({ summaryMode: 'aggregate', aggregate: { operation: cell.aggregate?.operation ?? 'sum', field: e.target.value } })}><option value="">Select field…</option><optgroup label="Imported Fields">{fieldOptions.filter((item) => item.kind === 'field').map((item) => <option key={`sf:${item.value}`} value={item.value}>{item.label}</option>)}</optgroup><optgroup label="Formula Columns">{fieldOptions.filter((item) => item.kind === 'formula').map((item) => <option key={`sc:${item.value}`} value={item.value}>{item.label}</option>)}</optgroup></select></label>
+    </>}
+    {mode === 'formula' && <>
+      <label>Summary formula<input value={cell.summaryFormula ?? ''} placeholder="SUM([Net Value]) * 0.18" onChange={(e) => onPatch({ summaryFormula: e.target.value, summaryMode: 'formula' })}/></label>
+      <label>Insert reference<select value={insertValue} onChange={(e) => { const value = e.target.value; if (!value) return; if (value.startsWith('agg:')) append(value.slice(4)); else if (value.startsWith('summary:')) append(value.slice(8)); else if (value.startsWith('global:')) append(formulaFieldReference(value.slice(7))); setInsertValue(''); }}><option value="">Select aggregate, formula or summary…</option><optgroup label="Aggregates">{fieldOptions.map((item) => { const ref = formulaFieldReference(item.value); return ['SUM','COUNT','AVG','MIN','MAX'].map((fn) => <option key={`${fn}:${item.kind}:${item.value}`} value={`agg:${fn}(${ref})`}>{fn}({item.label})</option>); })}</optgroup>{formulaFields.length > 0 && <optgroup label="Global Formula Fields">{formulaFields.map((item) => <option key={`sum-global:${item.name}`} value={`global:${item.name}`}>{item.label || item.name}</option>)}</optgroup>}{summaryRefs.length > 0 && <optgroup label="Previous Summary Values">{summaryRefs.map((item) => <option key={item.name} value={`summary:${item.reference}`}>{item.name}</option>)}</optgroup>}</select></label>
+      <p className="table-cell-help">Aggregates use only the currently selected Parent / Document group. Global Formula Fields and previous named summary values can be chained.</p>
+    </>}
+    {(mode === 'aggregate' || mode === 'formula') && <label>Summary name<input value={cell.summaryName ?? ''} placeholder="Subtotal / Tax Amount" onChange={(e) => onPatch({ summaryName: e.target.value })}/></label>}
+  </div>;
+}
+
+const TABLE_DATA_TYPE_OPTIONS: Array<{ value: TableDataType; label: string }> = [
+  { value: 'text', label: 'Text' },
+  { value: 'number', label: 'Number' },
+  { value: 'decimal', label: 'Decimal' },
+  { value: 'currency', label: 'Currency' },
+  { value: 'percentage', label: 'Percentage' },
+  { value: 'date', label: 'Date' },
+  { value: 'datetime', label: 'Date Time' },
+  { value: 'time', label: 'Time' },
+  { value: 'checkbox', label: 'Checkbox / Boolean' },
+];
+
+function TableDataFormatEditor({ dataType, value, onChange }: { dataType: TableDataType; value: TableDataFormat; onChange: (format: TableDataFormat) => void }) {
+  const patch = (next: Partial<TableDataFormat>) => onChange({ ...value, ...next });
+  if (dataType === 'text') return <p className="table-cell-help">Text keeps the original value without numeric/date conversion.</p>;
+  if (dataType === 'number' || dataType === 'decimal' || dataType === 'currency' || dataType === 'percentage') return <>
+    {dataType !== 'number' && <label>Decimals<input type="number" min="0" max="8" value={value.decimals ?? 2} onChange={(e) => patch({ decimals: Math.max(0, Math.min(8, Number(e.target.value) || 0)) })}/></label>}
+    <label className="check-row"><input type="checkbox" checked={value.thousandsSeparator !== false} onChange={(e) => patch({ thousandsSeparator: e.target.checked })}/>Thousands separator</label>
+    {dataType === 'currency' && <div className="property-grid"><label>Currency code<input value={value.currencyCode ?? 'INR'} maxLength={3} onChange={(e) => patch({ currencyCode: e.target.value.toUpperCase() })}/></label><label>Symbol<input value={value.currencySymbol ?? '₹'} maxLength={4} onChange={(e) => patch({ currencySymbol: e.target.value })}/></label></div>}
+    {dataType === 'percentage' && <label>Input interpretation<select value={value.percentInputMode ?? 'fraction'} onChange={(e) => patch({ percentInputMode: e.target.value as 'fraction'|'whole' })}><option value="fraction">0.18 → 18%</option><option value="whole">18 → 18%</option></select></label>}
+  </>;
+  if (dataType === 'date' || dataType === 'datetime' || dataType === 'time') return <>
+    {dataType !== 'time' && <label>Date format<select value={value.dateFormat ?? 'dd/MM/yyyy'} onChange={(e) => patch({ dateFormat: e.target.value as NonNullable<TableDataFormat['dateFormat']> })}><option value="dd/MM/yyyy">DD/MM/YYYY</option><option value="MM/dd/yyyy">MM/DD/YYYY</option><option value="yyyy-MM-dd">YYYY-MM-DD</option><option value="dd MMM yyyy">DD MMM YYYY</option></select></label>}
+    {dataType !== 'date' && <label>Time format<select value={value.timeFormat ?? '12h'} onChange={(e) => patch({ timeFormat: e.target.value as '12h'|'24h' })}><option value="12h">12 hour (AM/PM)</option><option value="24h">24 hour</option></select></label>}
+  </>;
+  if (dataType === 'checkbox') return <>
+    <label>Display<select value={value.checkboxStyle ?? 'checkbox'} onChange={(e) => patch({ checkboxStyle: e.target.value as 'checkbox'|'labels' })}><option value="checkbox">☑ / ☐</option><option value="labels">Custom labels</option></select></label>
+    {(value.checkboxStyle ?? 'checkbox') === 'labels' && <div className="property-grid"><label>True label<input value={value.trueValue ?? 'Yes'} onChange={(e) => patch({ trueValue: e.target.value })}/></label><label>False label<input value={value.falseValue ?? 'No'} onChange={(e) => patch({ falseValue: e.target.value })}/></label></div>}
+  </>;

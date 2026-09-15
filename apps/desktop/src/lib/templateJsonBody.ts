@@ -252,3 +252,116 @@ export function buildCurrentDocumentJsonBody(input: {
     warnings,
   };
 }
+
+
+export type TemplateInputPrimitiveType = 'string' | 'number' | 'boolean' | 'date' | 'datetime' | 'object' | 'array' | 'null';
+
+export type TemplateInputFieldContract = {
+  path: string;
+  label: string;
+  type: TemplateInputPrimitiveType;
+  required: boolean;
+  nullable: boolean;
+  description?: string;
+  contentKind?: 'image';
+  acceptedImageSources?: Array<'url' | 'base64' | 'data-url'>;
+};
+
+export type TemplateInputCollectionContract = {
+  path: 'items';
+  required: boolean;
+  fields: TemplateInputFieldContract[];
+  requiredFields: string[];
+  optionalFields: string[];
+};
+
+export type TemplateInputContract = {
+  contractVersion: '1.0';
+  template: { id?: string; name?: string };
+  required: string[];
+  optional: string[];
+  fields: TemplateInputFieldContract[];
+  collections: { items?: TemplateInputCollectionContract };
+  calculatedInternally: string[];
+  example: Record<string, unknown>;
+  warnings: string[];
+};
+
+export type TemplateInputContractResult = {
+  contract: TemplateInputContract;
+  json: string;
+};
+
+function imageInputFields(pages: JsonBodyPage[]): Set<string> {
+  const result = new Set<string>();
+  for (const element of pages.flatMap((page) => page.elements)) {
+    if ((element.type === 'image' || element.type === 'signature') && element.binding?.trim()) result.add(element.binding.trim().toLocaleLowerCase());
+    if (element.shapeMediaBinding?.trim()) result.add(element.shapeMediaBinding.trim().toLocaleLowerCase());
+    if (element.type === 'table' && element.table) {
+      for (const cell of [...cells(element.table.rows), ...cells(element.table.bodyRows), ...cells(element.table.customRows)]) {
+        if (cell.type === 'image' && cell.binding?.trim()) result.add(cell.binding.trim().toLocaleLowerCase());
+      }
+    }
+  }
+  return result;
+}
+
+function contractField(path: string, fields: FieldDefinition[], imageFields: Set<string>, outputPath = path): TemplateInputFieldContract {
+  const definition = fields.find((field) => field.name.toLocaleLowerCase() === path.toLocaleLowerCase());
+  const isImage = imageFields.has(path.toLocaleLowerCase());
+  return {
+    path: outputPath,
+    label: definition?.label ?? outputPath,
+    type: (definition?.type ?? 'string') as TemplateInputPrimitiveType,
+    required: definition?.required ?? false,
+    nullable: definition?.nullable ?? true,
+    ...(definition?.description ? { description: definition.description } : {}),
+    ...(isImage ? { contentKind: 'image' as const, acceptedImageSources: ['url', 'base64', 'data-url'] as Array<'url' | 'base64' | 'data-url'> } : {}),
+  };
+}
+
+/**
+ * DB-6A external integration contract. External systems send raw source values only;
+ * formula outputs stay inside Document Builder and are exposed under calculatedInternally.
+ */
+export function buildTemplateInputContract(input: {
+  pages: JsonBodyPage[];
+  source?: BuilderDataSource | null;
+  record?: NormalizedRecord | null;
+  templateId?: string;
+  templateName?: string;
+}): TemplateInputContractResult {
+  const bodyResult = buildCurrentDocumentJsonBody(input);
+  const fields = input.source?.fields ?? [];
+  const imageFields = imageInputFields(input.pages);
+  const repeatSources = new Set<string>();
+  for (const element of input.pages.flatMap((page) => page.elements)) {
+    if (element.type === 'table' && element.table?.binding?.repeatSource) repeatSources.add(element.table.binding.repeatSource);
+  }
+
+  const documentFields = bodyResult.documentFields.map((path) => contractField(path, fields, imageFields));
+  const itemFields = bodyResult.itemFields.map((path) => contractField(path, fields, imageFields, stripRowPrefix(path, [...repeatSources])));
+  const required = documentFields.filter((field) => field.required).map((field) => field.path).sort();
+  const optional = documentFields.filter((field) => !field.required).map((field) => field.path).sort();
+  const itemRequired = itemFields.filter((field) => field.required).map((field) => field.path).sort();
+  const itemOptional = itemFields.filter((field) => !field.required).map((field) => field.path).sort();
+
+  const contract: TemplateInputContract = {
+    contractVersion: '1.0',
+    template: {
+      ...(input.templateId?.trim() ? { id: input.templateId.trim() } : {}),
+      ...(input.templateName?.trim() ? { name: input.templateName.trim() } : {}),
+    },
+    required,
+    optional,
+    fields: documentFields,
+    collections: itemFields.length ? {
+      items: { path: 'items', required: itemRequired.length > 0, fields: itemFields, requiredFields: itemRequired, optionalFields: itemOptional },
+    } : {},
+    calculatedInternally: bodyResult.formulaFieldsExcluded,
+    example: bodyResult.body,
+    warnings: bodyResult.warnings,
+  };
+
+  return { contract, json: JSON.stringify(contract, null, 2) };
+}

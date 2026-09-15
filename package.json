@@ -3,9 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "description": "Standalone local-first PDF/DOCX business document builder",
-  "engines": {
-    "node": ">=20 <21"
-  },
+  "engines": { "node": ">=20 <21" },
   "scripts": {
     "dev": "npm run dev -w @document-builder/desktop",
     "build": "npm run build --workspaces --if-present",
@@ -13,10 +11,7 @@
     "test": "vitest run",
     "tauri:dev": "npm run tauri dev -w @document-builder/desktop"
   },
-  "workspaces": [
-    "packages/*",
-    "apps/*"
-  ],
+  "workspaces": ["packages/*", "apps/*"],
   "devDependencies": {
     "@tauri-apps/cli": "^1.6.0",
     "@testing-library/react": "^16.3.3",
