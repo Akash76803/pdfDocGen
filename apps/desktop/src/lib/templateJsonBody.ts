@@ -8,6 +8,9 @@ export type JsonBodyElement = {
   type: string;
   text?: string;
   binding?: string;
+  shapeMediaBinding?: string;
+  conditionEnabled?: boolean;
+  conditionField?: string;
   formulaName?: string;
   formulaExpression?: string;
   table?: TableDefinition;
@@ -195,6 +198,8 @@ export function buildCurrentDocumentJsonBody(input: {
       continue;
     }
     addCandidate(explicitDocumentFields, element.binding, fields, formulas);
+    addCandidate(explicitDocumentFields, element.shapeMediaBinding, fields, formulas);
+    if (element.conditionEnabled) addCandidate(explicitDocumentFields, element.conditionField, fields, formulas);
     addTextTokens(explicitDocumentFields, element.text, fields, formulas);
     if (element.type === 'table' && element.table) {
       collectTableInputs(element.table, explicitDocumentFields, itemFields, fields, formulas);

@@ -45,6 +45,12 @@ type BuilderElement = {
   text: string; fontSize: number; fontFamily?: string; fontWeight?: number; italic?: boolean; underline?: boolean; lineHeight?: number;
   textAlign: 'left'|'center'|'right'; fill: string; color: string; binding?: string;
   imageSource?: string; imageAssetId?: string; imageFit?: 'contain'|'cover'|'fill';
+  imageBackground?: string; imageOpacity?: number; imageBorderStyle?: 'none'|'solid'|'dashed'|'dotted'; imageBorderWidth?: number; imageBorderColor?: string; imageBorderRadius?: number;
+  imageBrightness?: number; imageContrast?: number; imageSaturation?: number; imageGrayscale?: number; imageSepia?: number; imageBlur?: number;
+  imageShadowEnabled?: boolean; imageOriginalAssetId?: string; imageOriginalSource?: string;
+  shapeKind?: string; shapeContentMode?: string; shapeMediaBinding?: string; shapeFillType?: string; shapeFillColor2?: string; shapeStrokeStyle?: string; shapeStrokeWidth?: number; shapeStrokeAlignment?: string; shapeCornerRadius?: number; shapeShadowEnabled?: boolean; shapeGlowEnabled?: boolean; shapeClipMedia?: boolean; shapeMediaOverlayOpacity?: number; conditionEnabled?: boolean;
+  qrForeground?: string; qrBackground?: string; qrQuietZone?: number; qrErrorCorrection?: string; qrShowValue?: boolean;
+  barcodeForeground?: string; barcodeBackground?: string; barcodeShowText?: boolean; barcodeTextSize?: number; barcodeBarHeight?: number; barcodeQuietZone?: number;
   table?: TableDefinition; region?: 'body'|'header'|'footer'; layoutMode?: 'flow'|'floating'; flowRowId?: string;
   flowWidthPercent?: number; flowGapBeforeMm?: number; flowGapAfterMm?: number; flowColumnGapMm?: number;
   formulaName?: string; formulaExpression?: string;
@@ -122,6 +128,11 @@ export function analyzeNativePdfCompatibility(raw: string | null, source?: Build
   if(dynamicSourceIds.size>1) reasons.push('Fast / Native currently supports one imported Data Source per generation request.');
   if(source&&dynamicSourceIds.size===1&&!dynamicSourceIds.has(source.id)) reasons.push('Selected Data Source does not match the template Dynamic Table source.');
   if(elements.some((e)=>e.layoutMode==='floating')) warnings.push('Floating body elements are converted to native document flow. Use Exact Preview when pixel-position fidelity is required.');
+  if(elements.some((e)=>(e.type==='image'||e.type==='signature') && ((e.imageOpacity??100)!==100 || (e.imageBorderWidth??0)>0 || (e.imageBorderRadius??0)>0 || !!e.imageBackground || (e.imageBrightness??100)!==100 || (e.imageContrast??100)!==100 || (e.imageSaturation??100)!==100 || (e.imageGrayscale??0)>0 || (e.imageSepia??0)>0 || (e.imageBlur??0)>0 || !!e.imageShadowEnabled))) reasons.push('Advanced Image/Signature styling currently requires Exact Preview for visual fidelity.');
+  if(elements.some((e)=>e.type==='shape' && ((e.shapeKind??'rectangle')!=='rectangle' || (e.shapeContentMode??(e.text?'text':'none'))!=='text' || (e.shapeFillType??'solid')!=='solid' || (e.shapeStrokeStyle??'none')!=='none' || (e.shapeStrokeWidth??0)>0 || (e.shapeStrokeAlignment??'center')!=='center' || (e.shapeCornerRadius??0)>0 || !!e.shapeShadowEnabled || !!e.shapeGlowEnabled || !!e.shapeMediaBinding))) reasons.push('Advanced Shape geometry, media or effects require Exact Preview for visual fidelity.');
+  if(elements.some((e)=>e.type==='qr' && ((e.qrForeground??'#111827').toUpperCase()!=='#111827' || (e.qrBackground??'#FFFFFF').toUpperCase()!=='#FFFFFF' || (e.qrQuietZone??8)!==8 || (e.qrErrorCorrection??'M')!=='M' || (e.qrShowValue??true)!==true))) reasons.push('Advanced QR formatting currently requires Exact Preview for visual fidelity.');
+  if(elements.some((e)=>e.type==='barcode' && ((e.barcodeForeground??'#111827').toUpperCase()!=='#111827' || (e.barcodeBackground??'#FFFFFF').toUpperCase()!=='#FFFFFF' || (e.barcodeShowText??true)!==true || (e.barcodeTextSize??11)!==11 || (e.barcodeBarHeight??54)!==54 || (e.barcodeQuietZone??8)!==8))) reasons.push('Advanced Barcode formatting currently requires Exact Preview for visual fidelity.');
+  if(elements.some((e)=>!!e.conditionEnabled)) reasons.push('Conditional element visibility currently requires Exact Preview for visual fidelity.');
   const unsupportedFonts=[...new Set(elements.map((e)=>e.fontFamily).filter((font):font is string=>!!font&&!isNativeFont(font)))];
   if(unsupportedFonts.length) warnings.push(`Native PDF substitutes unsupported fonts with a core PDF font: ${unsupportedFonts.join(', ')}.`);
   return {supported:reasons.length===0,reasons:[...new Set(reasons)],warnings:[...new Set(warnings)]};

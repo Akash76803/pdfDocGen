@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState, type ChangeEvent, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import QRCode from 'react-qr-code';
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
   Copy, Eye, Image, Minus, MousePointer2, QrCode, Save, Signature, Table2, Trash2, Calculator,
@@ -27,7 +28,7 @@ import { appendGenerationHistory, clearGenerationProgress, clearGenerationReques
 import { buildCurrentDocumentJsonBody, type TemplateJsonBodyResult } from '../lib/templateJsonBody.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
-type InspectorTab = 'properties' | 'binding' | 'formatting' | 'conditions' | 'header' | 'footer';
+type InspectorTab = 'properties' | 'content' | 'binding' | 'rows' | 'formatting' | 'conditions' | 'header' | 'footer';
 type TextAlign = 'left' | 'center' | 'right';
 type PageRegion = 'body' | 'header' | 'footer';
 
@@ -52,6 +53,82 @@ type BuilderElement = {
   imageSource?: string;
   imageAssetId?: string;
   imageFit?: 'contain' | 'cover' | 'fill';
+  imageObjectPosition?: 'center'|'top'|'bottom'|'left'|'right';
+  imageLockAspect?: boolean;
+  imageBackground?: string;
+  imageOpacity?: number;
+  imageBorderStyle?: 'none' | 'solid' | 'dashed' | 'dotted';
+  imageBorderWidth?: number;
+  imageBorderColor?: string;
+  imageBorderRadius?: number;
+  imageBrightness?: number;
+  imageContrast?: number;
+  imageSaturation?: number;
+  imageGrayscale?: number;
+  imageSepia?: number;
+  imageBlur?: number;
+  imageShadowEnabled?: boolean;
+  imageShadowX?: number;
+  imageShadowY?: number;
+  imageShadowBlur?: number;
+  imageShadowSpread?: number;
+  imageShadowColor?: string;
+  imageShadowOpacity?: number;
+  imageBgRemoveTolerance?: number;
+  imageBgRemoveSoftness?: number;
+  imageBgRemoveFeather?: number;
+  imageBgRemoveFringe?: number;
+  imageBgRemoveNoise?: number;
+  imageOriginalAssetId?: string;
+  imageOriginalSource?: string;
+  shapeKind?: 'rectangle' | 'rounded' | 'circle' | 'ellipse' | 'triangle' | 'diamond' | 'pentagon' | 'hexagon' | 'pill' | 'tag' | 'priceTag' | 'ticket' | 'banner' | 'ribbon' | 'foldedRibbon' | 'flag' | 'bookmark' | 'arrowRight' | 'arrowLeft' | 'arrowUp' | 'arrowDown' | 'arrowDouble' | 'chevron' | 'bentArrow' | 'speech' | 'thought' | 'cloud' | 'cloudCallout' | 'star' | 'heart' | 'check' | 'cross' | 'plus' | 'badge' | 'seal' | 'flowProcess' | 'flowDecision' | 'flowDocument' | 'flowDatabase';
+  shapeContentMode?: 'none' | 'text' | 'media' | 'text-media';
+  shapeMediaBinding?: string;
+  shapeMediaPosition?: 'left' | 'right' | 'top' | 'bottom' | 'background' | 'center';
+  shapeMediaSizePercent?: number;
+  shapeContentGap?: number;
+  shapePadding?: number;
+  shapeOpacity?: number;
+  shapeLockAspect?: boolean;
+  shapeFillType?: 'solid' | 'linear' | 'radial' | 'none';
+  shapeFillColor2?: string;
+  shapeFillAngle?: number;
+  shapeStrokeStyle?: 'none' | 'solid' | 'dashed' | 'dotted';
+  shapeStrokeWidth?: number;
+  shapeStrokeColor?: string;
+  shapeStrokeAlignment?: 'inside' | 'center' | 'outside';
+  shapeCornerRadius?: number;
+  shapeTextVerticalAlign?: 'top' | 'middle' | 'bottom';
+  shapeClipMedia?: boolean;
+  shapeMediaOverlayOpacity?: number;
+  shapeShadowEnabled?: boolean;
+  shapeShadowX?: number;
+  shapeShadowY?: number;
+  shapeShadowBlur?: number;
+  shapeShadowSpread?: number;
+  shapeShadowColor?: string;
+  shapeShadowOpacity?: number;
+  shapeGlowEnabled?: boolean;
+  shapeGlowBlur?: number;
+  shapeGlowColor?: string;
+  shapeGlowOpacity?: number;
+  conditionEnabled?: boolean;
+  conditionField?: string;
+  conditionOperator?: 'equals'|'notEquals'|'contains'|'notContains'|'isEmpty'|'isNotEmpty'|'greaterThan'|'lessThan';
+  conditionValue?: string;
+  qrForeground?: string;
+  qrBackground?: string;
+  qrQuietZone?: number;
+  qrErrorCorrection?: 'L'|'M'|'Q'|'H';
+  qrShowValue?: boolean;
+  barcodeFormat?: 'code39';
+  barcodeForeground?: string;
+  barcodeBackground?: string;
+  barcodeShowText?: boolean;
+  barcodeTextSize?: number;
+  barcodeBarHeight?: number;
+  barcodeQuietZone?: number;
+  signatureShowPlaceholder?: boolean;
   table?: TableDefinition;
   region?: PageRegion;
   layoutMode?: BodyLayoutMode;
@@ -210,8 +287,12 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
   const selected = formulaElements.find((item) => item.id === selectedId) ?? masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
   useEffect(() => {
-    if (!selected && (tab === 'binding' || tab === 'formatting' || tab === 'conditions')) setTab('properties');
-    if (selected?.type === 'text' && tab === 'binding') setTab('properties');
+    if (!selected && (tab === 'content' || tab === 'binding' || tab === 'formatting' || tab === 'conditions' || tab === 'rows')) setTab('properties');
+    if (selected?.type === 'text' && (tab === 'binding' || tab === 'content' || tab === 'rows')) setTab('properties');
+    if (selected?.type === 'image' && (tab === 'content' || tab === 'binding' || tab === 'rows')) setTab('properties');
+    if ((selected?.type === 'shape' || selected?.type === 'qr' || selected?.type === 'barcode' || selected?.type === 'signature') && (tab === 'binding' || tab === 'rows')) setTab(selected.type === 'shape' || selected.type === 'qr' || selected.type === 'barcode' || selected.type === 'signature' ? 'content' : 'properties');
+    if (tab === 'content' && !(['shape','qr','barcode','signature'] as ToolType[]).includes(selected?.type as ToolType)) setTab('properties');
+    if (tab === 'rows' && selected?.type !== 'table') setTab('properties');
   }, [selected, tab]);
   const globalDocumentPicker = source ? buildDocumentPreviewPicker(source, record, dataState.activeRecordIndex, activePage?.elements ?? []) : null;
   const selectPreviewRecord = (index: number) => {
@@ -1221,7 +1302,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
         <aside className="builder-right">
           <button className="panel-collapse right" title="Collapse inspector" onClick={() => setRightOpen(false)}><ChevronRight size={15}/></button>
           <div className="inspector-tabs contextual">
-            {(selected ? (selected.type === 'text' ? (['properties', 'formatting', 'conditions'] as const) : (['properties', 'binding', 'formatting', 'conditions'] as const)) : (['properties'] as const)).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'binding' ? (selected?.type === 'table' ? 'Columns' : 'Data') : item[0].toUpperCase() + item.slice(1)}</button>)}
+            {(selected ? (selected.type === 'text' ? (['properties', 'formatting', 'conditions'] as const) : selected.type === 'table' ? (['properties', 'binding', 'rows', 'formatting', 'conditions'] as const) : selected.type === 'shape' ? (['properties', 'content', 'formatting', 'conditions'] as const) : (selected.type === 'image') ? (['properties', 'formatting', 'conditions'] as const) : (selected.type === 'qr' || selected.type === 'barcode' || selected.type === 'signature') ? (['properties', 'content', 'formatting', 'conditions'] as const) : (['properties', 'binding', 'formatting', 'conditions'] as const)) : (['properties'] as const)).map((item) => <button key={item} className={tab === item ? 'active' : ''} onClick={() => setTab(item)}>{item === 'binding' ? (selected?.type === 'table' ? 'Columns' : 'Data') : item === 'rows' ? 'Rows' : item === 'content' ? 'Content' : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
           <Inspector tab={tab} onInspectorTab={setTab} selected={selected} source={source} record={record} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} dynamicTokenFields={dynamicTokenFields} dataState={dataState} pageSettings={pageSettings} pageName={activePage?.name || 'Page'} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={focusPreviewPage} onPageSettings={updatePageSettings} onPageName={renamePage} onAddPage={addPage} onDuplicatePage={duplicatePage} onDeletePage={deletePage} onMovePage={movePage} onSelectPage={(pageId) => { setActivePageId(pageId); setSelectedId(null); setActivePreviewPageIndex(0); }} onUpdate={updateSelected} onDelete={deleteSelected} onDuplicate={duplicateSelected} onArrange={arrangeSelected} onMoveFlow={moveFlowSelected} onFlowRowAction={updateFlowRowSelected} relativeElements={activeBodyElements} onSetInsertRegion={(region) => setActiveInsertRegion(region)} onEditTableConfiguration={(elementId) => { setTableEditorElementId(elementId); setTableModalOpen(true); }}/>
         </aside>
@@ -1304,7 +1385,7 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
 
   const continuationTop = contentBoundsPx(pageSettings).y;
   const renderedTop = virtualPageMode && virtualPageIndex > 0 ? continuationTop : item.y;
-  return <div data-page-region={region} data-repeated-projection={repeatedBandElement ? 'true' : 'false'} className={`canvas-element ${selected ? 'selected' : ''} element-${item.type} region-${region} ${virtualPageMode ? 'virtual-continuation-element' : ''} ${repeatedBandElement ? 'repeated-region-projection' : ''}`} style={{ left: item.x, top: renderedTop, width: item.width, height: item.height, color: item.color, background: item.type === 'shape' ? item.fill : undefined, fontSize: item.fontSize, fontFamily: item.fontFamily ?? 'Arial', fontWeight: item.fontWeight ?? 400, fontStyle: item.italic ? 'italic' : 'normal', textDecoration: item.underline ? 'underline' : 'none', lineHeight: item.lineHeight ?? 1.25, textAlign: item.textAlign }} onPointerDown={startDrag} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
+  return <div data-page-region={region} data-repeated-projection={repeatedBandElement ? 'true' : 'false'} className={`canvas-element ${selected ? 'selected' : ''} element-${item.type} region-${region} ${virtualPageMode ? 'virtual-continuation-element' : ''} ${repeatedBandElement ? 'repeated-region-projection' : ''}`} style={{ left: item.x, top: renderedTop, width: item.width, height: item.height, color: item.color, fontSize: item.fontSize, fontFamily: item.fontFamily ?? 'Arial', fontWeight: item.fontWeight ?? 400, fontStyle: item.italic ? 'italic' : 'normal', textDecoration: item.underline ? 'underline' : 'none', lineHeight: item.lineHeight ?? 1.25, textAlign: item.textAlign, ...imageElementFrameStyle(item) }} onPointerDown={startDrag} onPointerMove={move} onPointerUp={end} onPointerCancel={end}>
     <ElementContent item={item} pageSettings={pageSettings} record={record} source={source} sources={sources} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} virtualPageIndex={virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={runtimePageCount} virtualPageMode={virtualPageMode} onElementSelect={onSelect} onTableChange={(table) => onChange({ table })} onTableSelectionChange={onSelectionChange} onTableHistoryStart={onHistoryStart} onTableHistoryEnd={onHistoryEnd} onTableHeightChange={virtualPageMode ? undefined : (height) => { if (Math.abs(item.height - height) >= 1) onLayoutChange({ height }); }}/>
     {selected && (!virtualPageMode || virtualPageIndex === 0 || bandConstrained) && <>{!(region === 'body' && (item.layoutMode ?? 'floating') === 'flow') ? <span className="resize-handle" data-resize="true" onPointerDown={startResize}/> : null}<span className="selection-label">{repeatedBandElement ? `Global ${region === 'header' ? 'Header' : 'Footer'}` : labelFor(item.type)}</span></>}
   </div>;
@@ -1312,6 +1393,7 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
 
 function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
   const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
+  if (item.conditionEnabled && item.conditionField && !evaluateElementCondition(item, resolveBuilderField(item.conditionField))) return null;
   const bound = item.binding ? resolveBuilderField(item.binding) : undefined;
   const hasMixedTokens = templateHasTokens(item.text);
   const rawRendered = !hasMixedTokens && item.binding && bound !== undefined ? displayValue(bound) : item.text;
@@ -1328,11 +1410,210 @@ function ElementContent({ item, pageSettings, record, source, sources, formulaEl
     return <TableCanvas table={item.table} record={record} source={tableSource} documentSource={source} globalFormulaValues={documentFormulaValues(record, formulaElements, formulaAggregateRows)} availableHeight={availableHeight} continuationAvailableHeight={Math.max(80, bounds.height)} availableWidth={Math.max(80, item.width)} fragmentIndex={virtualPageMode ? virtualPageIndex : undefined} virtualPageMode={virtualPageMode} onChange={(table) => { onElementSelect(); onTableChange(table); }} onSelectionChange={(table) => { onElementSelect(); onTableSelectionChange(table); }} onInteractionStart={onTableHistoryStart} onInteractionEnd={onTableHistoryEnd} onHeightChange={onTableHeightChange}/>;
   }
   if (item.type === 'table') return <div className="db-table-empty-placeholder">Table schema missing</div>;
-  if (item.type === 'qr') return <><QrCode size={52}/><small>{rendered}</small></>;
-  if (item.type === 'barcode') return <><Barcode size={72}/><small>{rendered}</small></>;
+  if (item.type === 'qr') return <QrElementContent item={item} value={rendered}/>;
+  if (item.type === 'barcode') return <BarcodeElementContent item={item} value={rendered}/>;
   if (item.type === 'divider') return <span className="divider-line"/>;
-  if (item.type === 'shape') return rendered ? <span className="text-content shape-text-content">{rendered}</span> : null;
+  if (item.type === 'shape') return <ShapeElementContent item={item} rendered={rendered} mediaBoundValue={item.shapeMediaBinding ? resolveBuilderField(item.shapeMediaBinding) : undefined}/>;
   return <span className="text-content">{rendered}</span>;
+}
+
+
+function ShapeElementContent({ item, rendered, mediaBoundValue }: { item: BuilderElement; rendered: string; mediaBoundValue: unknown }) {
+  const contentMode = item.shapeContentMode ?? (item.text ? 'text' : 'none');
+  const showText = contentMode === 'text' || contentMode === 'text-media';
+  const showMedia = contentMode === 'media' || contentMode === 'text-media';
+  const mediaPosition = item.shapeMediaPosition ?? 'left';
+  const verticalAlign = item.shapeTextVerticalAlign ?? 'middle';
+  const direction = mediaPosition === 'top' || mediaPosition === 'bottom' ? 'column' : 'row';
+  const foregroundStyle: CSSProperties = {
+    padding: item.shapePadding ?? 12,
+    gap: item.shapeContentGap ?? 8,
+    justifyContent: verticalAlign === 'top' ? 'flex-start' : verticalAlign === 'bottom' ? 'flex-end' : 'center',
+    textAlign: item.textAlign ?? 'left',
+  };
+  if (mediaPosition === 'center') {
+    foregroundStyle.justifyContent = 'center';
+    foregroundStyle.alignItems = 'center';
+  } else if (mediaPosition !== 'background') {
+    foregroundStyle.flexDirection = direction;
+    foregroundStyle.alignItems = direction === 'row' ? (item.textAlign === 'center' ? 'center' : item.textAlign === 'right' ? 'flex-end' : 'flex-start') : 'stretch';
+  }
+  const mediaStyle: CSSProperties = { flexBasis: `${Math.min(80, Math.max(12, item.shapeMediaSizePercent ?? 32))}%` };
+  if(item.shapeClipMedia??true){const clip=shapeClipPath(item.shapeKind??'rectangle');mediaStyle.clipPath=clip;mediaStyle.WebkitClipPath=clip;}
+  const orderedTextFirst = mediaPosition === 'right' || mediaPosition === 'bottom';
+  return <div className="shape-shell">
+    <div className="shape-visual" style={shapeVisualStyle(item)}>
+      {showMedia && mediaPosition === 'background' ? <ShapeMediaContent item={item} bound={mediaBoundValue} className="shape-media-image background" extraStyle={{opacity:Math.min(100,Math.max(0,item.shapeMediaOverlayOpacity??100))/100}}/> : null}
+    </div>
+    <div className={`shape-foreground mode-${contentMode} media-${mediaPosition}`} style={foregroundStyle}>
+      {showMedia && mediaPosition !== 'background' && !orderedTextFirst ? <div className="shape-media-slot" style={mediaStyle}><ShapeMediaContent item={item} bound={mediaBoundValue} className="shape-media-image"/></div> : null}
+      {showText && rendered ? <div className={`shape-text-block valign-${verticalAlign}`}><span className="shape-text-content">{rendered}</span></div> : null}
+      {showMedia && mediaPosition !== 'background' && orderedTextFirst ? <div className="shape-media-slot" style={mediaStyle}><ShapeMediaContent item={item} bound={mediaBoundValue} className="shape-media-image"/></div> : null}
+      {!showText && !showMedia ? <span className="shape-placeholder">Shape</span> : null}
+    </div>
+  </div>;
+}
+
+function ShapeMediaContent({ item, bound, className = 'shape-media-image', extraStyle }: { item: BuilderElement; bound: unknown; className?: string; extraStyle?: CSSProperties }) {
+  const [assetUrl, setAssetUrl] = useState('');
+  useEffect(() => {
+    let objectUrl = '';
+    let cancelled = false;
+    if (!item.imageAssetId) { setAssetUrl(''); return; }
+    void loadImageAsset(item.imageAssetId).then((blob) => {
+      if (!blob || cancelled) return;
+      objectUrl = URL.createObjectURL(blob);
+      setAssetUrl(objectUrl);
+    }).catch(() => setAssetUrl(''));
+    return () => { cancelled = true; if (objectUrl) URL.revokeObjectURL(objectUrl); };
+  }, [item.imageAssetId]);
+
+  const boundSrc = typeof bound === 'string' && isImageSource(bound) ? bound : '';
+  const manualSrc = item.imageSource && isImageSource(item.imageSource) ? item.imageSource : '';
+  const src = boundSrc || assetUrl || manualSrc;
+  if (src) return <img className={className} src={src} alt="Shape media" style={{ objectFit: item.imageFit ?? 'contain', objectPosition: item.imageObjectPosition ?? 'center', filter: imageElementFilter(item), ...shapeMediaFrameStyle(item), ...(extraStyle??{}) }}/>
+  return <div className="shape-media-empty">No media</div>;
+}
+
+function shapeClipPath(kind: NonNullable<BuilderElement['shapeKind']>) {
+  switch (kind) {
+    case 'circle': return 'ellipse(50% 50% at 50% 50%)';
+    case 'ellipse': return 'ellipse(50% 42% at 50% 50%)';
+    case 'triangle': return 'polygon(50% 0%, 100% 100%, 0% 100%)';
+    case 'diamond': return 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
+    case 'pentagon': return 'polygon(50% 0%, 100% 38%, 82% 100%, 18% 100%, 0% 38%)';
+    case 'hexagon': return 'polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)';
+    case 'pill': return 'inset(0 round 999px)';
+    case 'tag': return 'polygon(0 0, 82% 0, 100% 50%, 82% 100%, 0 100%, 0 0)';
+    case 'priceTag': return 'polygon(15% 0, 100% 0, 100% 100%, 15% 100%, 0 50%)';
+    case 'ticket': return 'polygon(0 0, 100% 0, 100% 32%, 94% 38%, 100% 44%, 100% 100%, 0 100%, 0 44%, 6% 38%, 0 32%)';
+    case 'banner': return 'polygon(0 0, 100% 0, 100% 78%, 76% 78%, 70% 100%, 64% 78%, 0 78%)';
+    case 'ribbon': return 'polygon(0 15%, 15% 15%, 15% 0, 85% 0, 85% 15%, 100% 15%, 92% 50%, 100% 85%, 85% 85%, 85% 100%, 15% 100%, 15% 85%, 0 85%, 8% 50%)';
+    case 'foldedRibbon': return 'polygon(0 18%, 18% 18%, 18% 0, 100% 0, 86% 50%, 100% 100%, 18% 100%, 18% 82%, 0 82%, 9% 50%)';
+    case 'flag': return 'polygon(0 0, 100% 0, 82% 50%, 100% 100%, 0 100%)';
+    case 'bookmark': return 'polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)';
+    case 'arrowRight': return 'polygon(0 0, 72% 0, 72% 18%, 100% 50%, 72% 82%, 72% 100%, 0 100%, 12% 50%)';
+    case 'arrowLeft': return 'polygon(28% 0, 100% 0, 88% 50%, 100% 100%, 28% 100%, 28% 82%, 0 50%, 28% 18%)';
+    case 'arrowUp': return 'polygon(50% 0, 100% 35%, 72% 35%, 72% 100%, 28% 100%, 28% 35%, 0 35%)';
+    case 'arrowDown': return 'polygon(28% 0, 72% 0, 72% 65%, 100% 65%, 50% 100%, 0 65%, 28% 65%)';
+    case 'arrowDouble': return 'polygon(0 50%, 22% 12%, 22% 34%, 78% 34%, 78% 12%, 100% 50%, 78% 88%, 78% 66%, 22% 66%, 22% 88%)';
+    case 'chevron': return 'polygon(0 0, 68% 0, 100% 50%, 68% 100%, 0 100%, 30% 50%)';
+    case 'bentArrow': return 'polygon(0 0, 62% 0, 62% 28%, 78% 28%, 78% 8%, 100% 42%, 78% 76%, 78% 56%, 42% 56%, 42% 100%, 0 100%)';
+    case 'speech': return 'polygon(0 0, 100% 0, 100% 82%, 64% 82%, 54% 100%, 50% 82%, 0 82%)';
+    case 'thought': return 'polygon(10% 12%, 30% 0, 55% 6%, 76% 0, 96% 20%, 100% 48%, 92% 72%, 70% 88%, 46% 90%, 30% 100%, 18% 88%, 0 74%, 4% 42%)';
+    case 'cloud': return 'polygon(10% 72%, 4% 54%, 10% 34%, 28% 24%, 38% 6%, 60% 8%, 72% 22%, 90% 24%, 100% 44%, 96% 66%, 82% 80%, 58% 86%, 34% 84%)';
+    case 'cloudCallout': return 'polygon(10% 68%, 4% 48%, 12% 28%, 30% 22%, 40% 4%, 62% 8%, 74% 20%, 92% 24%, 100% 44%, 94% 66%, 78% 78%, 60% 82%, 50% 96%, 44% 82%, 28% 82%)';
+    case 'star': return 'polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%)';
+    case 'heart': return 'polygon(50% 92%, 12% 56%, 4% 34%, 12% 16%, 30% 8%, 50% 26%, 70% 8%, 88% 16%, 96% 34%, 88% 56%)';
+    case 'check': return 'polygon(0 52%, 12% 40%, 36% 64%, 84% 10%, 100% 24%, 38% 92%)';
+    case 'cross': return 'polygon(28% 0, 50% 22%, 72% 0, 100% 28%, 78% 50%, 100% 72%, 72% 100%, 50% 78%, 28% 100%, 0 72%, 22% 50%, 0 28%)';
+    case 'plus': return 'polygon(36% 0, 64% 0, 64% 36%, 100% 36%, 100% 64%, 64% 64%, 64% 100%, 36% 100%, 36% 64%, 0 64%, 0 36%, 36% 36%)';
+    case 'badge': return 'polygon(20% 0, 80% 0, 100% 20%, 100% 80%, 80% 100%, 20% 100%, 0 80%, 0 20%)';
+    case 'seal': return 'polygon(50% 0, 60% 10%, 74% 4%, 80% 18%, 96% 20%, 90% 36%, 100% 50%, 90% 64%, 96% 80%, 80% 82%, 74% 96%, 60% 90%, 50% 100%, 40% 90%, 26% 96%, 20% 82%, 4% 80%, 10% 64%, 0 50%, 10% 36%, 4% 20%, 20% 18%, 26% 4%, 40% 10%)';
+    case 'flowDecision': return 'polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)';
+    case 'flowDocument': return 'polygon(0 0, 100% 0, 100% 84%, 86% 92%, 70% 86%, 52% 94%, 34% 86%, 16% 94%, 0 86%)';
+    case 'flowDatabase': return 'ellipse(50% 50% at 50% 50%)';
+    case 'rounded': return 'inset(0 round 18px)';
+    case 'flowProcess':
+    case 'rectangle':
+    default:
+      return 'none';
+  }
+}
+
+function shapeVisualStyle(item: BuilderElement) {
+  const kind=item.shapeKind??'rectangle';
+  const clipPath=shapeClipPath(kind);
+  const fillType=item.shapeFillType??'solid';
+  const color1=item.fill||'#EAF1FF';
+  const color2=item.shapeFillColor2??'#C7D7FE';
+  const angle=item.shapeFillAngle??45;
+  const strokeStyle=item.shapeStrokeStyle??'solid';
+  const strokeWidth=Math.max(0,item.shapeStrokeWidth??1);
+  const strokeColor=item.shapeStrokeColor??'#9DB7F5';
+  const strokeAlignment=item.shapeStrokeAlignment??'center';
+  const style:CSSProperties={
+    background:fillType==='none'?'transparent':fillType==='linear'?`linear-gradient(${angle}deg, ${color1}, ${color2})`:fillType==='radial'?`radial-gradient(circle at center, ${color1}, ${color2})`:color1,
+    opacity:Math.min(100,Math.max(0,item.shapeOpacity??100))/100,
+    clipPath,
+    WebkitClipPath:clipPath,
+    boxSizing:'border-box',
+  };
+  if(kind==='rounded'||kind==='rectangle'||kind==='flowProcess')style.borderRadius=item.shapeCornerRadius??(kind==='rounded'?18:0);
+  const shadows:string[]=[];
+  if(strokeStyle!=='none'&&strokeWidth>0){
+    if((strokeStyle==='solid')&&strokeAlignment==='inside')shadows.push(`inset 0 0 0 ${strokeWidth}px ${strokeColor}`);
+    else if((strokeStyle==='solid')&&strokeAlignment==='outside')shadows.push(`0 0 0 ${strokeWidth}px ${strokeColor}`);
+    else {style.borderStyle=strokeStyle;style.borderWidth=strokeWidth;style.borderColor=strokeColor;}
+  }
+  const irregular=!['rectangle','rounded','flowProcess'].includes(kind);
+  const filters:string[]=[];
+  if(item.shapeShadowEnabled){const c=hexToRgba(item.shapeShadowColor??'#000000',Math.min(100,Math.max(0,item.shapeShadowOpacity??28))/100);if(irregular)filters.push(`drop-shadow(${item.shapeShadowX??0}px ${item.shapeShadowY??4}px ${Math.max(0,item.shapeShadowBlur??10)}px ${c})`);else shadows.push(`${item.shapeShadowX??0}px ${item.shapeShadowY??4}px ${Math.max(0,item.shapeShadowBlur??10)}px ${item.shapeShadowSpread??0}px ${c}`);}
+  if(item.shapeGlowEnabled){const c=hexToRgba(item.shapeGlowColor??'#60A5FA',Math.min(100,Math.max(0,item.shapeGlowOpacity??45))/100);if(irregular)filters.push(`drop-shadow(0 0 ${Math.max(0,item.shapeGlowBlur??12)}px ${c})`);else shadows.push(`0 0 ${Math.max(0,item.shapeGlowBlur??12)}px ${c}`);}
+  if(shadows.length)style.boxShadow=shadows.join(', ');
+  if(filters.length)style.filter=filters.join(' ');
+  return style;
+}
+
+function shapeMediaFrameStyle(item: BuilderElement) {
+  const style: CSSProperties = {
+    opacity: Math.min(100, Math.max(0, item.imageOpacity ?? 100)) / 100,
+  };
+  const borderStyle = item.imageBorderStyle ?? '';
+  const borderWidth = item.imageBorderWidth ?? 0;
+  if (borderStyle && borderStyle !== 'none' && borderWidth > 0) {
+    style.borderStyle = borderStyle;
+    style.borderWidth = borderWidth;
+    style.borderColor = item.imageBorderColor ?? '#CBD5E1';
+  }
+  if ((item.imageBorderRadius ?? 0) > 0) style.borderRadius = item.imageBorderRadius ?? 0;
+  if (item.imageShadowEnabled) {
+    const shadowColor = hexToRgba(item.imageShadowColor ?? '#000000', Math.min(100, Math.max(0, item.imageShadowOpacity ?? 25)) / 100);
+    style.boxShadow = `${item.imageShadowX ?? 0}px ${item.imageShadowY ?? 3}px ${Math.max(0, item.imageShadowBlur ?? 8)}px ${item.imageShadowSpread ?? 0}px ${shadowColor}`;
+  }
+  if (item.imageBackground) style.background = item.imageBackground;
+  return style;
+}
+
+
+function QrElementContent({ item, value }: { item: BuilderElement; value: string }) {
+  const quiet = Math.max(0, item.qrQuietZone ?? 8);
+  const display = value || ' ';
+  return <div className="qr-render-shell" style={{ background: item.qrBackground ?? '#FFFFFF', padding: quiet }}>
+    <div className="qr-code-host"><QRCode value={display} fgColor={item.qrForeground ?? '#111827'} bgColor={item.qrBackground ?? '#FFFFFF'} level={item.qrErrorCorrection ?? 'M'} size={256} style={{ width: '100%', height: '100%' }}/></div>
+    {(item.qrShowValue ?? true) ? <div className="machine-readable-value">{value || 'QR value'}</div> : null}
+  </div>;
+}
+
+const CODE39_PATTERNS: Record<string,string> = {
+  '0':'nnnwwnwnn','1':'wnnwnnnnw','2':'nnwwnnnnw','3':'wnwwnnnnn','4':'nnnwwnnnw','5':'wnnwwnnnn','6':'nnwwwnnnn','7':'nnnwnnwnw','8':'wnnwnnwnn','9':'nnwwnnwnn',
+  'A':'wnnnnwnnw','B':'nnwnnwnnw','C':'wnwnnwnnn','D':'nnnnwwnnw','E':'wnnnwwnnn','F':'nnwnwwnnn','G':'nnnnnwwnw','H':'wnnnnwwnn','I':'nnwnnwwnn','J':'nnnnwwwnn',
+  'K':'wnnnnnnww','L':'nnwnnnnww','M':'wnwnnnnwn','N':'nnnnwnnww','O':'wnnnwnnwn','P':'nnwnwnnwn','Q':'nnnnnnwww','R':'wnnnnnwwn','S':'nnwnnnwwn','T':'nnnnwnwwn',
+  'U':'wwnnnnnnw','V':'nwwnnnnnw','W':'wwwnnnnnn','X':'nwnnwnnnw','Y':'wwnnwnnnn','Z':'nwwnwnnnn','-':'nwnnnnwnw','.':'wwnnnnwnn',' ':'nwwnnnwnn','$':'nwnwnwnnn','/':'nwnwnnnwn','+':'nwnnnwnwn','%':'nnnwnwnwn','*':'nwnnwnwnn'
+};
+
+function normalizeCode39(value: string) {
+  return value.toUpperCase().split('').map((char) => CODE39_PATTERNS[char] ? char : '-').join('') || ' ';
+}
+
+function BarcodeElementContent({ item, value }: { item: BuilderElement; value: string }) {
+  const normalized = normalizeCode39(value);
+  const encoded = `*${normalized}*`;
+  const modules: Array<{ wide:boolean; bar:boolean }> = [];
+  for (let c = 0; c < encoded.length; c += 1) {
+    const pattern = CODE39_PATTERNS[encoded[c]] ?? CODE39_PATTERNS['-'];
+    for (let i = 0; i < pattern.length; i += 1) modules.push({ wide: pattern[i] === 'w', bar: i % 2 === 0 });
+    if (c < encoded.length - 1) modules.push({ wide:false, bar:false });
+  }
+  const units = modules.reduce((sum, module) => sum + (module.wide ? 3 : 1), 0);
+  let cursor = 0;
+  const quiet = Math.max(0, item.barcodeQuietZone ?? 8);
+  return <div className="barcode-render-shell" style={{ background: item.barcodeBackground ?? '#FFFFFF', padding: `${quiet}px` }}>
+    <svg className="barcode-svg" viewBox={`0 0 ${Math.max(1,units)} ${Math.max(24,item.barcodeBarHeight ?? 54)}`} preserveAspectRatio="none" aria-label={`Code 39 barcode ${normalized}`}>
+      {modules.map((module, index) => { const width = module.wide ? 3 : 1; const x = cursor; cursor += width; return module.bar ? <rect key={`${index}:${x}`} x={x} y="0" width={width} height="100%" fill={item.barcodeForeground ?? '#111827'}/> : null; })}
+    </svg>
+    {(item.barcodeShowText ?? true) ? <div className="machine-readable-value" style={{ fontSize: item.barcodeTextSize ?? 11, color: item.barcodeForeground ?? '#111827' }}>{normalized}</div> : null}
+  </div>;
 }
 
 function ImageBackedContent({ item, bound }: { item: BuilderElement; bound: unknown }) {
@@ -1352,13 +1633,57 @@ function ImageBackedContent({ item, bound }: { item: BuilderElement; bound: unkn
   const boundSrc = typeof bound === 'string' && isImageSource(bound) ? bound : '';
   const manualSrc = item.imageSource && isImageSource(item.imageSource) ? item.imageSource : '';
   const src = boundSrc || assetUrl || manualSrc;
-  if (src) return <img className="bound-image" src={src} alt={item.type === 'signature' ? 'Signature' : 'Image'} style={{ objectFit: item.imageFit ?? 'contain' }}/>;
+  if (src) return <img className="bound-image" src={src} alt={item.type === 'signature' ? 'Signature' : 'Image'} style={{ objectFit: item.imageFit ?? 'contain', objectPosition: item.imageObjectPosition ?? 'center', filter: imageElementFilter(item) }}/>;
+  if (item.type === 'signature' && item.signatureShowPlaceholder === false) return null;
   const Icon = item.type === 'signature' ? Signature : Image;
   return <><Icon size={item.type === 'signature' ? 36 : 26}/><span>{item.type === 'signature' ? 'Signature image' : 'Image'}</span></>;
 }
 
 function isImageSource(value: string) {
   return /^data:image\//i.test(value.trim()) || /^https?:\/\//i.test(value.trim()) || /^blob:/i.test(value.trim());
+}
+
+function imageElementFrameStyle(item: BuilderElement) {
+  if (item.type !== 'image' && item.type !== 'signature') return {};
+  const style: CSSProperties = {
+    boxSizing: 'border-box',
+    overflow: 'hidden',
+    borderRadius: item.imageBorderRadius ?? 0,
+    opacity: Math.min(100, Math.max(0, item.imageOpacity ?? 100)) / 100,
+  };
+  if (item.imageBackground) style.background = item.imageBackground;
+  const borderStyle = item.imageBorderStyle ?? '';
+  const borderWidth = item.imageBorderWidth ?? 0;
+  if (borderStyle && borderStyle !== 'none' && borderWidth > 0) {
+    style.borderStyle = borderStyle;
+    style.borderWidth = borderWidth;
+    style.borderColor = item.imageBorderColor ?? '#CBD5E1';
+  } else if (borderStyle === 'none' || borderWidth === 0) {
+    style.border = 'none';
+  }
+  if (item.imageShadowEnabled) {
+    const shadowColor = hexToRgba(item.imageShadowColor ?? '#000000', Math.min(100, Math.max(0, item.imageShadowOpacity ?? 25)) / 100);
+    style.boxShadow = `${item.imageShadowX ?? 0}px ${item.imageShadowY ?? 3}px ${Math.max(0, item.imageShadowBlur ?? 8)}px ${item.imageShadowSpread ?? 0}px ${shadowColor}`;
+  }
+  return style;
+}
+
+function imageElementFilter(item: BuilderElement) {
+  const brightness=Math.max(0,item.imageBrightness??100);
+  const contrast=Math.max(0,item.imageContrast??100);
+  const saturation=Math.max(0,item.imageSaturation??100);
+  const grayscale=Math.min(100,Math.max(0,item.imageGrayscale??0));
+  const sepia=Math.min(100,Math.max(0,item.imageSepia??0));
+  const blur=Math.max(0,item.imageBlur??0);
+  return `brightness(${brightness}%) contrast(${contrast}%) saturate(${saturation}%) grayscale(${grayscale}%) sepia(${sepia}%) blur(${blur}px)`;
+}
+
+function hexToRgba(hex:string,alpha:number){
+  const raw=hex.replace('#','').trim();
+  const normalized=raw.length===3?raw.split('').map((c)=>c+c).join(''):raw.padEnd(6,'0').slice(0,6);
+  const value=Number.parseInt(normalized,16);
+  const r=(value>>16)&255,g=(value>>8)&255,b=value&255;
+  return `rgba(${r}, ${g}, ${b}, ${Math.min(1,Math.max(0,alpha))})`;
 }
 
 
@@ -1549,18 +1874,33 @@ function Inspector({ tab, onInspectorTab, selected, source, record, formulaEleme
   const selectedBand = selected?.region === 'header' ? 'header' : selected?.region === 'footer' ? 'footer' : null;
   const selectedContentPreview = selected ? resolveTemplateTokens(selected.text, (field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows), { pageNumber: activePreviewPageIndex + 1, totalPages: Math.max(1, virtualPageCount), preserveUnknown: !record }) : '';
   const selectedFormulaPreview = selected?.type === 'formula' ? evaluateDocumentFormulaElement(selected, record, formulaElements, formulaAggregateRows) : null;
+  const selectedBindingPreview = selected?.binding ? displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) : '';
+  const selectedShapeMediaPreview = selected?.shapeMediaBinding ? displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.shapeMediaBinding, formulaAggregateRows)) : '';
 
   if (tab === 'header') return <GlobalBandEditor region="header" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion} onBack={() => onInspectorTab('properties')}/>;
   if (tab === 'footer') return <GlobalBandEditor region="footer" settings={pageSettings} onPageSettings={onPageSettings} onSetInsertRegion={onSetInsertRegion} onBack={() => onInspectorTab('properties')}/>;
   if (selected?.type === 'table' && selected.table && tab === 'properties') return <TableElementProperties selected={selected} elements={relativeElements} pageSettings={pageSettings} sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction} onEditConfiguration={() => onEditTableConfiguration(selected.id)} onDuplicate={onDuplicate} onDelete={onDelete}/>;
   if (selected?.type === 'table' && selected.table && tab === 'binding') return <div className="inspector-body table-ux3-panel"><div className="inspector-panel-heading"><div><h3>Columns</h3><small>Column values and cell overrides</small></div></div><TableProperties table={selected.table} view="columns" sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/></div>;
+  if (selected?.type === 'table' && selected.table && tab === 'rows') return <div className="inspector-body table-ux3-panel"><div className="inspector-panel-heading"><div><h3>Rows</h3><small>Header, body and summary row structure</small></div></div><TableProperties table={selected.table} view="rows" sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/></div>;
   if (selected?.type === 'table' && selected.table && tab === 'formatting') return <div className="inspector-body table-ux3-panel"><div className="inspector-panel-heading"><div><h3>Formatting</h3><small>Table and cell appearance</small></div></div><TableProperties table={selected.table} view="formatting" sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/></div>;
-  if (tab === 'binding') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
+  if (selected?.type === 'shape' && tab === 'properties') return <ShapePropertiesPanel selected={selected} selectedBand={selectedBand} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
+  if (selected?.type === 'shape' && (tab === 'content' || tab === 'binding')) return <ShapeContentPanel selected={selected} contentPreview={selectedContentPreview} dynamicTokenFields={dynamicTokenFields} mediaBindingPreview={selectedShapeMediaPreview} onUpdate={onUpdate}/>;
+  if (selected?.type === 'shape' && tab === 'formatting') return <ShapeFormattingPanel selected={selected} onUpdate={onUpdate}/>;
+  if ((selected?.type === 'qr' || selected?.type === 'barcode' || selected?.type === 'signature') && tab === 'properties') return <MachineReadablePropertiesPanel selected={selected} selectedBand={selectedBand} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
+  if (selected?.type === 'qr' && (tab === 'content' || tab === 'binding')) return <QrContentPanel selected={selected} contentPreview={selectedContentPreview} dynamicTokenFields={dynamicTokenFields} onUpdate={onUpdate}/>;
+  if (selected?.type === 'barcode' && (tab === 'content' || tab === 'binding')) return <BarcodeContentPanel selected={selected} contentPreview={selectedContentPreview} dynamicTokenFields={dynamicTokenFields} onUpdate={onUpdate}/>;
+  if (selected?.type === 'signature' && (tab === 'content' || tab === 'binding')) return <SignatureContentPanel selected={selected} bindingPreview={selectedBindingPreview} dynamicTokenFields={dynamicTokenFields} onUpdate={onUpdate}/>;
+  if (selected?.type === 'qr' && tab === 'formatting') return <QrFormattingPanel selected={selected} onUpdate={onUpdate}/>;
+  if (selected?.type === 'barcode' && tab === 'formatting') return <BarcodeFormattingPanel selected={selected} onUpdate={onUpdate}/>;
+  if (selected?.type === 'signature' && tab === 'formatting') return <ImageFormattingPanel selected={selected} onUpdate={onUpdate}/>;
+  if (tab === 'binding' && selected?.type !== 'image' && selected?.type !== 'signature') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
   if (tab === 'formatting' && selected?.type === 'text') return <TextFormattingPanel selected={selected} onUpdate={onUpdate}/>;
+  if (tab === 'formatting' && (selected?.type === 'image' || selected?.type === 'signature')) return <ImageFormattingPanel selected={selected} onUpdate={onUpdate}/>;
   if (tab === 'formatting') return <div className="inspector-body"><h3>Formatting</h3>{!selected ? <p>Select an element to edit document-safe formatting.</p> : <><label>Font family<select value={selected.fontFamily ?? 'Arial'} onChange={(e) => onUpdate({ fontFamily: e.target.value })}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label><div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e) => onUpdate({ fontSize: Math.max(6, Number(e.target.value) || 12) })}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight ?? 1.25} onChange={(e) => onUpdate({ lineHeight: Math.min(3, Math.max(0.8, Number(e.target.value) || 1.25)) })}/></label></div><div className="text-style-actions"><button type="button" className={(selected.fontWeight ?? 400) >= 700 ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ fontWeight: (selected.fontWeight ?? 400) >= 700 ? 400 : 700 })}><b>B</b></button><button type="button" className={selected.italic ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ italic: !selected.italic })}><i>I</i></button><button type="button" className={selected.underline ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ underline: !selected.underline })}><u>U</u></button></div><label>Text color<input type="color" value={selected.color} onChange={(e) => onUpdate({ color: e.target.value })}/></label>{selected.type === 'shape' && <label>Fill<input type="color" value={selected.fill} onChange={(e) => onUpdate({ fill: e.target.value })}/></label>}<div className="align-actions"><button className={selected.textAlign === 'left' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'left' })}><AlignLeft size={16}/></button><button className={selected.textAlign === 'center' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'center' })}><AlignCenter size={16}/></button><button className={selected.textAlign === 'right' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'right' })}><AlignRight size={16}/></button></div><p className="table-cell-help">Typography applies to static text and every resolved dynamic token in this content block.</p></>}</div>;
   if (tab === 'properties' && selected?.type === 'text') return <TextPropertiesPanel selected={selected} selectedBand={selectedBand} contentPreview={selectedContentPreview} dynamicTokenFields={dynamicTokenFields} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
+  if (tab === 'properties' && (selected?.type === 'image' || selected?.type === 'signature')) return <ImagePropertiesPanel selected={selected} selectedBand={selectedBand} bindingPreview={selectedBindingPreview} dynamicTokenFields={dynamicTokenFields} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
   if (tab === 'properties' && selected?.type === 'formula') return <div className="inspector-body"><h3>Formula Field</h3><FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div>;
-  if (tab === 'conditions') return <div className="inspector-body"><h3>Conditions</h3><p>Condition rules are planned for a later phase. The selected element remains schema-ready for them.</p><button className="secondary" disabled={!selected}>Add condition</button></div>;
+  if (tab === 'conditions') return <ConditionsPanel selected={selected} fields={dynamicTokenFields} onUpdate={onUpdate}/>;
   return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} elements={relativeElements} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => onEditTableConfiguration(selected.id)}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage} onEditHeader={() => onInspectorTab('header')} onEditFooter={() => onInspectorTab('footer')}/>}</div>;
 }
 
@@ -1582,6 +1922,61 @@ function TokenInsertPanel({ fields, value, onChange }: { fields: TemplateTokenFi
 
 function InspectorHelp({ text }: { text: string }) {
   return <span className="inspector-help" title={text} aria-label={text}>?</span>;
+}
+
+
+function MachineReadablePropertiesPanel({ selected, selectedBand, pageSettings, relativeElements, onUpdate, onPageSettings, assignRegion, onMoveFlow, onFlowRowAction, onArrange, onDuplicate, onDelete }: {
+  selected: BuilderElement;
+  selectedBand: 'header'|'footer'|null;
+  pageSettings: PageSettings;
+  relativeElements: BuilderElement[];
+  onUpdate: (patch: Partial<BuilderElement>) => void;
+  onPageSettings: (patch: Partial<PageSettings>) => void;
+  assignRegion: (region: PageRegion) => void;
+  onMoveFlow: (direction: -1|1) => void;
+  onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void;
+  onArrange: (action: 'front'|'forward'|'backward'|'back') => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const label = selected.type === 'qr' ? 'QR Code' : selected.type === 'barcode' ? 'Barcode' : 'Signature';
+  const isFlow = !selectedBand && (selected.layoutMode ?? 'floating') === 'flow';
+  const aspect = selected.height > 0 ? selected.width / selected.height : 1;
+  const lockAspect = selected.type === 'signature' ? (selected.imageLockAspect ?? true) : false;
+  const updateWidth = (width:number) => onUpdate(lockAspect ? { width, height: Math.max(20, width / aspect) } : { width });
+  const updateHeight = (height:number) => onUpdate(lockAspect ? { height, width: Math.max(20, height * aspect) } : { height });
+  return <div className="inspector-body text-inspector-body machine-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>{label}</h3><small>Placement, size and document flow</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Position & Size <span className="section-unit">px</span></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><div className="property-grid compact-geometry-grid"><label>X<input type="number" disabled={isFlow} value={Math.round(selected.x)} onChange={(e)=>onUpdate({x:Number(e.target.value)||0})}/></label><label>Y<input type="number" disabled={isFlow} value={Math.round(selected.y)} onChange={(e)=>onUpdate({y:Number(e.target.value)||0})}/></label><label>Width<input type="number" min="20" disabled={isFlow && (selected.flowWidth ?? 'custom') === 'full'} value={Math.round(selected.width)} onChange={(e)=>updateWidth(Math.max(20,Number(e.target.value)||20))}/></label><label>Height<input type="number" min="20" value={Math.round(selected.height)} onChange={(e)=>updateHeight(Math.max(20,Number(e.target.value)||20))}/></label></div>{selected.type === 'signature' ? <label className="guide-toggle"><input type="checkbox" checked={selected.imageLockAspect ?? true} onChange={(e)=>onUpdate({imageLockAspect:e.target.checked})}/><span><strong>Lock aspect ratio</strong><small>Keep signature proportions while resizing</small></span></label> : null}</div>
+      </details>
+      <details className="inspector-accordion text-accordion" open><summary><span>Layout <InspectorHelp text="Flow keeps the element in automatic document flow. Floating enables exact placement and overlap controls."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content">{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <TextLayoutControls selected={selected} elements={relativeElements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction} showRowManager={false}/>}</div></details>
+      <details className="inspector-accordion text-accordion"><summary><span>Region <InspectorHelp text="Body is normal content. Header/Footer are global document masters and repeat according to the selected master rule."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Place in<select value={selected.region ?? 'body'} onChange={(e)=>assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e)=>onPageSettings({[selectedBand]:{...pageSettings[selectedBand],enabled:true,repeat:e.target.value as PageRepeatMode}} as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}</div></details>
+      <details className="inspector-accordion text-accordion"><summary><span>Advanced</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content">{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="nested-inspector-card arrange-card"><div className="nested-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={()=>onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={()=>onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={()=>onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={()=>onArrange('back')}>Send Back</button></div></section> : <p className="field-hint">Layer controls appear when this element is Floating or assigned to a master region.</p>}<div className="inspector-actions text-object-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div></details>
+    </div>
+  </div>;
+}
+
+function QrContentPanel({ selected, contentPreview, dynamicTokenFields, onUpdate }: { selected: BuilderElement; contentPreview: string; dynamicTokenFields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body machine-inspector-body"><div className="inspector-panel-heading"><div><h3>QR Content</h3><small>Value encoded into the QR Code</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>QR Value <InspectorHelp text="Use plain text, a URL, imported field tokens or Formula Field tokens. The resolved value is what gets encoded."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><MixedContentEditor label="QR content" value={selected.text} fields={dynamicTokenFields} previewValue={contentPreview} onChange={(text)=>onUpdate({text})}/><div className="machine-value-preview"><small>Encoded preview</small><strong>{contentPreview || 'Empty'}</strong></div></div></details></div></div>;
+}
+
+function BarcodeContentPanel({ selected, contentPreview, dynamicTokenFields, onUpdate }: { selected: BuilderElement; contentPreview: string; dynamicTokenFields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body machine-inspector-body"><div className="inspector-panel-heading"><div><h3>Barcode Content</h3><small>Code 39 value and binding</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>Barcode Value <InspectorHelp text="Current renderer supports Code 39. Lowercase characters are normalized to uppercase; unsupported characters are replaced safely."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Barcode type<select value={selected.barcodeFormat ?? 'code39'} disabled><option value="code39">Code 39</option></select></label><MixedContentEditor label="Barcode content" value={selected.text} fields={dynamicTokenFields} previewValue={contentPreview} onChange={(text)=>onUpdate({text})}/><div className="machine-value-preview"><small>Encoded preview</small><strong>{normalizeCode39(contentPreview || selected.text)}</strong></div></div></details></div></div>;
+}
+
+function SignatureContentPanel({ selected, bindingPreview, dynamicTokenFields, onUpdate }: { selected: BuilderElement; bindingPreview: string; dynamicTokenFields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body machine-inspector-body"><div className="inspector-panel-heading"><div><h3>Signature Content</h3><small>Manual or dynamic signature source</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>Signature Source <InspectorHelp text="Upload a transparent signature image, paste an image URL/data URL, or bind a field from the current record."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><ImageSourceEditor selected={selected} dynamicTokenFields={dynamicTokenFields} bindingPreview={bindingPreview} onUpdate={onUpdate}/></div></details><details className="inspector-accordion text-accordion"><summary><span>Display</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label className="guide-toggle"><input type="checkbox" checked={selected.signatureShowPlaceholder ?? true} onChange={(e)=>onUpdate({signatureShowPlaceholder:e.target.checked})}/><span><strong>Show empty placeholder</strong><small>Useful while designing before a signature is assigned</small></span></label></div></details></div></div>;
+}
+
+function QrFormattingPanel({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body machine-inspector-body"><div className="inspector-panel-heading"><div><h3>QR Formatting</h3><small>Colors, quiet zone and readability</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>Appearance</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Foreground<div className="color-control"><input type="color" value={selected.qrForeground ?? '#111827'} onChange={(e)=>onUpdate({qrForeground:e.target.value})}/><code>{(selected.qrForeground ?? '#111827').toUpperCase()}</code></div></label><label>Background<div className="color-control"><input type="color" value={selected.qrBackground ?? '#FFFFFF'} onChange={(e)=>onUpdate({qrBackground:e.target.value})}/><code>{(selected.qrBackground ?? '#FFFFFF').toUpperCase()}</code></div></label><div className="property-grid"><label>Quiet zone<input type="number" min="0" max="40" value={selected.qrQuietZone ?? 8} onChange={(e)=>onUpdate({qrQuietZone:Math.max(0,Number(e.target.value)||0)})}/></label><label>Error correction<select value={selected.qrErrorCorrection ?? 'M'} onChange={(e)=>onUpdate({qrErrorCorrection:e.target.value as NonNullable<BuilderElement['qrErrorCorrection']>})}><option value="L">L · Low</option><option value="M">M · Medium</option><option value="Q">Q · Quartile</option><option value="H">H · High</option></select></label></div><label className="guide-toggle"><input type="checkbox" checked={selected.qrShowValue ?? true} onChange={(e)=>onUpdate({qrShowValue:e.target.checked})}/><span><strong>Show value below QR</strong><small>Builder/exact preview helper text</small></span></label></div></details><details className="inspector-accordion text-accordion"><summary><span>Readability</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><p className="field-hint">For reliable scanning, keep strong foreground/background contrast and preserve a quiet zone around the code.</p></div></details></div></div>;
+}
+
+function BarcodeFormattingPanel({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  return <div className="inspector-body text-inspector-body machine-inspector-body"><div className="inspector-panel-heading"><div><h3>Barcode Formatting</h3><small>Bars, label and spacing</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>Appearance</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Bar color<div className="color-control"><input type="color" value={selected.barcodeForeground ?? '#111827'} onChange={(e)=>onUpdate({barcodeForeground:e.target.value})}/><code>{(selected.barcodeForeground ?? '#111827').toUpperCase()}</code></div></label><label>Background<div className="color-control"><input type="color" value={selected.barcodeBackground ?? '#FFFFFF'} onChange={(e)=>onUpdate({barcodeBackground:e.target.value})}/><code>{(selected.barcodeBackground ?? '#FFFFFF').toUpperCase()}</code></div></label><div className="property-grid"><label>Bar height<input type="number" min="20" max="240" value={selected.barcodeBarHeight ?? 54} onChange={(e)=>onUpdate({barcodeBarHeight:Math.max(20,Number(e.target.value)||54)})}/></label><label>Quiet zone<input type="number" min="0" max="40" value={selected.barcodeQuietZone ?? 8} onChange={(e)=>onUpdate({barcodeQuietZone:Math.max(0,Number(e.target.value)||0)})}/></label></div></div></details><details className="inspector-accordion text-accordion" open><summary><span>Human-readable Text</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label className="guide-toggle"><input type="checkbox" checked={selected.barcodeShowText ?? true} onChange={(e)=>onUpdate({barcodeShowText:e.target.checked})}/><span><strong>Show barcode value</strong><small>Print the encoded value below the bars</small></span></label>{selected.barcodeShowText ?? true ? <label>Text size<input type="number" min="7" max="32" value={selected.barcodeTextSize ?? 11} onChange={(e)=>onUpdate({barcodeTextSize:Math.max(7,Number(e.target.value)||11)})}/></label> : null}</div></details><details className="inspector-accordion text-accordion"><summary><span>Readability</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><p className="field-hint">Keep the barcode wide enough for Code 39. Very long values in a narrow frame can become difficult to scan.</p></div></details></div></div>;
 }
 
 function TextPropertiesPanel({ selected, selectedBand, contentPreview, dynamicTokenFields, pageSettings, relativeElements, onUpdate, onPageSettings, assignRegion, onMoveFlow, onFlowRowAction, onArrange, onDuplicate, onDelete }: {
@@ -1650,7 +2045,7 @@ function TextPropertiesPanel({ selected, selectedBand, contentPreview, dynamicTo
   </div>;
 }
 
-function TextLayoutControls({ selected, elements, pageSettings, onUpdate, onMove, onRowAction }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void }) {
+function TextLayoutControls({ selected, elements, pageSettings, onUpdate, onMove, onRowAction, showRowManager = true }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; showRowManager?: boolean }) {
   const isFlow=(selected.layoutMode ?? 'floating')==='flow';
   const rowMembers=isFlow?elements.filter((item)=>(item.region??'body')==='body'&&(item.layoutMode??'floating')==='flow'&&flowRowKey(item)===flowRowKey(selected)):[];
   const widthPct=Math.min(100,Math.max(5,selected.flowWidthPercent??100));
@@ -1663,7 +2058,7 @@ function TextLayoutControls({ selected, elements, pageSettings, onUpdate, onMove
       <label>Distribution<select value={selected.flowDistribution??'packed'} onChange={(e)=>onUpdate({flowDistribution:e.target.value as BodyFlowDistribution})}><option value="packed">Packed</option><option value="space-between">Space Between</option><option value="space-around">Space Around</option><option value="space-evenly">Space Evenly</option></select></label>
       <div className="property-grid"><label>Gap before<input type="number" min="0" step="0.5" value={selected.flowGapBeforeMm??0} onChange={(e)=>onUpdate({flowGapBeforeMm:Math.max(0,Number(e.target.value)||0)})}/></label><label>Block gap<input type="number" min="0" step="0.5" disabled={(selected.flowDistribution??'packed')!=='packed'} value={selected.flowColumnGapMm??4} onChange={(e)=>onUpdate({flowColumnGapMm:Math.max(0,Number(e.target.value)||0)})}/></label></div>
       <label>Row alignment<select disabled={(selected.flowDistribution??'packed')!=='packed'} value={selected.flowAlign??'left'} onChange={(e)=>onUpdate({flowAlign:e.target.value as BodyFlowAlign})}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
-      <details className="row-manager"><summary>Manage row <ChevronDown size={14}/></summary><div className="row-manager-content"><div className="row-action-grid"><button type="button" className="secondary compact" onClick={()=>onRowAction('left')}>← Move in row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('right')}>Move in row →</button><button type="button" className="secondary compact" onClick={()=>onMove(-1)}>↑ Move row</button><button type="button" className="secondary compact" onClick={()=>onMove(1)}>↓ Move row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinPrevious')}>Join previous</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinNext')}>Join next</button></div><button type="button" className="secondary compact full-width" onClick={()=>onRowAction('newRow')}>+ New row</button><p className="field-hint">Use Join to place elements on the same horizontal row. Width controls each block's share of that row.</p></div></details>
+      {showRowManager && <details className="row-manager"><summary>Manage row <ChevronDown size={14}/></summary><div className="row-manager-content"><div className="row-action-grid"><button type="button" className="secondary compact" onClick={()=>onRowAction('left')}>← Move in row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('right')}>Move in row →</button><button type="button" className="secondary compact" onClick={()=>onMove(-1)}>↑ Move row</button><button type="button" className="secondary compact" onClick={()=>onMove(1)}>↓ Move row</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinPrevious')}>Join previous</button><button type="button" className="secondary compact" onClick={()=>onRowAction('joinNext')}>Join next</button></div><button type="button" className="secondary compact full-width" onClick={()=>onRowAction('newRow')}>+ New row</button><p className="field-hint">Use Join to place elements on the same horizontal row. Width controls each block's share of that row.</p></div></details>}
     </> : <>
       <p className="field-hint">Floating allows exact free placement for overlays, stamps and decorative text.</p>
       <BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/>
@@ -1685,6 +2080,426 @@ function TextFormattingPanel({ selected, onUpdate }: { selected: BuilderElement;
       <details className="inspector-accordion text-accordion" open><summary><span>Color & Spacing</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Text color<div className="color-control"><input type="color" value={selected.color} onChange={(e)=>onUpdate({color:e.target.value})}/><code>{selected.color}</code></div></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={(e)=>onUpdate({lineHeight:Math.min(3,Math.max(.8,Number(e.target.value)||1.25))})}/></label></div></details>
       <details className="inspector-accordion text-accordion"><summary><span>Effects & Auto Fit</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><p className="field-hint">Advanced text effects and auto-fit controls will stay grouped here as those renderer-safe options are enabled. Existing document formatting remains unchanged.</p></div></details>
     </div>
+  </div>;
+}
+
+
+
+function ConditionsPanel({ selected, fields, onUpdate }: { selected: BuilderElement|null; fields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  if(!selected)return <div className="inspector-body"><h3>Conditions</h3><p>Select an element to configure visibility.</p></div>;
+  const op=selected.conditionOperator??'equals';
+  const needsValue=!['isEmpty','isNotEmpty'].includes(op);
+  return <div className="inspector-body text-inspector-body"><div className="inspector-panel-heading"><div><h3>Conditions</h3><small>Control when this element is visible</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>Visibility <InspectorHelp text="The selected element can be shown only when a current-record field matches this rule. Formula Fields can also be used."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label className="guide-toggle"><input type="checkbox" checked={selected.conditionEnabled??false} onChange={(e)=>onUpdate({conditionEnabled:e.target.checked})}/><span><strong>Use visibility condition</strong><small>Hide this element when the rule is false</small></span></label>{selected.conditionEnabled?<><label>Field<select value={selected.conditionField??''} onChange={(e)=>onUpdate({conditionField:e.target.value||undefined})}><option value="">Select field…</option>{fields.map((field)=><option key={field.name} value={field.name}>{field.label||field.name}</option>)}</select></label><label>Operator<select value={op} onChange={(e)=>onUpdate({conditionOperator:e.target.value as NonNullable<BuilderElement['conditionOperator']>})}><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="contains">Contains</option><option value="notContains">Does not contain</option><option value="isEmpty">Is empty</option><option value="isNotEmpty">Is not empty</option><option value="greaterThan">Greater than</option><option value="lessThan">Less than</option></select></label>{needsValue?<label>Value<input value={selected.conditionValue??''} onChange={(e)=>onUpdate({conditionValue:e.target.value})} placeholder="Comparison value"/></label>:null}<div className="condition-summary">Show when <strong>{selected.conditionField||'field'}</strong> {conditionOperatorLabel(op)} {needsValue?<strong>{selected.conditionValue||'value'}</strong>:null}</div></>:null}</div></details></div></div>;
+}
+
+function conditionOperatorLabel(op: NonNullable<BuilderElement['conditionOperator']>) {
+  return ({equals:'equals',notEquals:'does not equal',contains:'contains',notContains:'does not contain',isEmpty:'is empty',isNotEmpty:'is not empty',greaterThan:'is greater than',lessThan:'is less than'} as const)[op];
+}
+
+function evaluateElementCondition(item: BuilderElement, rawValue: unknown) {
+  const op=item.conditionOperator??'equals';
+  const expected=item.conditionValue??'';
+  const actual=displayValue(rawValue).trim();
+  if(op==='isEmpty')return !actual;
+  if(op==='isNotEmpty')return Boolean(actual);
+  if(op==='contains')return actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
+  if(op==='notContains')return !actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
+  if(op==='notEquals')return actual!==expected;
+  if(op==='greaterThan'){const a=Number(actual),b=Number(expected);return Number.isFinite(a)&&Number.isFinite(b)&&a>b;}
+  if(op==='lessThan'){const a=Number(actual),b=Number(expected);return Number.isFinite(a)&&Number.isFinite(b)&&a<b;}
+  return actual===expected;
+}
+
+const SHAPE_LIBRARY: Array<{ value: NonNullable<BuilderElement['shapeKind']>; label: string; category: string }> = [
+  { value:'rectangle', label:'Rectangle', category:'Basic' }, { value:'rounded', label:'Rounded Rectangle', category:'Basic' }, { value:'circle', label:'Circle', category:'Basic' }, { value:'ellipse', label:'Ellipse', category:'Basic' }, { value:'triangle', label:'Triangle', category:'Basic' }, { value:'diamond', label:'Diamond', category:'Basic' }, { value:'pentagon', label:'Pentagon', category:'Basic' }, { value:'hexagon', label:'Hexagon', category:'Basic' },
+  { value:'arrowRight', label:'Right Arrow', category:'Arrows' }, { value:'arrowLeft', label:'Left Arrow', category:'Arrows' }, { value:'arrowUp', label:'Up Arrow', category:'Arrows' }, { value:'arrowDown', label:'Down Arrow', category:'Arrows' }, { value:'arrowDouble', label:'Double Arrow', category:'Arrows' }, { value:'chevron', label:'Chevron', category:'Arrows' }, { value:'bentArrow', label:'Bent Arrow', category:'Arrows' },
+  { value:'pill', label:'Pill Badge', category:'Badges & Labels' }, { value:'tag', label:'Tag', category:'Badges & Labels' }, { value:'priceTag', label:'Price Tag', category:'Badges & Labels' }, { value:'ticket', label:'Ticket', category:'Badges & Labels' }, { value:'badge', label:'Badge', category:'Badges & Labels' }, { value:'seal', label:'Certificate Seal', category:'Badges & Labels' },
+  { value:'banner', label:'Banner', category:'Banners & Ribbons' }, { value:'ribbon', label:'Ribbon', category:'Banners & Ribbons' }, { value:'foldedRibbon', label:'Folded Ribbon', category:'Banners & Ribbons' }, { value:'flag', label:'Flag', category:'Banners & Ribbons' }, { value:'bookmark', label:'Bookmark', category:'Banners & Ribbons' },
+  { value:'speech', label:'Speech Bubble', category:'Callouts' }, { value:'thought', label:'Thought Bubble', category:'Callouts' }, { value:'cloud', label:'Cloud', category:'Callouts' }, { value:'cloudCallout', label:'Cloud Callout', category:'Callouts' },
+  { value:'star', label:'Star', category:'Symbols' }, { value:'heart', label:'Heart', category:'Symbols' }, { value:'check', label:'Check', category:'Symbols' }, { value:'cross', label:'Cross', category:'Symbols' }, { value:'plus', label:'Plus', category:'Symbols' },
+  { value:'flowProcess', label:'Process', category:'Flowchart' }, { value:'flowDecision', label:'Decision', category:'Flowchart' }, { value:'flowDocument', label:'Document', category:'Flowchart' }, { value:'flowDatabase', label:'Database', category:'Flowchart' },
+];
+
+function ShapePropertiesPanel({ selected, selectedBand, pageSettings, relativeElements, onUpdate, onPageSettings, assignRegion, onMoveFlow, onFlowRowAction, onArrange, onDuplicate, onDelete }: {
+  selected: BuilderElement;
+  selectedBand: 'header'|'footer'|null;
+  pageSettings: PageSettings;
+  relativeElements: BuilderElement[];
+  onUpdate: (patch: Partial<BuilderElement>) => void;
+  onPageSettings: (patch: Partial<PageSettings>) => void;
+  assignRegion: (region: PageRegion) => void;
+  onMoveFlow: (direction: -1|1) => void;
+  onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void;
+  onArrange: (action: 'front'|'forward'|'backward'|'back') => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const isFlow = !selectedBand && (selected.layoutMode ?? 'floating') === 'flow';
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [shapeSearch, setShapeSearch] = useState('');
+  const [shapeCategory, setShapeCategory] = useState('All');
+  const currentShape = SHAPE_LIBRARY.find((item)=>item.value===(selected.shapeKind??'rectangle')) ?? SHAPE_LIBRARY[0]!;
+  const aspect = selected.height > 0 ? selected.width / selected.height : 1;
+  const updateWidth = (width:number) => onUpdate(selected.shapeLockAspect ? { width, height:Math.max(20,width/aspect) } : { width });
+  const updateHeight = (height:number) => onUpdate(selected.shapeLockAspect ? { height, width:Math.max(20,height*aspect) } : { height });
+  const categories = ['All', ...Array.from(new Set(SHAPE_LIBRARY.map((item)=>item.category)))];
+  const normalizedSearch=shapeSearch.trim().toLowerCase();
+  const visibleShapes=SHAPE_LIBRARY.filter((item)=>(shapeCategory==='All'||item.category===shapeCategory)&&(!normalizedSearch||`${item.label} ${item.category}`.toLowerCase().includes(normalizedSearch)));
+  return <div className="inspector-body text-inspector-body shape-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Shape</h3><small>Shape type, placement and layout</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Shape <InspectorHelp text="Choose from basic shapes, arrows, badges, ribbons, callouts, symbols and flowchart shapes. Existing text/media content is preserved when the preset changes."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <div className="shape-current-card"><div className="shape-mini-preview"><span style={shapeVisualStyle({ ...selected, width:64, height:40 } as BuilderElement)}/></div><div><strong>{currentShape.label}</strong><small>{currentShape.category}</small></div><button type="button" className="secondary compact" onClick={()=>setLibraryOpen(true)}>Change Shape</button></div>
+          {libraryOpen ? <div className="shape-library-overlay" role="dialog" aria-modal="true"><div className="shape-library-modal"><div className="shape-library-head"><div><strong>Choose Shape</strong><small>Search and select a reusable shape preset</small></div><button type="button" className="secondary compact" onClick={()=>setLibraryOpen(false)}>Close</button></div><input className="shape-search" placeholder="Search shapes..." value={shapeSearch} onChange={(e)=>setShapeSearch(e.target.value)}/><div className="shape-category-tabs">{categories.map((category)=><button type="button" key={category} className={shapeCategory===category?'secondary compact active':'secondary compact'} onClick={()=>setShapeCategory(category)}>{category}</button>)}</div><div className="shape-library-grid">{visibleShapes.map((option)=><button type="button" key={option.value} className={(selected.shapeKind??'rectangle')===option.value?'shape-library-item active':'shape-library-item'} onClick={()=>{onUpdate({shapeKind:option.value});setLibraryOpen(false);}}><span className="shape-library-preview"><i style={shapeVisualStyle({ ...selected, shapeKind:option.value, width:70, height:44, shapeStrokeWidth:1 } as BuilderElement)}/></span><strong>{option.label}</strong><small>{option.category}</small></button>)}</div></div></div> : null}
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Position & Size <span className="section-unit">px</span> <InspectorHelp text="Lock aspect ratio keeps width and height proportional while resizing. Flow mode owns X/Y automatically."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <div className="property-grid compact-geometry-grid">
+            <label>X<input type="number" disabled={isFlow} value={Math.round(selected.x)} onChange={(e)=>onUpdate({x:Number(e.target.value)||0})}/></label>
+            <label>Y<input type="number" disabled={isFlow} value={Math.round(selected.y)} onChange={(e)=>onUpdate({y:Number(e.target.value)||0})}/></label>
+            <label>Width<input type="number" min="20" disabled={isFlow&&(selected.flowWidth??'custom')==='full'} value={Math.round(selected.width)} onChange={(e)=>updateWidth(Math.max(20,Number(e.target.value)||20))}/></label>
+            <label>Height<input type="number" min="20" value={Math.round(selected.height)} onChange={(e)=>updateHeight(Math.max(20,Number(e.target.value)||20))}/></label>
+          </div>
+          <label className="guide-toggle"><input type="checkbox" checked={selected.shapeLockAspect??false} onChange={(e)=>onUpdate({shapeLockAspect:e.target.checked})}/><span><strong>Lock aspect ratio</strong><small>Keep shape proportions while resizing</small></span></label>
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Layout <InspectorHelp text="Flow keeps the shape in automatic document flow. Floating is best for stamps, callouts, banners and overlays."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <TextLayoutControls selected={selected} elements={relativeElements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>}</div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Region <InspectorHelp text="Body is normal content. Header/Footer are global masters and repeat according to their master policy."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><label>Place in<select value={selected.region??'body'} onChange={(e)=>assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selectedBand?<label>{selectedBand==='header'?'Header':'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e)=>onPageSettings({[selectedBand]:{...pageSettings[selectedBand],enabled:true,repeat:e.target.value as PageRepeatMode}} as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label>:null}</div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Advanced</span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">{((selected.region??'body')!=='body'||(selected.layoutMode??'floating')==='floating')?<section className="nested-inspector-card arrange-card"><div className="nested-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={()=>onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={()=>onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={()=>onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={()=>onArrange('back')}>Send Back</button></div></section>:<p className="field-hint">Layer controls appear when Shape is Floating or in a master region.</p>}<div className="inspector-actions text-object-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div>
+      </details>
+    </div>
+  </div>;
+}
+
+function ShapeContentPanel({ selected, contentPreview, dynamicTokenFields, mediaBindingPreview, onUpdate }: {
+  selected: BuilderElement;
+  contentPreview: string;
+  dynamicTokenFields: TemplateTokenField[];
+  mediaBindingPreview: string;
+  onUpdate: (patch: Partial<BuilderElement>) => void;
+}) {
+  const contentMode = selected.shapeContentMode ?? 'text';
+  const hasMedia = contentMode === 'media' || contentMode === 'text-media';
+  const hasText = contentMode === 'text' || contentMode === 'text-media';
+  return <div className="inspector-body text-inspector-body shape-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Content</h3><small>Text, media and inner layout</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Content Type <InspectorHelp text="Use no content, text only, media only, or text and media together inside the same shape container."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><label>Content mode<select value={contentMode} onChange={(e)=>onUpdate({shapeContentMode:e.target.value as NonNullable<BuilderElement['shapeContentMode']>})}><option value="none">None</option><option value="text">Text</option><option value="media">Media</option><option value="text-media">Text + Media</option></select></label></div>
+      </details>
+
+      {hasText?<details className="inspector-accordion text-accordion" open><summary><span>Text Content <InspectorHelp text="Static text and imported/formula tokens can be combined. Current-record preview is resolved below the editor."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><MixedContentEditor label="Shape text" value={selected.text} fields={dynamicTokenFields} previewValue={contentPreview} onChange={(text)=>onUpdate({text})}/></div></details>:null}
+
+      {hasMedia?<details className="inspector-accordion text-accordion" open><summary><span>Media Source <InspectorHelp text="Upload a local image, use an image URL/data URL, or bind a current-record field. Dynamic media binding takes priority during preview."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><ShapeMediaSourceEditor selected={selected} dynamicTokenFields={dynamicTokenFields} bindingPreview={mediaBindingPreview} onUpdate={onUpdate}/></div></details>:null}
+
+      {(hasText||hasMedia)?<details className="inspector-accordion text-accordion" open><summary><span>Inner Layout <InspectorHelp text="Control media position, media proportion, inner gap and padding without changing the outer shape size."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content">
+        {hasMedia?<><label>Media position<select value={selected.shapeMediaPosition??'left'} onChange={(e)=>{const position=e.target.value as NonNullable<BuilderElement['shapeMediaPosition']>;onUpdate(position==='background'?{shapeMediaPosition:position,shapeClipMedia:true,imageFit:'cover',imageObjectPosition:'center'}:{shapeMediaPosition:position});}}><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="background">Background</option><option value="center">Center / icon</option></select></label><div className="property-grid"><label>Media size (%)<input type="number" min="12" max="80" value={selected.shapeMediaSizePercent??32} onChange={(e)=>onUpdate({shapeMediaSizePercent:Math.min(80,Math.max(12,Number(e.target.value)||32))})}/></label><label>Gap<input type="number" min="0" max="40" value={selected.shapeContentGap??8} onChange={(e)=>onUpdate({shapeContentGap:Math.max(0,Number(e.target.value)||0)})}/></label></div><label className="guide-toggle"><input type="checkbox" checked={selected.shapeClipMedia??true} onChange={(e)=>onUpdate({shapeClipMedia:e.target.checked})}/><span><strong>Clip media to shape</strong><small>Prevent media from drawing outside the shape boundary</small></span></label>{(selected.shapeMediaPosition??'left')==='background'?<label>Background media opacity (%)<input type="number" min="0" max="100" value={selected.shapeMediaOverlayOpacity??100} onChange={(e)=>onUpdate({shapeMediaOverlayOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label>:null}</>:null}
+        <div className="property-grid"><label>Padding<input type="number" min="0" max="64" value={selected.shapePadding??12} onChange={(e)=>onUpdate({shapePadding:Math.max(0,Number(e.target.value)||0)})}/></label><label>Vertical align<select value={selected.shapeTextVerticalAlign??'middle'} onChange={(e)=>onUpdate({shapeTextVerticalAlign:e.target.value as NonNullable<BuilderElement['shapeTextVerticalAlign']>})}><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></label></div>
+      </div></details>:null}
+    </div>
+  </div>;
+}
+
+function ShapeFormattingPanel({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const contentMode=selected.shapeContentMode??'text';
+  const hasMedia=contentMode==='media'||contentMode==='text-media';
+  const hasText=contentMode==='text'||contentMode==='text-media';
+  const strokeStyle=selected.shapeStrokeStyle??'solid';
+  const strokeWidth=selected.shapeStrokeWidth??1;
+  const strokeColor=selected.shapeStrokeColor??'#9DB7F5';
+  const fillType=selected.shapeFillType??'solid';
+  return <div className="inspector-body text-inspector-body shape-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Formatting</h3><small>Fill, stroke, text, media and effects</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Fill <InspectorHelp text="Use solid, linear gradient, radial gradient or no fill. Gradients are non-destructive and remain editable after save/reload."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><label>Fill type<select value={fillType} onChange={(e)=>onUpdate({shapeFillType:e.target.value as NonNullable<BuilderElement['shapeFillType']>})}><option value="solid">Solid</option><option value="linear">Linear gradient</option><option value="radial">Radial gradient</option><option value="none">None</option></select></label>{fillType!=='none'?<><div className="property-grid"><label>Color 1<div className="color-control"><input type="color" value={selected.fill??'#EAF1FF'} onChange={(e)=>onUpdate({fill:e.target.value})}/><code>{(selected.fill??'#EAF1FF').toUpperCase()}</code></div></label>{fillType!=='solid'?<label>Color 2<div className="color-control"><input type="color" value={selected.shapeFillColor2??'#C7D7FE'} onChange={(e)=>onUpdate({shapeFillColor2:e.target.value})}/><code>{(selected.shapeFillColor2??'#C7D7FE').toUpperCase()}</code></div></label>:<label>Opacity (%)<input type="number" min="0" max="100" value={selected.shapeOpacity??100} onChange={(e)=>onUpdate({shapeOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label>}</div>{fillType!=='solid'?<div className="property-grid"><label>Angle (°)<input type="number" min="0" max="360" value={selected.shapeFillAngle??45} onChange={(e)=>onUpdate({shapeFillAngle:((Number(e.target.value)||0)%360+360)%360})}/></label><label>Opacity (%)<input type="number" min="0" max="100" value={selected.shapeOpacity??100} onChange={(e)=>onUpdate({shapeOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label></div>:null}</>:null}</div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Border / Stroke <InspectorHelp text="Inside keeps the stroke inside the shape, Center straddles the boundary, Outside expands visually beyond the boundary. Dashed/dotted strokes use centered rendering for fidelity."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><div className="property-grid"><label>Style<select value={strokeStyle} onChange={(e)=>onUpdate({shapeStrokeStyle:e.target.value as NonNullable<BuilderElement['shapeStrokeStyle']>})}><option value="none">None</option><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label><label>Width<input type="number" min="0" max="20" value={strokeWidth} onChange={(e)=>onUpdate({shapeStrokeWidth:Math.max(0,Number(e.target.value)||0)})}/></label></div><label>Stroke color<div className="color-control"><input type="color" value={strokeColor} onChange={(e)=>onUpdate({shapeStrokeColor:e.target.value})}/><code>{strokeColor.toUpperCase()}</code></div></label><label>Alignment<select value={selected.shapeStrokeAlignment??'center'} onChange={(e)=>onUpdate({shapeStrokeAlignment:e.target.value as NonNullable<BuilderElement['shapeStrokeAlignment']>})}><option value="inside">Inside</option><option value="center">Center</option><option value="outside">Outside</option></select></label></div>
+      </details>
+
+      {['rectangle','rounded','flowProcess'].includes(selected.shapeKind??'rectangle')?<details className="inspector-accordion text-accordion"><summary><span>Corners</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Corner radius<input type="number" min="0" max="200" value={selected.shapeCornerRadius??14} onChange={(e)=>onUpdate({shapeCornerRadius:Math.max(0,Number(e.target.value)||0)})}/></label></div></details>:null}
+
+      {hasText?<details className="inspector-accordion text-accordion" open><summary><span>Text Style</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label>Font family<select value={selected.fontFamily??'Arial'} onChange={(e)=>onUpdate({fontFamily:e.target.value})}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label><div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e)=>onUpdate({fontSize:Math.max(6,Number(e.target.value)||12)})}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight??1.25} onChange={(e)=>onUpdate({lineHeight:Math.min(3,Math.max(.8,Number(e.target.value)||1.25))})}/></label></div><div className="text-style-actions compact-style-actions"><button type="button" className={(selected.fontWeight??400)>=700?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({fontWeight:(selected.fontWeight??400)>=700?400:700})}><b>B</b></button><button type="button" className={selected.italic?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({italic:!selected.italic})}><i>I</i></button><button type="button" className={selected.underline?'secondary compact active':'secondary compact'} onClick={()=>onUpdate({underline:!selected.underline})}><u>U</u></button></div><label>Text color<div className="color-control"><input type="color" value={selected.color} onChange={(e)=>onUpdate({color:e.target.value})}/><code>{selected.color.toUpperCase()}</code></div></label><div className="align-actions labeled-align-actions"><button className={selected.textAlign==='left'?'active':''} onClick={()=>onUpdate({textAlign:'left'})}><AlignLeft size={16}/><span>Left</span></button><button className={selected.textAlign==='center'?'active':''} onClick={()=>onUpdate({textAlign:'center'})}><AlignCenter size={16}/><span>Center</span></button><button className={selected.textAlign==='right'?'active':''} onClick={()=>onUpdate({textAlign:'right'})}><AlignRight size={16}/><span>Right</span></button></div><div className="property-grid"><label>Vertical align<select value={selected.shapeTextVerticalAlign??'middle'} onChange={(e)=>onUpdate({shapeTextVerticalAlign:e.target.value as NonNullable<BuilderElement['shapeTextVerticalAlign']>})}><option value="top">Top</option><option value="middle">Middle</option><option value="bottom">Bottom</option></select></label><label>Padding<input type="number" min="0" max="64" value={selected.shapePadding??12} onChange={(e)=>onUpdate({shapePadding:Math.max(0,Number(e.target.value)||0)})}/></label></div></div></details>:null}
+
+      {hasMedia?<details className="inspector-accordion text-accordion" open><summary><span>Media Style <InspectorHelp text="Placement controls where media sits inside the Shape. Background fills the complete Shape frame; Fit and focal Position control how the image is cropped inside that frame."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><button type="button" className="secondary compact full-width shape-fill-media-action" onClick={()=>onUpdate({shapeMediaPosition:'background',shapeClipMedia:true,imageFit:'cover',imageObjectPosition:'center'})}>Fill Shape with Media</button><p className="field-hint">Recommended for a rectangle/circle photo background: Background placement + Clip ON + Cover + Center.</p><label>Placement in shape<select value={selected.shapeMediaPosition??'left'} onChange={(e)=>{const position=e.target.value as NonNullable<BuilderElement['shapeMediaPosition']>;onUpdate(position==='background'?{shapeMediaPosition:position,shapeClipMedia:true,imageFit:'cover',imageObjectPosition:'center'}:{shapeMediaPosition:position});}}><option value="left">Left</option><option value="right">Right</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="center">Center / icon</option><option value="background">Background — fill shape</option></select></label><label className="guide-toggle"><input type="checkbox" checked={selected.shapeClipMedia??true} onChange={(e)=>onUpdate({shapeClipMedia:e.target.checked})}/><span><strong>Clip media to shape</strong><small>Hide media outside the selected Shape boundary</small></span></label>{(selected.shapeMediaPosition??'left')==='background'?<label>Background media opacity (%)<input type="number" min="0" max="100" value={selected.shapeMediaOverlayOpacity??100} onChange={(e)=>onUpdate({shapeMediaOverlayOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label>:null}<div className="property-grid"><label>Fit<select value={selected.imageFit??'contain'} onChange={(e)=>onUpdate({imageFit:e.target.value as 'contain'|'cover'|'fill'})}><option value="contain">Contain</option><option value="cover">Cover</option><option value="fill">Stretch</option></select></label><label>Focal position<select value={selected.imageObjectPosition??'center'} onChange={(e)=>onUpdate({imageObjectPosition:e.target.value as NonNullable<BuilderElement['imageObjectPosition']>})}><option value="center">Center</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label></div><div className="property-grid"><label>Opacity (%)<input type="number" min="0" max="100" value={selected.imageOpacity??100} onChange={(e)=>onUpdate({imageOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Radius<input type="number" min="0" max="200" value={selected.imageBorderRadius??0} onChange={(e)=>onUpdate({imageBorderRadius:Math.max(0,Number(e.target.value)||0)})}/></label></div><label>Media background<div className="color-control"><input type="color" value={selected.imageBackground??'#ffffff'} onChange={(e)=>onUpdate({imageBackground:e.target.value})}/><code>{(selected.imageBackground??'#FFFFFF').toUpperCase()}</code></div></label><div className="property-grid"><label>Brightness (%)<input type="number" min="0" max="300" value={selected.imageBrightness??100} onChange={(e)=>onUpdate({imageBrightness:Math.max(0,Number(e.target.value)||0)})}/></label><label>Contrast (%)<input type="number" min="0" max="300" value={selected.imageContrast??100} onChange={(e)=>onUpdate({imageContrast:Math.max(0,Number(e.target.value)||0)})}/></label></div><div className="property-grid"><label>Saturation (%)<input type="number" min="0" max="300" value={selected.imageSaturation??100} onChange={(e)=>onUpdate({imageSaturation:Math.max(0,Number(e.target.value)||0)})}/></label><label>Blur (px)<input type="number" min="0" max="30" step="0.5" value={selected.imageBlur??0} onChange={(e)=>onUpdate({imageBlur:Math.max(0,Number(e.target.value)||0)})}/></label></div><div className="property-grid"><label>Grayscale (%)<input type="number" min="0" max="100" value={selected.imageGrayscale??0} onChange={(e)=>onUpdate({imageGrayscale:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Sepia (%)<input type="number" min="0" max="100" value={selected.imageSepia??0} onChange={(e)=>onUpdate({imageSepia:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label></div><div className="property-grid"><label>Border style<select value={selected.imageBorderStyle??'none'} onChange={(e)=>onUpdate({imageBorderStyle:e.target.value as NonNullable<BuilderElement['imageBorderStyle']>})}><option value="none">None</option><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label><label>Border width<input type="number" min="0" max="20" value={selected.imageBorderWidth??0} onChange={(e)=>onUpdate({imageBorderWidth:Math.max(0,Number(e.target.value)||0)})}/></label></div><label>Border color<div className="color-control"><input type="color" value={selected.imageBorderColor??'#CBD5E1'} onChange={(e)=>onUpdate({imageBorderColor:e.target.value})}/><code>{(selected.imageBorderColor??'#CBD5E1').toUpperCase()}</code></div></label><label className="guide-toggle"><input type="checkbox" checked={selected.imageShadowEnabled??false} onChange={(e)=>onUpdate({imageShadowEnabled:e.target.checked})}/><span><strong>Media shadow</strong><small>Use standalone Image-style drop shadow</small></span></label>{selected.imageShadowEnabled?<><div className="property-grid"><label>X<input type="number" value={selected.imageShadowX??0} onChange={(e)=>onUpdate({imageShadowX:Number(e.target.value)||0})}/></label><label>Y<input type="number" value={selected.imageShadowY??3} onChange={(e)=>onUpdate({imageShadowY:Number(e.target.value)||0})}/></label><label>Blur<input type="number" min="0" value={selected.imageShadowBlur??8} onChange={(e)=>onUpdate({imageShadowBlur:Math.max(0,Number(e.target.value)||0)})}/></label><label>Spread<input type="number" value={selected.imageShadowSpread??0} onChange={(e)=>onUpdate({imageShadowSpread:Number(e.target.value)||0})}/></label></div><div className="property-grid"><label>Opacity (%)<input type="number" min="0" max="100" value={selected.imageShadowOpacity??25} onChange={(e)=>onUpdate({imageShadowOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Color<div className="color-control"><input type="color" value={selected.imageShadowColor??'#000000'} onChange={(e)=>onUpdate({imageShadowColor:e.target.value})}/></div></label></div></>:null}<button type="button" className="secondary compact full-width" onClick={()=>onUpdate({imageOpacity:100,imageBrightness:100,imageContrast:100,imageSaturation:100,imageGrayscale:0,imageSepia:0,imageBlur:0,imageShadowEnabled:false})}>Reset media appearance</button><div className="nested-inspector-card"><div className="nested-card-title">Background Removal</div><ImageBackgroundRemoval selected={selected} onUpdate={onUpdate}/></div></div></details>:null}
+
+      <details className="inspector-accordion text-accordion"><summary><span>Shape Effects <InspectorHelp text="Shadow adds depth outside the shape; Glow adds a soft halo. Both are non-destructive."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label className="guide-toggle"><input type="checkbox" checked={selected.shapeShadowEnabled??false} onChange={(e)=>onUpdate({shapeShadowEnabled:e.target.checked})}/><span><strong>Drop shadow</strong><small>Shadow behind the complete shape</small></span></label>{selected.shapeShadowEnabled?<><div className="property-grid"><label>X<input type="number" value={selected.shapeShadowX??0} onChange={(e)=>onUpdate({shapeShadowX:Number(e.target.value)||0})}/></label><label>Y<input type="number" value={selected.shapeShadowY??4} onChange={(e)=>onUpdate({shapeShadowY:Number(e.target.value)||0})}/></label><label>Blur<input type="number" min="0" value={selected.shapeShadowBlur??10} onChange={(e)=>onUpdate({shapeShadowBlur:Math.max(0,Number(e.target.value)||0)})}/></label><label>Spread<input type="number" value={selected.shapeShadowSpread??0} onChange={(e)=>onUpdate({shapeShadowSpread:Number(e.target.value)||0})}/></label></div><div className="property-grid"><label>Opacity (%)<input type="number" min="0" max="100" value={selected.shapeShadowOpacity??28} onChange={(e)=>onUpdate({shapeShadowOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Color<div className="color-control"><input type="color" value={selected.shapeShadowColor??'#000000'} onChange={(e)=>onUpdate({shapeShadowColor:e.target.value})}/></div></label></div></>:null}<label className="guide-toggle"><input type="checkbox" checked={selected.shapeGlowEnabled??false} onChange={(e)=>onUpdate({shapeGlowEnabled:e.target.checked})}/><span><strong>Glow</strong><small>Soft outer halo</small></span></label>{selected.shapeGlowEnabled?<div className="property-grid"><label>Blur<input type="number" min="0" max="60" value={selected.shapeGlowBlur??12} onChange={(e)=>onUpdate({shapeGlowBlur:Math.max(0,Number(e.target.value)||0)})}/></label><label>Opacity (%)<input type="number" min="0" max="100" value={selected.shapeGlowOpacity??45} onChange={(e)=>onUpdate({shapeGlowOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Glow color<div className="color-control"><input type="color" value={selected.shapeGlowColor??'#60A5FA'} onChange={(e)=>onUpdate({shapeGlowColor:e.target.value})}/></div></label></div>:null}</div></details>
+    </div>
+  </div>;
+}
+
+function ImagePropertiesPanel({ selected, selectedBand, bindingPreview, dynamicTokenFields, pageSettings, relativeElements, onUpdate, onPageSettings, assignRegion, onMoveFlow, onFlowRowAction, onArrange, onDuplicate, onDelete }: {
+  selected: BuilderElement;
+  selectedBand: 'header'|'footer'|null;
+  bindingPreview: string;
+  dynamicTokenFields: TemplateTokenField[];
+  pageSettings: PageSettings;
+  relativeElements: BuilderElement[];
+  onUpdate: (patch: Partial<BuilderElement>) => void;
+  onPageSettings: (patch: Partial<PageSettings>) => void;
+  assignRegion: (region: PageRegion) => void;
+  onMoveFlow: (direction: -1|1) => void;
+  onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void;
+  onArrange: (action: 'front'|'forward'|'backward'|'back') => void;
+  onDuplicate: () => void;
+  onDelete: () => void;
+}) {
+  const isFlow = !selectedBand && (selected.layoutMode ?? 'floating') === 'flow';
+  const aspect = selected.height > 0 ? selected.width / selected.height : 1;
+  const updateWidth = (width:number) => onUpdate(selected.imageLockAspect ? { width, height: Math.max(20, width / aspect) } : { width });
+  const updateHeight = (height:number) => onUpdate(selected.imageLockAspect ? { height, width: Math.max(20, height * aspect) } : { height });
+  return <div className="inspector-body text-inspector-body image-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>{selected.type === 'signature' ? 'Signature' : 'Image'}</h3><small>Source, sizing, fit and placement</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Image Source <InspectorHelp text="Choose a local image, paste a URL/data URL, or bind the element to a dynamic image field from the current record."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><ImageSourceEditor selected={selected} dynamicTokenFields={dynamicTokenFields} bindingPreview={bindingPreview} onUpdate={onUpdate}/></div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Position & Size <span className="section-unit">px</span> <InspectorHelp text="Flow owns X/Y automatically. Lock aspect ratio keeps width and height proportional while resizing."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <div className="property-grid compact-geometry-grid">
+            <label>X<input type="number" disabled={isFlow} value={Math.round(selected.x)} onChange={(e)=>onUpdate({x:Number(e.target.value)||0})}/></label>
+            <label>Y<input type="number" disabled={isFlow} value={Math.round(selected.y)} onChange={(e)=>onUpdate({y:Number(e.target.value)||0})}/></label>
+            <label>Width<input type="number" min="20" disabled={isFlow && (selected.flowWidth ?? 'custom') === 'full'} value={Math.round(selected.width)} onChange={(e)=>updateWidth(Math.max(20,Number(e.target.value)||20))}/></label>
+            <label>Height<input type="number" min="20" value={Math.round(selected.height)} onChange={(e)=>updateHeight(Math.max(20,Number(e.target.value)||20))}/></label>
+          </div>
+          <label className="guide-toggle"><input type="checkbox" checked={selected.imageLockAspect ?? true} onChange={(e)=>onUpdate({imageLockAspect:e.target.checked})}/><span><strong>Lock aspect ratio</strong><small>Keep image proportions while resizing</small></span></label>
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Layout <InspectorHelp text="Flow keeps the image in automatic document flow. Floating enables exact placement and layer/overlap controls."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <TextLayoutControls selected={selected} elements={relativeElements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction} showRowManager={false}/>}</div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Fit & Crop <InspectorHelp text="Contain shows the full image, Cover fills the frame, Stretch fills the frame without preserving proportions. Position chooses which part remains visible in Cover mode."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <label>Fit mode<select value={selected.imageFit ?? 'contain'} onChange={(e)=>onUpdate({imageFit:e.target.value as 'contain'|'cover'|'fill'})}><option value="contain">Contain</option><option value="cover">Cover</option><option value="fill">Stretch</option></select></label>
+          <label>Image position<select value={selected.imageObjectPosition ?? 'center'} onChange={(e)=>onUpdate({imageObjectPosition:e.target.value as NonNullable<BuilderElement['imageObjectPosition']>})}><option value="center">Center</option><option value="top">Top</option><option value="bottom">Bottom</option><option value="left">Left</option><option value="right">Right</option></select></label>
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Region <InspectorHelp text="Choose Body for normal content. Header/Footer are global document masters and repeat according to the selected master policy."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><label>Place in<select value={selected.region ?? 'body'} onChange={(e)=>assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e)=>onPageSettings({[selectedBand]:{...pageSettings[selectedBand],enabled:true,repeat:e.target.value as PageRepeatMode}} as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}</div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Advanced</span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          {((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="nested-inspector-card arrange-card"><div className="nested-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={()=>onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={()=>onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={()=>onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={()=>onArrange('back')}>Send Back</button></div></section> : <p className="field-hint">Layer controls appear when the image is Floating or assigned to a master region.</p>}
+          <div className="inspector-actions text-object-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div>
+        </div>
+      </details>
+    </div>
+  </div>;
+}
+
+function ImageFormattingPanel({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const borderStyle=selected.imageBorderStyle??'none';
+  const borderWidth=selected.imageBorderWidth??0;
+  const borderColor=selected.imageBorderColor??'#CBD5E1';
+  return <div className="inspector-body text-inspector-body image-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Formatting</h3><small>Image appearance, effects and background tools</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Appearance <InspectorHelp text="Opacity affects the whole image frame. Brightness, contrast and saturation affect the image pixels only."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <div className="property-grid"><label>Opacity (%)<input type="number" min="0" max="100" value={selected.imageOpacity??100} onChange={(e)=>onUpdate({imageOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Background<div className="color-control"><input type="color" value={selected.imageBackground??'#ffffff'} onChange={(e)=>onUpdate({imageBackground:e.target.value})}/><code>{(selected.imageBackground??'#FFFFFF').toUpperCase()}</code></div></label></div>
+          <div className="property-grid"><label>Brightness (%)<input type="number" min="0" max="300" value={selected.imageBrightness??100} onChange={(e)=>onUpdate({imageBrightness:Math.max(0,Number(e.target.value)||0)})}/></label><label>Contrast (%)<input type="number" min="0" max="300" value={selected.imageContrast??100} onChange={(e)=>onUpdate({imageContrast:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+          <label>Saturation (%)<input type="number" min="0" max="300" value={selected.imageSaturation??100} onChange={(e)=>onUpdate({imageSaturation:Math.max(0,Number(e.target.value)||0)})}/></label>
+          <button type="button" className="secondary compact full-width" onClick={()=>onUpdate({imageOpacity:100,imageBrightness:100,imageContrast:100,imageSaturation:100,imageGrayscale:0,imageSepia:0,imageBlur:0})}>Reset appearance</button>
+        </div>
+      </details>
+
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Border <InspectorHelp text="Frame border and corner radius apply around the image element without changing the source image."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><div className="property-grid"><label>Style<select value={borderStyle} onChange={(e)=>onUpdate({imageBorderStyle:e.target.value as NonNullable<BuilderElement['imageBorderStyle']>})}><option value="none">None</option><option value="solid">Solid</option><option value="dashed">Dashed</option><option value="dotted">Dotted</option></select></label><label>Width<input type="number" min="0" max="20" value={borderWidth} onChange={(e)=>onUpdate({imageBorderWidth:Math.max(0,Number(e.target.value)||0)})}/></label></div><label>Border color<div className="color-control"><input type="color" value={borderColor} onChange={(e)=>onUpdate({imageBorderColor:e.target.value})}/><code>{borderColor.toUpperCase()}</code></div></label><label>Corner radius<input type="number" min="0" max="200" value={selected.imageBorderRadius??0} onChange={(e)=>onUpdate({imageBorderRadius:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Shadow <InspectorHelp text="Adds a non-destructive drop shadow behind the image frame."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><label className="guide-toggle"><input type="checkbox" checked={selected.imageShadowEnabled??false} onChange={(e)=>onUpdate({imageShadowEnabled:e.target.checked})}/><span><strong>Enable shadow</strong><small>Drop shadow behind image frame</small></span></label><div className="property-grid"><label>X offset<input type="number" value={selected.imageShadowX??0} onChange={(e)=>onUpdate({imageShadowX:Number(e.target.value)||0})}/></label><label>Y offset<input type="number" value={selected.imageShadowY??3} onChange={(e)=>onUpdate({imageShadowY:Number(e.target.value)||0})}/></label><label>Blur<input type="number" min="0" value={selected.imageShadowBlur??8} onChange={(e)=>onUpdate({imageShadowBlur:Math.max(0,Number(e.target.value)||0)})}/></label><label>Spread<input type="number" value={selected.imageShadowSpread??0} onChange={(e)=>onUpdate({imageShadowSpread:Number(e.target.value)||0})}/></label></div><div className="property-grid"><label>Opacity (%)<input type="number" min="0" max="100" value={selected.imageShadowOpacity??25} onChange={(e)=>onUpdate({imageShadowOpacity:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Color<div className="color-control"><input type="color" value={selected.imageShadowColor??'#000000'} onChange={(e)=>onUpdate({imageShadowColor:e.target.value})}/><code>{(selected.imageShadowColor??'#000000').toUpperCase()}</code></div></label></div></div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Image Effects <InspectorHelp text="Use grayscale, sepia and blur as non-destructive effects. These remain editable after save/reload."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><div className="property-grid"><label>Grayscale (%)<input type="number" min="0" max="100" value={selected.imageGrayscale??0} onChange={(e)=>onUpdate({imageGrayscale:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label><label>Sepia (%)<input type="number" min="0" max="100" value={selected.imageSepia??0} onChange={(e)=>onUpdate({imageSepia:Math.min(100,Math.max(0,Number(e.target.value)||0))})}/></label></div><label>Blur (px)<input type="number" min="0" max="30" step="0.5" value={selected.imageBlur??0} onChange={(e)=>onUpdate({imageBlur:Math.max(0,Number(e.target.value)||0)})}/></label></div>
+      </details>
+
+      <details className="inspector-accordion text-accordion">
+        <summary><span>Background Removal <InspectorHelp text="Removes a border-connected background color using corner sampling. Tolerance controls color matching; softness/feather smooth the edge. The original source is preserved for Restore."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content"><ImageBackgroundRemoval selected={selected} onUpdate={onUpdate}/></div>
+      </details>
+    </div>
+  </div>;
+}
+
+function ImageBackgroundRemoval({ selected, onUpdate }: { selected: BuilderElement; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const [message,setMessage]=useState('');
+  const [busy,setBusy]=useState(false);
+  const tolerance=selected.imageBgRemoveTolerance??28;
+  const softness=selected.imageBgRemoveSoftness??12;
+  const feather=selected.imageBgRemoveFeather??6;
+  const fringe=selected.imageBgRemoveFringe??2;
+  const noise=selected.imageBgRemoveNoise??2;
+
+  const apply=async()=>{
+    setBusy(true);setMessage('Processing background…');
+    try{
+      const blob=await resolveManualImageBlob(selected);
+      if(!blob) throw new Error('Upload a local image or provide an image URL before removing the background.');
+      const processed=await removeConnectedImageBackground(blob,{tolerance,softness,feather,fringe,noise});
+      const file=new File([processed],`background-removed-${Date.now()}.png`,{type:'image/png'});
+      const id=await saveImageAsset(file);
+      onUpdate({
+        imageOriginalAssetId:selected.imageOriginalAssetId??selected.imageAssetId,
+        imageOriginalSource:selected.imageOriginalSource??selected.imageSource,
+        imageAssetId:id,imageSource:undefined,
+      });
+      setMessage('Background removed. Original source preserved for Restore.');
+    }catch(error){setMessage(error instanceof Error?error.message:'Unable to remove background.');}
+    finally{setBusy(false);}
+  };
+  const restore=()=>{
+    if(!selected.imageOriginalAssetId&&!selected.imageOriginalSource)return;
+    onUpdate({imageAssetId:selected.imageOriginalAssetId,imageSource:selected.imageOriginalSource,imageOriginalAssetId:undefined,imageOriginalSource:undefined});
+    setMessage('Original image restored.');
+  };
+  return <div className="background-removal-panel">
+    <div className="property-grid"><label>Tolerance<input type="number" min="0" max="150" value={tolerance} onChange={(e)=>onUpdate({imageBgRemoveTolerance:Math.min(150,Math.max(0,Number(e.target.value)||0))})}/></label><label>Edge softness<input type="number" min="0" max="80" value={softness} onChange={(e)=>onUpdate({imageBgRemoveSoftness:Math.min(80,Math.max(0,Number(e.target.value)||0))})}/></label><label>Feather<input type="number" min="0" max="80" value={feather} onChange={(e)=>onUpdate({imageBgRemoveFeather:Math.min(80,Math.max(0,Number(e.target.value)||0))})}/></label><label>Fringe<input type="number" min="0" max="40" value={fringe} onChange={(e)=>onUpdate({imageBgRemoveFringe:Math.min(40,Math.max(0,Number(e.target.value)||0))})}/></label></div>
+    <label>Noise cleanup<input type="number" min="0" max="50" value={noise} onChange={(e)=>onUpdate({imageBgRemoveNoise:Math.min(50,Math.max(0,Number(e.target.value)||0))})}/></label>
+    <div className="image-action-row"><button type="button" className="secondary" disabled={busy} onClick={apply}>{busy?'Processing…':'Remove Background'}</button><button type="button" className="secondary" disabled={!selected.imageOriginalAssetId&&!selected.imageOriginalSource} onClick={restore}>Restore Original</button></div>
+    <p className="field-hint">Best for white/off-white or flat connected backgrounds. The algorithm starts from image edges so internal light details are less likely to be removed.</p>
+    {message?<div className="image-message">{message}</div>:null}
+  </div>;
+}
+
+async function resolveManualImageBlob(selected:BuilderElement):Promise<Blob|null>{
+  if(selected.imageAssetId){const blob=await loadImageAsset(selected.imageAssetId);if(blob)return blob;}
+  const source=selected.imageSource?.trim();
+  if(!source)return null;
+  const response=await fetch(source);
+  if(!response.ok)throw new Error(`Unable to load image (${response.status}).`);
+  return response.blob();
+}
+
+async function removeConnectedImageBackground(blob:Blob,options:{tolerance:number;softness:number;feather:number;fringe:number;noise:number}):Promise<Blob>{
+  const bitmap=await createImageBitmap(blob);
+  try{
+    const canvas=document.createElement('canvas');canvas.width=bitmap.width;canvas.height=bitmap.height;
+    const ctx=canvas.getContext('2d',{willReadFrequently:true});if(!ctx)throw new Error('Canvas is unavailable.');
+    ctx.drawImage(bitmap,0,0);const image=ctx.getImageData(0,0,canvas.width,canvas.height);const data=image.data,w=canvas.width,h=canvas.height;
+    const corners=[[0,0],[w-1,0],[0,h-1],[w-1,h-1]];
+    let br=0,bg=0,bb=0;for(const [x,y] of corners){const i=(y*w+x)*4;br+=data[i];bg+=data[i+1];bb+=data[i+2];}
+    br/=4;bg/=4;bb/=4;
+    const dist=(i:number)=>Math.sqrt((data[i]-br)**2+(data[i+1]-bg)**2+(data[i+2]-bb)**2);
+    const outer=options.tolerance+options.softness+options.feather+options.fringe;
+    const visited=new Uint8Array(w*h);const queue=new Int32Array(w*h);let head=0,tail=0;
+    const push=(x:number,y:number)=>{if(x<0||x>=w||y<0||y>=h)return;const p=y*w+x;if(visited[p])return;const i=p*4;if(dist(i)>outer)return;visited[p]=1;queue[tail++]=p;};
+    for(let x=0;x<w;x++){push(x,0);push(x,h-1);}for(let y=0;y<h;y++){push(0,y);push(w-1,y);}
+    while(head<tail){const p=queue[head++],x=p%w,y=(p/w)|0;push(x-1,y);push(x+1,y);push(x,y-1);push(x,y+1);}
+    const transition=Math.max(1,options.softness+options.feather);
+    for(let p=0;p<w*h;p++)if(visited[p]){const i=p*4,d=dist(i);let alpha=d<=options.tolerance?0:Math.min(1,(d-options.tolerance)/transition);if(alpha*100<options.noise)alpha=0;data[i+3]=Math.round(data[i+3]*alpha);}
+    ctx.putImageData(image,0,0);
+    return await new Promise<Blob>((resolve,reject)=>canvas.toBlob((result)=>result?resolve(result):reject(new Error('Unable to encode transparent PNG.')),'image/png'));
+  }finally{bitmap.close();}
+}
+
+
+function ShapeMediaSourceEditor({ selected, dynamicTokenFields, bindingPreview, onUpdate }: { selected: BuilderElement; dynamicTokenFields: TemplateTokenField[]; bindingPreview: string; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [message, setMessage] = useState('');
+
+  async function upload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const id = await saveImageAsset(file);
+      onUpdate({ imageAssetId: id, imageSource: undefined });
+      setMessage(`${file.name} selected`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to load image.');
+    }
+  }
+
+  function removeImage() {
+    onUpdate({ imageAssetId: undefined, imageSource: undefined, shapeMediaBinding: undefined });
+    setMessage('Media removed');
+  }
+
+  return <div className="image-properties shape-media-properties">
+    <input ref={inputRef} className="hidden-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onChange={upload}/>
+    <label>Dynamic media binding<select value={selected.shapeMediaBinding ?? ''} onChange={(e) => onUpdate({ shapeMediaBinding: e.target.value || undefined })}><option value="">No media binding</option>{dynamicTokenFields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name}</option>)}</select></label>
+    {selected.shapeMediaBinding ? <><div className="binding-preview">{'{{'}{selected.shapeMediaBinding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{bindingPreview || 'Empty / null'}</strong></div></> : null}
+    <div className="image-action-row">
+      <button className="secondary" type="button" onClick={() => inputRef.current?.click()}>{selected.imageAssetId || selected.imageSource ? 'Replace media' : 'Upload media'}</button>
+      <button className="secondary" type="button" onClick={removeImage} disabled={!selected.imageAssetId && !selected.imageSource && !selected.shapeMediaBinding}>Remove</button>
+    </div>
+    <label>Image URL / data URL<input type="text" placeholder="https://... or data:image/..." value={selected.imageSource ?? ''} onChange={(e) => onUpdate({ imageSource: e.target.value || undefined, imageAssetId: e.target.value ? undefined : selected.imageAssetId })}/></label>
+    <p className="image-help">Dynamic media binding overrides the manual image during preview when the bound field resolves to an image URL or data URL.</p>
+    {message && <div className="image-message">{message}</div>}
+  </div>;
+}
+
+function ImageSourceEditor({ selected, dynamicTokenFields, bindingPreview, onUpdate }: { selected: BuilderElement; dynamicTokenFields: TemplateTokenField[]; bindingPreview: string; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+  const inputRef = useRef<HTMLInputElement | null>(null);
+  const [message, setMessage] = useState('');
+
+  async function upload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    try {
+      const id = await saveImageAsset(file);
+      onUpdate({ imageAssetId: id, imageSource: undefined });
+      setMessage(`${file.name} selected`);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : 'Unable to load image.');
+    }
+  }
+
+  function removeImage() {
+    onUpdate({ imageAssetId: undefined, imageSource: undefined });
+    setMessage('Image removed');
+  }
+
+  return <div className="image-properties enhanced-image-properties">
+    <input ref={inputRef} className="hidden-file-input" type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml" onChange={upload}/>
+    <div className="image-action-row">
+      <button className="secondary" type="button" onClick={() => inputRef.current?.click()}>{selected.imageAssetId || selected.imageSource ? 'Replace image' : 'Upload image'}</button>
+      <button className="secondary" type="button" onClick={removeImage} disabled={!selected.imageAssetId && !selected.imageSource}>Remove</button>
+    </div>
+    <label>Image URL / data URL<input type="text" placeholder="https://... or data:image/..." value={selected.imageSource ?? ''} onChange={(e) => onUpdate({ imageSource: e.target.value || undefined, imageAssetId: e.target.value ? undefined : selected.imageAssetId })}/></label>
+    <label>Dynamic binding<select value={selected.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No dynamic binding</option>{dynamicTokenFields.map((field) => <option key={field.name} value={field.name}>{field.label || field.name}</option>)}</select></label>
+    {selected.binding ? <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{bindingPreview || 'Empty / null'}</strong></div></> : null}
+    <p className="image-help">{selected.type === 'signature' ? 'Use a PNG/WebP with transparent background for the cleanest signature.' : 'Upload a local image or use an image URL. Dynamic binding overrides the manual image during preview.'}</p>
+    {message && <div className="image-message">{message}</div>}
   </div>;
 }
 
@@ -1810,7 +2625,7 @@ function TableElementProperties({ selected, elements, pageSettings, sources, act
     <div className="inspector-panel-heading"><div><h3>Table</h3><small>Structure, data source and pagination</small></div></div>
     <div className="text-inspector-stack">
       <details className="inspector-accordion table-ux3-accordion" open><summary><span>Position &amp; Size</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="property-grid"><label>X<input type="number" disabled={isFlow} value={Math.round(selected.x)} onChange={(e)=>onUpdate({x:Number(e.target.value)||0})}/></label><label>Y<input type="number" disabled={isFlow} value={Math.round(selected.y)} onChange={(e)=>onUpdate({y:Number(e.target.value)||0})}/></label><label>Width<input type="number" min="20" disabled={isFlow && (selected.flowWidth ?? 'full')==='full'} value={Math.round(selected.width)} onChange={(e)=>onUpdate({width:Math.max(20,Number(e.target.value)||20)})}/></label><label>Height<input type="text" disabled value={`Auto · ${Math.round(selected.height)}px`}/></label></div></div></details>
-      <details className="inspector-accordion table-ux3-accordion" open><summary><span>Layout</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><TextLayoutControls selected={selected} elements={elements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMove} onRowAction={onRowAction}/></div></details>
+      <details className="inspector-accordion table-ux3-accordion" open><summary><span>Layout</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><TextLayoutControls selected={selected} elements={elements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMove} onRowAction={onRowAction} showRowManager={false}/></div></details>
       <details className="inspector-accordion table-ux3-accordion"><summary><span>Region</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="compact-info-row"><span>Place in</span><strong>Body / Content</strong></div><p className="field-hint">Tables remain in the document body so pagination respects header, footer and content bounds.</p></div></details>
       <TableProperties table={selected.table} view="properties" sources={sources} activeSourceId={activeSourceId} formulaFields={formulaFields} onUpdate={(table)=>onUpdate({table})} onEditConfiguration={onEditConfiguration}/>
       <details className="inspector-accordion table-ux3-accordion"><summary><span>Advanced</span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div></details>
@@ -1818,7 +2633,7 @@ function TableElementProperties({ selected, elements, pageSettings, sources, act
   </div>;
 }
 
-function TableProperties({ table, view = 'properties', sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; view?: 'properties'|'columns'|'formatting'; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
+function TableProperties({ table, view = 'properties', sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; view?: 'properties'|'columns'|'rows'|'formatting'; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
   const cell = findTableCell(table, table.selectedCellId);
   const cellLocation = findTableCellLocation(table, table.selectedCellId);
   const selectedColumn = cellLocation ? table.columns[Math.min(cellLocation.columnIndex, table.columns.length - 1)] ?? null : null;
@@ -1894,10 +2709,11 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
         <label className="check-row"><input type="checkbox" checked={table.pagination.allowRowSplit} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, allowRowSplit: e.target.checked } })}/>Allow oversized row split</label>
         <div className="table-cell-help">Overflow is calculated from the table's Y position to the page bottom margin. Summary rows move to the final continuation page when needed.</div>
       </section>
-      {!groupedSummary && <button className="secondary table-add-summary" onClick={() => onUpdate(addCustomSummaryRow(table))}>+ Add custom total / summary row</button>}
+      {!groupedSummary && <button className="secondary table-add-summary table-scope-rows" onClick={() => onUpdate(addCustomSummaryRow(table))}>+ Add custom total / summary row</button>}
       </>;
     })()}
     <div className="table-schema-note table-scope-properties"><span>Table ID</span><code>{table.id}</code></div>
+    {view === 'rows' && <TableRowsOverview table={table} onUpdate={onUpdate}/>} 
     {cellLocation && <div className="table-structure-editor">
       <section className="table-inspector-card table-row-structure">
         <div className="table-inspector-card-head">
@@ -1959,6 +2775,8 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
     </div>}
     {cell ? <div className="table-cell-editor table-selected-cell-editor">
       <div className="table-inspector-card-head selected-cell-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▣</span><span>Selected Cell</span></span><small className="table-inspector-badge">{cell.type}</small></div>
+      <div className="selected-cell-context ux4-cell-context"><strong>{selectedColumn?.label || 'Selected cell'}</strong><small>{cellLocation?.row.kind || 'cell'} row · shared by Columns and Rows workspaces</small></div>
+      <div className="cell-editor-section-label">Cell Properties</div>
       <details className="table-tech-details"><summary>Technical ID</summary><code title={cell.id}>{cell.id}</code></details>
       <label>Cell type<select value={cell.type} onChange={(e) => { const nextType = e.target.value as TableCellType; patchCell({ type: nextType, ...(nextType === 'image' && !cell.imageFit ? { imageFit: 'cover' as const } : {}) }); }}><option value="text">Text</option><option value="image">Image</option><option value="qr">QR Code</option><option value="barcode">Barcode</option></select></label>
       {cell.type === 'text' ? <>
@@ -1979,7 +2797,9 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
         <TableCellBindingPicker source={bindingSource} formulaFields={formulaFields} value={cell.binding} onChange={(binding) => patchCell({ binding })}/>
         <p className="table-cell-help">Field binding overrides the custom value during preview/generation.</p>
       </>}
+      <div className="cell-editor-section-label">Cell Layout</div>
       <div className="property-grid"><label>Row span<input type="number" min="1" max="50" value={cell.rowSpan} onChange={(e) => patchCell({ rowSpan: Math.max(1, Number(e.target.value) || 1) })}/></label><label>Col span<input type="number" min="1" max={Math.max(1, table.columns.length)} value={cell.colSpan} onChange={(e) => patchCell({ colSpan: Math.max(1, Math.min(table.columns.length, Number(e.target.value) || 1)) })}/></label></div>
+      <div className="cell-editor-section-label">Cell Style</div>
       <div className="property-grid"><label>Padding<input type="number" min="0" max="40" value={cell.style.padding} onChange={(e) => patchCell({ style: { ...cell.style, padding: Math.max(0, Number(e.target.value) || 0) } })}/></label><label>Font size<input type="number" min="8" max="72" value={cell.style.fontSize} onChange={(e) => patchCell({ style: { ...cell.style, fontSize: Math.max(8, Number(e.target.value) || 11) } })}/></label></div>
       <label>Alignment<select value={cell.style.align} onChange={(e) => patchCell({ style: { ...cell.style, align: e.target.value as 'left'|'center'|'right' } })}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
       <label>Background<input type="color" value={cell.style.background} onChange={(e) => patchCell({ style: { ...cell.style, background: e.target.value } })}/></label>
@@ -1997,6 +2817,33 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
 }
 
 
+
+
+function TableRowsOverview({ table, onUpdate }: { table: TableDefinition; onUpdate: (table: TableDefinition) => void }) {
+  const rows = table.mode === 'dynamic' ? [...table.headerRows, ...table.bodyRows, ...table.customRows] : table.rows;
+  const selectRow = (rowId: string) => {
+    const row = rows.find((item) => item.id === rowId);
+    const firstCell = row?.cells.find(Boolean);
+    if (firstCell) onUpdate({ ...table, selectedCellId: firstCell.id });
+  };
+  return <section className="table-rows-overview">
+    <div className="table-row-workspace-actions">
+      {table.mode === 'custom' && <button type="button" className="secondary compact" onClick={() => {
+        const anchor = findTableCell(table, table.selectedCellId) ?? rows[rows.length - 1]?.cells[0];
+        if (anchor) onUpdate(addTableRow(table, anchor.id, 'below'));
+      }}>+ Add Row</button>}
+      {table.mode === 'dynamic' && !table.binding?.grouping && <button type="button" className="secondary compact" onClick={() => onUpdate(addCustomSummaryRow(table))}>+ Summary Row</button>}
+    </div>
+    <div className="table-row-list">
+      {rows.map((row, index) => {
+        const selected = row.cells.some((cell) => cell.id === table.selectedCellId);
+        const label = row.kind === 'header' ? 'Header Row' : row.kind === 'body' ? 'Body Row Template' : 'Summary / Custom Row';
+        const meta = row.kind === 'header' ? (row.repeatOnEveryPage ? 'Repeats on each page' : 'Header') : row.kind === 'body' ? (table.mode === 'dynamic' ? 'Data-driven' : 'Body row') : 'Custom / summary';
+        return <button type="button" key={row.id} className={`table-row-list-item${selected ? ' active' : ''}`} onClick={() => selectRow(row.id)}><span><strong>{label}</strong><small>{meta}</small></span><em>{index + 1}</em></button>;
+      })}
+    </div>
+  </section>;
+}
 
 function SummaryCellEditor({ table, cell, source, formulaFields, onPatch }: { table: TableDefinition; cell: NonNullable<ReturnType<typeof findTableCell>>; source: BuilderDataState['sources'][number] | null; formulaFields: TemplateTokenField[]; onPatch: (patch: Parameters<typeof updateTableCell>[2]) => void }) {
   const mode = cell.summaryMode ?? 'custom';
@@ -2412,10 +3259,10 @@ function defaultElement(type: ToolType, index: number): BuilderElement {
     case 'text': return { ...common, width: 260, height: 44, text: 'Double-click style text' };
     case 'image': return { ...common, width: 180, height: 130, text: '', imageFit: 'contain' };
     case 'table': return { ...common, width: 430, height: 150, text: 'Table' };
-    case 'shape': return { ...common, width: 180, height: 100, text: '' };
-    case 'qr': return { ...common, width: 110, height: 120, text: 'QR value' };
-    case 'barcode': return { ...common, width: 190, height: 90, text: '1234567890' };
-    case 'signature': return { ...common, width: 190, height: 80, text: '', imageFit: 'contain' };
+    case 'shape': return { ...common, width: 220, height: 110, text: 'Shape text', fill: '#EAF1FF', shapeKind: 'rounded', shapeContentMode: 'text', shapeMediaPosition: 'left', shapeMediaSizePercent: 32, shapeContentGap: 8, shapePadding: 12, shapeOpacity: 100, shapeLockAspect: false, shapeFillType: 'solid', shapeFillColor2: '#C7D7FE', shapeFillAngle: 45, shapeStrokeStyle: 'solid', shapeStrokeWidth: 1, shapeStrokeColor: '#9DB7F5', shapeStrokeAlignment: 'center', shapeCornerRadius: 14, shapeTextVerticalAlign: 'middle', shapeClipMedia: true, shapeMediaOverlayOpacity: 100, shapeShadowEnabled: false, shapeGlowEnabled: false };
+    case 'qr': return { ...common, width: 130, height: 150, text: 'QR value', qrForeground: '#111827', qrBackground: '#FFFFFF', qrQuietZone: 8, qrErrorCorrection: 'M', qrShowValue: true };
+    case 'barcode': return { ...common, width: 220, height: 100, text: '1234567890', barcodeFormat: 'code39', barcodeForeground: '#111827', barcodeBackground: '#FFFFFF', barcodeShowText: true, barcodeTextSize: 11, barcodeBarHeight: 54, barcodeQuietZone: 8 };
+    case 'signature': return { ...common, width: 220, height: 90, text: '', imageFit: 'contain', imageLockAspect: true, signatureShowPlaceholder: true };
     case 'divider': return { ...common, width: 360, height: 12, text: '' };
     case 'formula': return { ...common, width: 220, height: 44, text: '', formulaName: `Formula${index + 1}`, formulaExpression: '' };
   }
