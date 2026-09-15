@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { expect, it } from 'vitest';
 import { evaluateDocumentFormulas, formatDocumentFormulaValue, validateDocumentFormula, type DocumentFormulaDefinition } from './documentFormula.ts';
 
 const fields = [{ name: 'Taxable' }, { name: 'CGST' }, { name: 'SGST' }, { name: 'PaidAmount' }];

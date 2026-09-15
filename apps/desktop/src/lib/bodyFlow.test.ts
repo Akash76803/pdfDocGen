@@ -106,8 +106,8 @@ describe('materializeBodyFlowPages', () => {
   });
 
   it('synchronizes shared row height after one table grows and allows the row to shrink again', () => {
-    const left = { id: 'left-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 90 };
-    const right = { id: 'right-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 110 };
+    const left = { id: 'left-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 90, flowRowHeightPx: undefined as number | undefined };
+    const right = { id: 'right-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 110, flowRowHeightPx: undefined as number | undefined };
     const grown = synchronizeFlowRowHeights([{ ...left, height: 220 }, right]);
     expect(grown[0].flowRowHeightPx).toBe(220);
     expect(grown[1].flowRowHeightPx).toBe(220);

@@ -27,6 +27,7 @@ import {
   appendGenerationHistory,
   TEMPLATE_STORAGE_KEY,
   type GenerationFormat,
+  type GenerationRequest,
   type GenerationHistoryEntry,
 } from '../lib/generationEngine.ts';
 
@@ -258,13 +259,13 @@ export function Generate({ onNavigate }: { onNavigate: (route: AppRoute) => void
     const batchId = crypto.randomUUID();
     const finalCombinedName = (combinedFileName.trim() || 'Combined_Invoices').replace(/\.pdf$/i, '');
     const useNative = format === 'pdf' && pdfRenderMode === 'native-auto' && nativeCompatibility.supported;
-    const requests = selected.map((item, index) => {
+    const requests: GenerationRequest[] = selected.map((item, index) => {
       const selectedRecord = source.records[item.value] ?? null;
       return {
         id: crypto.randomUUID(), templateName: template.name, sourceId: source.id, activeRecordIndex: item.value, documentLabel: item.rawLabel, format,
         fileName: useCombinedPdf ? finalCombinedName : resolveFileNamePattern(filePattern, selectedRecord, template.name, item.rawLabel),
         pdfRenderProfile: format === 'pdf' ? pdfRenderProfile : undefined,
-        pdfRenderMode: format === 'pdf' ? (useNative ? 'native-auto' : 'exact') : undefined,
+        pdfRenderMode: format === 'pdf' ? (useNative ? 'native-auto' as const : 'exact' as const) : undefined,
         createdAt: new Date().toISOString(),
         combinedPdf: useCombinedPdf ? { batchId, index, total: selected.length, finalFileName: finalCombinedName } : undefined,
       };

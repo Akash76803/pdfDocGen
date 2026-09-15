@@ -161,7 +161,7 @@ function createColumns(count: number): TableColumn[] {
   }));
 }
 
-function createRow(kind: TableRowKind, columns: number, index = 0): TableRow {
+function createRow(kind: TableRowKind, columns: number, _index = 0): TableRow {
   return {
     id: crypto.randomUUID(), kind, height: kind === 'header' ? 32 : 30,
     autoHeight: true, repeatOnEveryPage: kind === 'header', keepTogether: true,
@@ -367,7 +367,7 @@ export function groupedFinalSummaryConfigFromTable(table: TableDefinition): Grou
   const grouping = table.binding?.grouping;
   if (!grouping || table.customRows.length === 0) return defaultGroupedFinalSummaryConfig(grouping?.columns ?? []);
   const row = table.customRows[0];
-  const columns = grouping.columns.map((mapping, index): GroupedFinalSummaryColumn => {
+  const columns = grouping.columns.map((_mapping, index): GroupedFinalSummaryColumn => {
     const cell = row.cells[index];
     if (!cell) return { operation: 'blank' };
     if (cell.summaryMode === 'formula') return { operation: 'formula', formula: cell.summaryFormula ?? '' };
@@ -1245,7 +1245,7 @@ export function dynamicRows(
   record: NormalizedRecord | null,
   source?: BuilderDataSource | null,
   parentSource?: BuilderDataSource | null,
-): Array<{ key: string; value: unknown }> {
+): TablePaginationRuntimeRow[] {
   if (table.mode !== 'dynamic' || !table.binding?.repeatSource) return [];
 
   const raw: unknown = table.binding.sourceId && source?.id === table.binding.sourceId
@@ -1258,7 +1258,7 @@ export function dynamicRows(
   // Primary flat-source model: restrict both Detail and Grouped Summary tables to the
   // currently selected Parent / Document before any grouping or aggregation happens.
   const parentKeys = configuredKeys(table.binding.parentKey, table.binding.parentKeys);
-  if (parentKeys.length > 0 && source && record) {
+  if (parentKeys.length > 0 && !table.binding.childForeignKey && source && record) {
     const selectedParentKey = compositeKey(record, parentKeys);
     if (!selectedParentKey) return [];
     filtered = raw.filter((item) => compositeKey(item, parentKeys) === selectedParentKey);

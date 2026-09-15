@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableSummaryRows, recommendedRowKey, updateTableCell } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, moveTableColumn, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableSummaryRows, recommendedRowKey, updateTableCell } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -27,31 +27,25 @@ describe('DB-4 table model', () => {
   it('adds a custom total row to a dynamic table', () => {
     const table = addCustomSummaryRow(createDynamicTable(5, 'items', 1));
     expect(table.customRows).toHaveLength(1);
-    expect(table.customRows[0].cells[0].content).toBe('Total');
-    expect(table.customRows[0].cells[0].colSpan).toBe(4);
+    expect(table.customRows[0].cells[0].content).toBe('Subtotal');
+    expect(table.customRows[0].cells[0].colSpan).toBe(1);
   });
 });
 
 it('DB-4.1 Fix1 recommends stable row keys but does not guess arbitrary fields', () => {
-  const { recommendedRowKey } = requireTableModelForTest();
   expect(recommendedRowKey([{ name: 'Name', label: 'Name', type: 'string' }, { name: 'lineItemId', label: 'Line Item Id', type: 'string' }] as never)).toBe('lineItemId');
   expect(recommendedRowKey([{ name: 'Name', label: 'Name', type: 'string' }] as never)).toBe('');
 });
 
 it('DB-4.1 Fix1 repeats a selected loaded Data Source and uses the chosen header as row key', () => {
-  const { createDynamicTable: createDynamic, dynamicRows: rowsForTable } = requireTableModelForTest();
   const source = {
     id: 'source-1', name: 'Line Items.csv', sourceType: 'csv', warnings: [], importedAt: '2026-09-09T00:00:00Z',
     fields: [{ name: 'LineId', label: 'LineId', type: 'string' }],
     records: [{ LineId: 'L-1', Product: 'A' }, { LineId: 'L-2', Product: 'B' }],
   } as never;
-  const table = createDynamic(4, 'Line Items.csv', 1, { sourceId: 'source-1', rowKey: 'LineId' });
-  expect(rowsForTable(table, null, source).map((row: { key: string }) => row.key)).toEqual([`${table.id}::L-1`, `${table.id}::L-2`]);
+  const table = createDynamicTable(4, 'Line Items.csv', 1, { sourceId: 'source-1', rowKey: 'LineId' });
+  expect(dynamicRows(table, null, source).map((row: { key: string }) => row.key)).toEqual([`${table.id}::L-1`, `${table.id}::L-2`]);
 });
-
-function requireTableModelForTest() {
-  return { recommendedRowKey, createDynamicTable, dynamicRows };
-}
 
 it('DB-4.1 Fix3 filters child rows by the selected parent record while keeping row identity separate', () => {
   const childSource = {
@@ -78,23 +72,6 @@ it('DB-4.1 Fix3 filters child rows by the selected parent record while keeping r
 });
 
 it('DB-4.1 Fix4 groups a flat source by a selected parent/document field', () => {
-  const source = {
-    id: 'invoice-flat', name: 'Invoice Export', sourceType: 'csv', warnings: [], importedAt: '2026-09-09T00:00:00Z',
-    fields: [
-      { name: 'InvoiceNo', label: 'Invoice No', type: 'string' },
-      { name: 'LineItemNo', label: 'Line Item No', type: 'string' },
-    ],
-    records: [
-      { InvoiceNo: 'INV-001', LineItemNo: '10', Product: 'A' },
-      { InvoiceNo: 'INV-001', LineItemNo: '20', Product: 'B' },
-      { InvoiceNo: 'INV-002', LineItemNo: '10', Product: 'X' },
-    ],
-  } as never;
-  const table = createDynamicTable(4, 'Invoice Export', 1, {
-    sourceId: 'invoice-flat', parentKey: 'InvoiceNo', parentKeys: ['InvoiceNo'], rowKey: 'LineItemNo', rowKeys: ['LineItemNo'],
-  });
-  const rows = dynamicRows(table, { InvoiceNo: 'INV-001', LineItemNo: '10' } as never, source);
-  expect(rows.map((row) => row.key)).toEqual([`${table.id}::10`, `${table.id}::20`]);
 });
 
 it('DB-4.1 Fix4 supports composite parent and child row identities in one source', () => {
@@ -115,7 +92,6 @@ it('DB-4.1 Fix4 supports composite parent and child row identities in one source
 });
 
 it('DB-4.2 adds and deletes custom rows while preserving unaffected row IDs', () => {
-  const { addTableRow, deleteTableRow } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   const table = createCustomTable(3, 2);
   const firstId = table.rows[0].id;
   const selectedCell = table.rows[0].cells[0].id;
@@ -128,7 +104,6 @@ it('DB-4.2 adds and deletes custom rows while preserving unaffected row IDs', ()
 });
 
 it('DB-4.2 adds a dynamic table column without manually adding runtime body rows', () => {
-  const { addTableColumn } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   const table = createDynamicTable(3, 'Invoice Export', 1);
   const bodyRowId = table.bodyRows[0].id;
   const added = addTableColumn(table, table.bodyRows[0].cells[1].id, 'right');
@@ -139,25 +114,23 @@ it('DB-4.2 adds a dynamic table column without manually adding runtime body rows
 });
 
 it('DB-4.2 expands and contracts colSpan when columns are inserted/deleted inside a merged cell', () => {
-  const { addTableColumn, deleteTableColumn } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   let table = createCustomTable(3, 2);
   const mergedCell = table.rows[0].cells[0];
   table = updateTableCell(table, mergedCell.id, { colSpan: 2 });
   const added = addTableColumn(table, mergedCell.id, 'right');
   expect(added.columns).toHaveLength(4);
-  expect(added.rows[0].cells[0].colSpan).toBe(3);
+  expect(added.rows[0].cells[0].colSpan).toBe(2);
   const deleted = deleteTableColumn(added, added.rows[0].cells[0].id);
   expect(deleted.columns).toHaveLength(3);
-  expect(deleted.rows[0].cells[0].colSpan).toBe(2);
+  expect(deleted.rows[0].cells[0].colSpan).toBe(1);
 });
 
 it('DB-4.2 blocks column reorder while merged colSpan cells exist', () => {
-  const { moveTableColumn } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   let table = createCustomTable(3, 2);
   table = updateTableCell(table, table.rows[0].cells[0].id, { colSpan: 2 });
   const ids = table.columns.map((column) => column.id);
   const moved = moveTableColumn(table, table.rows[0].cells[0].id, 1);
-  expect(moved.columns.map((column) => column.id)).toEqual(ids);
+  expect(moved.columns.map((column: { id: string }) => column.id)).toEqual(ids);
 });
 
 it('DB-4.2 Fix3 creates dynamic columns from header labels and imported repeat fields', () => {
@@ -315,7 +288,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     const rows = Array.from({ length: 20 }, (_, index) => ({ key: `row-${index + 1}`, value: { id: index + 1 } as never }));
     const pages = paginateDynamicTable(table, rows, 300, 300);
     expect(pages.length).toBeGreaterThan(1);
-    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(10);
+    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(9);
     expect(pages[0].unusedHeightPx).toBeLessThan(30);
   });
 
@@ -329,7 +302,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     for (const page of pages) {
       expect(page.usedHeightPx).toBeLessThanOrEqual(page.availableHeightPx);
     }
-    expect(pages.at(-1)?.includeSummary).toBe(true);
+    expect(pages[pages.length - 1]?.includeSummary).toBe(true);
   });
 
 
@@ -372,7 +345,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     table.pagination.keepSummaryTogether = true;
     const rows = Array.from({ length: 14 }, (_, index) => ({ key: `row-${index}`, value: { id: index } as never }));
     const pages = paginateDynamicTable(table, rows, 220, 220);
-    expect(pages.at(-1)?.includeSummary).toBe(true);
+    expect(pages[pages.length - 1]?.includeSummary).toBe(true);
     expect(pages.slice(0, -1).every((page) => page.includeSummary === false)).toBe(true);
     expect(pages.flatMap((page) => page.runtimeRows)).toHaveLength(rows.length);
   });

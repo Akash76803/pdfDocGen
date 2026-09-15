@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
 import { RecordPicker } from '../components/RecordPicker.tsx';
-import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState } from '../lib/dataSourceStore.ts';
+import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState, type NormalizedRecord, type NormalizedValue } from '../lib/dataSourceStore.ts';
 import { loadImageAsset, saveImageAsset } from '../lib/imageAssetStore.ts';
 import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
@@ -203,7 +203,6 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     if (!isTarget) return page;
     return { ...page, elements: typeof updater === 'function' ? updater(page.elements) : updater };
   }));
-  const setElements = (updater: BuilderElement[] | ((current: BuilderElement[]) => BuilderElement[])) => { recordHistory(); setElementsRaw(updater); };
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activePreviewPageIndex, setActivePreviewPageIndex] = useState(0);
   const [status, setStatus] = useState('Draft');
@@ -726,7 +725,6 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       const target = action === 'joinPrevious' ? flows[at - 1] : action === 'joinNext' ? flows[at + 1] : null;
       if ((action === 'joinPrevious' || action === 'joinNext') && !target) return page;
       if (action === 'left' || action === 'right') {
-        const rowId = selected.flowRowId;
         const rowIds = items.map((item, index) => ({ item, index })).filter(({ item }) => (item.region ?? 'body') === 'body' && (item.layoutMode ?? 'floating') === 'flow' && flowRowKey(item) === flowRowKey(selected));
         const rowAt = rowIds.findIndex(({ item }) => item.id === selectedId);
         const swapWith = action === 'left' ? rowAt - 1 : rowAt + 1;
@@ -844,7 +842,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     while (Date.now() < deadline) {
       await waitForBuilderPaint();
       const currentPages = pagesRef.current;
-      latestCounts = currentPages.map((page, index) => {
+      latestCounts = currentPages.map((page, _index) => {
         const currentMaster = currentPages[0];
         const header = currentMaster?.settings.header ?? page.settings.header;
         const footer = currentMaster?.settings.footer ?? page.settings.footer;
@@ -1081,8 +1079,6 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     }
   }
 
-  const contentBounds = contentBoundsPx(pageSettings);
-
   function buildBodyMaterialization(pageElements: BuilderElement[], settings: PageSettings) {
     const body = pageElements.filter((item) => (item.region ?? 'body') === 'body');
     const tablePlans = new Map<string, ReturnType<typeof paginateDynamicTable>>();
@@ -1222,7 +1218,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
             ))}
           </div>
           <div className="section-title document-tree"><span>Pages</span><button className="page-add-mini" onClick={addPage} title="Add page"><Plus size={14}/></button></div>
-          <div className="page-tree">{pages.map((page, index) => <button key={page.id} className={page.id === activePageId ? "tree-row selected" : "tree-row"} onClick={() => { setActivePageId(page.id); setSelectedId(null); setActivePreviewPageIndex(0); }}><FileText size={15}/><span>{page.name}</span><small>{page.settings.preset}</small></button>)}</div>
+          <div className="page-tree">{pages.map((page, _index) => <button key={page.id} className={page.id === activePageId ? "tree-row selected" : "tree-row"} onClick={() => { setActivePageId(page.id); setSelectedId(null); setActivePreviewPageIndex(0); }}><FileText size={15}/><span>{page.name}</span><small>{page.settings.preset}</small></button>)}</div>
           <div className="page-tree-actions"><button onClick={duplicatePage} title="Duplicate page">⧉</button><button onClick={() => movePage(-1)} title="Move page up">↑</button><button onClick={() => movePage(1)} title="Move page down">↓</button><button className="danger-lite" onClick={deletePage} disabled={pages.length <= 1} title="Delete page">×</button></div>
           <div className="section-title document-tree"><span>Elements</span></div>
           <div className="element-tree">
@@ -1320,7 +1316,7 @@ function sanitizeExportFileName(value: string) {
   return cleaned || 'Document';
 }
 
-function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
+function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
   const drag = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const resize = useRef<{ sx: number; sy: number; width: number; height: number } | null>(null);
   const scale = zoom / 100;
@@ -1391,7 +1387,7 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
   </div>;
 }
 
-function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
+function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
   const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
   if (item.conditionEnabled && item.conditionField && !evaluateElementCondition(item, resolveBuilderField(item.conditionField))) return null;
   const bound = item.binding ? resolveBuilderField(item.binding) : undefined;
@@ -1846,7 +1842,7 @@ function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof active
 }
 
 function Inspector({ tab, onInspectorTab, selected, source, record, formulaElements, formulaAggregateRows, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
-  tab: InspectorTab; onInspectorTab: (tab: InspectorTab) => void; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
+  tab: InspectorTab; onInspectorTab: (tab: InspectorTab) => void; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
   onPageSettings: (patch: Partial<PageSettings>) => void; onPageName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void;
   onUpdate: (patch: Partial<BuilderElement>) => void; onDelete: () => void; onDuplicate: () => void; onArrange: (action: 'front' | 'forward' | 'backward' | 'back') => void; onMoveFlow: (direction: -1 | 1) => void; onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; relativeElements: BuilderElement[]; onSetInsertRegion: (region: PageRegion) => void; onEditTableConfiguration: (elementId: string) => void;
 }) {
@@ -1893,7 +1889,7 @@ function Inspector({ tab, onInspectorTab, selected, source, record, formulaEleme
   if (selected?.type === 'qr' && tab === 'formatting') return <QrFormattingPanel selected={selected} onUpdate={onUpdate}/>;
   if (selected?.type === 'barcode' && tab === 'formatting') return <BarcodeFormattingPanel selected={selected} onUpdate={onUpdate}/>;
   if (selected?.type === 'signature' && tab === 'formatting') return <ImageFormattingPanel selected={selected} onUpdate={onUpdate}/>;
-  if (tab === 'binding' && selected?.type !== 'image' && selected?.type !== 'signature') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && selected.type !== 'image' && selected.type !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
+  if (tab === 'binding' && (selected?.type as string) !== 'image' && (selected?.type as string) !== 'signature') return <div className="inspector-body"><h3>Dynamic Field</h3><p>{selected ? 'Pick an imported field or reusable Formula Field. Formula Fields are available everywhere in the document.' : 'Select an element to use a Dynamic Field.'}</p><label>Whole element binding<select disabled={!selected || dynamicTokenFields.length === 0 || selected.type === 'formula'} value={selected?.binding ?? ''} onChange={(e) => onUpdate({ binding: e.target.value || undefined })}><option value="">No whole-element binding</option>{source?.fields.length ? <optgroup label="Imported Fields">{source.fields.map((field) => <option key={`src:${field.name}`} value={field.name}>{field.label} ({field.type})</option>)}</optgroup> : null}{formulaTokenFieldsForElements(formulaElements).length ? <optgroup label="Formula Fields">{formulaTokenFieldsForElements(formulaElements).map((field) => <option key={`formula:${field.name}`} value={field.name}>{field.label}</option>)}</optgroup> : null}</select></label>{selected?.binding && <><div className="binding-preview">{'{{'}{selected.binding}{'}}'}</div><div className="binding-value"><small>Preview value</small><strong>{displayValue(valueForBuilderField(record, source?.fields ?? [], formulaElements, selected.binding, formulaAggregateRows)) || 'Empty / null'}</strong></div></>}{selected && selected.type !== 'table' && (selected.type as string) !== 'image' && (selected.type as string) !== 'signature' && selected.type !== 'divider' && selected.type !== 'formula' ? <TokenInsertPanel fields={dynamicTokenFields} value={selected.text} onChange={(text) => onUpdate({ text })}/> : null}</div>;
   if (tab === 'formatting' && selected?.type === 'text') return <TextFormattingPanel selected={selected} onUpdate={onUpdate}/>;
   if (tab === 'formatting' && (selected?.type === 'image' || selected?.type === 'signature')) return <ImageFormattingPanel selected={selected} onUpdate={onUpdate}/>;
   if (tab === 'formatting') return <div className="inspector-body"><h3>Formatting</h3>{!selected ? <p>Select an element to edit document-safe formatting.</p> : <><label>Font family<select value={selected.fontFamily ?? 'Arial'} onChange={(e) => onUpdate({ fontFamily: e.target.value })}><option>Arial</option><option>Helvetica</option><option>Verdana</option><option>Tahoma</option><option>Georgia</option><option>Times New Roman</option><option>Courier New</option></select></label><div className="property-grid"><label>Font size<input type="number" min="6" max="144" value={selected.fontSize} onChange={(e) => onUpdate({ fontSize: Math.max(6, Number(e.target.value) || 12) })}/></label><label>Line height<input type="number" min="0.8" max="3" step="0.05" value={selected.lineHeight ?? 1.25} onChange={(e) => onUpdate({ lineHeight: Math.min(3, Math.max(0.8, Number(e.target.value) || 1.25)) })}/></label></div><div className="text-style-actions"><button type="button" className={(selected.fontWeight ?? 400) >= 700 ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ fontWeight: (selected.fontWeight ?? 400) >= 700 ? 400 : 700 })}><b>B</b></button><button type="button" className={selected.italic ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ italic: !selected.italic })}><i>I</i></button><button type="button" className={selected.underline ? 'secondary compact active' : 'secondary compact'} onClick={() => onUpdate({ underline: !selected.underline })}><u>U</u></button></div><label>Text color<input type="color" value={selected.color} onChange={(e) => onUpdate({ color: e.target.value })}/></label>{selected.type === 'shape' && <label>Fill<input type="color" value={selected.fill} onChange={(e) => onUpdate({ fill: e.target.value })}/></label>}<div className="align-actions"><button className={selected.textAlign === 'left' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'left' })}><AlignLeft size={16}/></button><button className={selected.textAlign === 'center' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'center' })}><AlignCenter size={16}/></button><button className={selected.textAlign === 'right' ? 'active' : ''} onClick={() => onUpdate({ textAlign: 'right' })}><AlignRight size={16}/></button></div><p className="table-cell-help">Typography applies to static text and every resolved dynamic token in this content block.</p></>}</div>;
@@ -2099,7 +2095,7 @@ function conditionOperatorLabel(op: NonNullable<BuilderElement['conditionOperato
 function evaluateElementCondition(item: BuilderElement, rawValue: unknown) {
   const op=item.conditionOperator??'equals';
   const expected=item.conditionValue??'';
-  const actual=displayValue(rawValue).trim();
+  const actual=displayValue(rawValue as NormalizedValue | undefined).trim();
   if(op==='isEmpty')return !actual;
   if(op==='isNotEmpty')return Boolean(actual);
   if(op==='contains')return actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
@@ -2510,7 +2506,6 @@ function MixedContentEditor({ label, value, fields, onChange, compact = false, p
   const insert = (token: string) => {
     const textarea = textareaRef.current;
     const start = textarea?.selectionStart ?? value.length;
-    const end = textarea?.selectionEnd ?? start;
     const next = insertTokenAtSelection(value, token, textarea);
     onChange(next);
     requestAnimationFrame(() => {
@@ -2618,7 +2613,7 @@ function GlobalBandEditor({ region, settings, onPageSettings, onSetInsertRegion,
 }
 
 
-function TableElementProperties({ selected, elements, pageSettings, sources, activeSourceId, formulaFields, onUpdate, onMove, onRowAction, onEditConfiguration, onDuplicate, onDelete }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; onEditConfiguration: () => void; onDuplicate: () => void; onDelete: () => void }) {
+function TableElementProperties({ selected, elements, pageSettings, sources, activeSourceId, formulaFields, onUpdate, onMove, onRowAction, onEditConfiguration, onDuplicate, onDelete }: { selected: BuilderElement; elements: BuilderElement[]; pageSettings: PageSettings; sources: BuilderDataState['sources']; activeSourceId?: string | null; formulaFields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void; onMove: (direction: -1|1) => void; onRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; onEditConfiguration: () => void; onDuplicate: () => void; onDelete: () => void }) {
   if (!selected.table) return null;
   const isFlow = (selected.layoutMode ?? 'floating') === 'flow';
   return <div className="inspector-body table-ux3-panel">
@@ -2633,7 +2628,7 @@ function TableElementProperties({ selected, elements, pageSettings, sources, act
   </div>;
 }
 
-function TableProperties({ table, view = 'properties', sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; view?: 'properties'|'columns'|'rows'|'formatting'; sources: BuilderDataState['sources']; activeSourceId?: string; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
+function TableProperties({ table, view = 'properties', sources, activeSourceId, formulaFields, onUpdate, onEditConfiguration }: { table: TableDefinition; view?: 'properties'|'columns'|'rows'|'formatting'; sources: BuilderDataState['sources']; activeSourceId?: string | null; formulaFields: TemplateTokenField[]; onUpdate: (table: TableDefinition) => void; onEditConfiguration: () => void }) {
   const cell = findTableCell(table, table.selectedCellId);
   const cellLocation = findTableCellLocation(table, table.selectedCellId);
   const selectedColumn = cellLocation ? table.columns[Math.min(cellLocation.columnIndex, table.columns.length - 1)] ?? null : null;
@@ -2914,8 +2909,8 @@ function formulaTokenFieldsForElements(formulas: BuilderElement[]): TemplateToke
   });
 }
 
-function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[]): Array<Record<string, unknown>> {
-  const rows = source.records.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object');
+function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[]): NormalizedRecord[] {
+  const rows = source.records;
   if (!record || typeof record !== 'object') return rows;
   const identityTable = elements.find((item) => {
     if (item.type !== 'table' || item.table?.mode !== 'dynamic' || item.table.binding?.sourceId !== source.id) return false;
@@ -2925,7 +2920,7 @@ function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof acti
   const parentKeys = identityTable?.table?.binding?.parentKeys?.filter(Boolean)
     ?? (identityTable?.table?.binding?.parentKey ? [identityTable.table.binding.parentKey] : []);
   if (parentKeys.length === 0) return rows;
-  const same = (left: unknown, right: unknown) => displayValue(left).trim() === displayValue(right).trim();
+  const same = (left: unknown, right: unknown) => displayValue(left as NormalizedValue | undefined).trim() === displayValue(right as NormalizedValue | undefined).trim();
   return rows.filter((row) => parentKeys.every((key) => same(valueForField(row, key), valueForField(record, key))));
 }
 
@@ -2938,7 +2933,7 @@ function formulaAggregateNumericValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formulaAggregateValue(rows: Array<Record<string, unknown>>, field: string, operation: 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX'): number {
+function formulaAggregateValue(rows: NormalizedRecord[], field: string, operation: 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX'): number {
   const values = rows.map((row) => valueForField(row, field)).filter((value) => value !== undefined && value !== null && value !== '');
   if (operation === 'COUNT') return values.length;
   const numeric = values.map(formulaAggregateNumericValue).filter((value): value is number => value != null);
@@ -2966,7 +2961,7 @@ function unwrapWholeFormulaFunction(expression: string, functionNames: string[])
   return { name, inner: trimmed.slice(open + 1, -1).trim() };
 }
 
-function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: Array<Record<string, unknown>>): string | number | null {
+function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: NormalizedRecord[]): string | number | null {
   if (!expression?.trim()) return null;
 
   // DB-4.6 Number to Words: keep conversion at the document-formula layer so the
@@ -2989,7 +2984,7 @@ function evaluateDocumentFormulaExpression(expression: string | undefined, scala
   return evaluateTableFormula(replaced, scalarContext);
 }
 
-function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>, excludeId?: string) {
+function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: NormalizedRecord[], excludeId?: string) {
   const context: Record<string, unknown> = record && typeof record === 'object' ? { ...(record as Record<string, unknown>) } : {};
   const usable = formulas.filter((item) => item.id !== excludeId && item.formulaName?.trim() && item.formulaExpression?.trim());
   const unresolved = new Set(usable.map((item) => item.id));
@@ -3009,12 +3004,12 @@ function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, fo
   return context;
 }
 
-function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>) {
+function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: NormalizedRecord[]) {
   if (item.type !== 'formula' || !item.formulaExpression?.trim()) return null;
   return evaluateDocumentFormulaExpression(item.formulaExpression, buildDocumentFormulaContext(record, formulas, aggregateRows, item.id), aggregateRows);
 }
 
-function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>): Record<string, unknown> {
+function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: NormalizedRecord[]): Record<string, unknown> {
   const context = buildDocumentFormulaContext(record, formulas, aggregateRows);
   const values: Record<string, unknown> = {};
   for (const formula of formulas) {
@@ -3026,7 +3021,7 @@ function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas
   return values;
 }
 
-function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string, aggregateRows: Array<Record<string, unknown>>) {
+function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string, aggregateRows: NormalizedRecord[]) {
   const formula = formulas.find((item) => item.formulaName?.trim().toLocaleLowerCase() === field.trim().toLocaleLowerCase());
   if (formula) return evaluateDocumentFormulaElement(formula, record, formulas, aggregateRows);
   if (!record) return undefined;
