@@ -1,7 +1,8 @@
 # Source Baseline
 
-- Repository: https://github.com/Akash76803/pdfDocGen
-- Git baseline used for DB-6A: `7ddffa1463388ed30810a6b65140a94274b71c76`
-- Baseline health: GitHub Actions Code Health run `34959535788` — install, typecheck, test and build PASS.
-- Latest-main cleanup removals from commit `7ddffa1...` were reconciled before DB-6A work.
-- DB-6A changes are intentionally not pushed by this package; this ZIP is the downloadable implementation candidate for the next phase.
+Phase: DB-6B — Document Generation REST API (foundation)
+Git source of truth before this phase: `Akash76803/pdfDocGen` main commit `74da75458369dabcc1cf57335ed250bd7d9de81a`.
+
+DB-6A at that commit passed GitHub Code Health: dependency install, typecheck, tests and build.
+
+DB-6B additions in this ZIP are not yet committed to Git. The API transport/contract and generation-service boundary are implemented. Production headless renderer adapter wiring remains pending before DB-6B can be marked COMPLETE.

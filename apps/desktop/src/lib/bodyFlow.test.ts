@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { contentBoundsPx, defaultPageSettings } from './pageModel.ts';
-import { layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, shouldCommitMeasuredFlowHeight } from './bodyFlow.ts';
+import { layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights } from './bodyFlow.ts';
 
 describe('body flow layout', () => {
   it('pushes later flow blocks down when an earlier block grows', () => {
@@ -104,6 +104,18 @@ describe('materializeBodyFlowPages', () => {
     const projectedNext = projected.find((item) => item.id === next.id)!;
     expect(projectedNext.y).toBeGreaterThanOrEqual(projectedLeft.y + 150);
   });
+
+  it('synchronizes shared row height after one table grows and allows the row to shrink again', () => {
+    const left = { id: 'left-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 90 };
+    const right = { id: 'right-table-sync', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'row-sync', x: 0, y: 0, width: 300, height: 110 };
+    const grown = synchronizeFlowRowHeights([{ ...left, height: 220 }, right]) as Array<{ flowRowHeightPx?: number }>;
+    expect(grown[0].flowRowHeightPx).toBe(220);
+    expect(grown[1].flowRowHeightPx).toBe(220);
+    const shrunk = synchronizeFlowRowHeights(grown.map((item: any) => item.id === left.id ? { ...item, height: 80 } : item)) as Array<{ flowRowHeightPx?: number }>;
+    expect(shrunk[0].flowRowHeightPx).toBe(110);
+    expect(shrunk[1].flowRowHeightPx).toBe(110);
+  });
+
 });
 
 

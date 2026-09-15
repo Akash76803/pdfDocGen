@@ -54,6 +54,12 @@
     },
     {
       "path": "apps/desktop"
+    },
+    {
+      "path": "packages/generation-core"
+    },
+    {
+      "path": "apps/api"
     }
   ]
 }
