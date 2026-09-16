@@ -161,7 +161,7 @@ function createColumns(count: number): TableColumn[] {
   }));
 }
 
-function createRow(kind: TableRowKind, columns: number, index = 0): TableRow {
+function createRow(kind: TableRowKind, columns: number, _index = 0): TableRow {
   return {
     id: crypto.randomUUID(), kind, height: kind === 'header' ? 32 : 30,
     autoHeight: true, repeatOnEveryPage: kind === 'header', keepTogether: true,
@@ -367,7 +367,7 @@ export function groupedFinalSummaryConfigFromTable(table: TableDefinition): Grou
   const grouping = table.binding?.grouping;
   if (!grouping || table.customRows.length === 0) return defaultGroupedFinalSummaryConfig(grouping?.columns ?? []);
   const row = table.customRows[0];
-  const columns = grouping.columns.map((mapping, index): GroupedFinalSummaryColumn => {
+  const columns = grouping.columns.map((_mapping, index): GroupedFinalSummaryColumn => {
     const cell = row.cells[index];
     if (!cell) return { operation: 'blank' };
     if (cell.summaryMode === 'formula') return { operation: 'formula', formula: cell.summaryFormula ?? '' };
@@ -1341,7 +1341,7 @@ export function dynamicRows(
   record: NormalizedRecord | null,
   source?: BuilderDataSource | null,
   parentSource?: BuilderDataSource | null,
-): Array<{ key: string; value: unknown }> {
+): TablePaginationRuntimeRow[] {
   if (table.mode !== 'dynamic' || !table.binding?.repeatSource) return [];
 
   const raw: unknown = table.binding.sourceId && source?.id === table.binding.sourceId
@@ -1380,7 +1380,8 @@ export function dynamicRows(
   const rowKeys = configuredKeys(table.binding.rowKey, table.binding.rowKeys);
   return filtered.map((item, index) => {
     const configured = compositeKey(item, rowKeys);
-    return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: item };
+    const rec = (item && typeof item === 'object' && !Array.isArray(item) ? item : { value: item }) as NormalizedRecord;
+    return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: rec };
   });
 }
 

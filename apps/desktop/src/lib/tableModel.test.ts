@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableSummaryRows, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences } from './tableModel.ts';
+import { addCustomSummaryRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -329,7 +329,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     for (const page of pages) {
       expect(page.usedHeightPx).toBeLessThanOrEqual(page.availableHeightPx);
     }
-    expect(pages.at(-1)?.includeSummary).toBe(true);
+    expect(pages[pages.length - 1]?.includeSummary).toBe(true);
   });
 
 
@@ -372,7 +372,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     table.pagination.keepSummaryTogether = true;
     const rows = Array.from({ length: 14 }, (_, index) => ({ key: `row-${index}`, value: { id: index } as never }));
     const pages = paginateDynamicTable(table, rows, 220, 220);
-    expect(pages.at(-1)?.includeSummary).toBe(true);
+    expect(pages[pages.length - 1]?.includeSummary).toBe(true);
     expect(pages.slice(0, -1).every((page) => page.includeSummary === false)).toBe(true);
     expect(pages.flatMap((page) => page.runtimeRows)).toHaveLength(rows.length);
   });
@@ -569,7 +569,7 @@ describe('DB-6B Fix8 DISCOUNT formula parity', () => {
 
 describe('normalizeTableFormulaReferences', () => {
   it('brackets bare calculated-column references while preserving DISCOUNT function calls', () => {
-    const table = createDynamicTable([
+    const table = createDynamicTable(3, 'items', 1, undefined, [
       { label: 'Basic Value', field: 'Basic Value' },
       { label: 'Discount', field: 'Discount' },
       { label: 'Taxable', field: 'Taxable Value' },

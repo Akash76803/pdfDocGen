@@ -22,7 +22,7 @@ export async function buildExactPreviewDocx(
 }
 
 export function downloadDocx(bytes: Uint8Array, fileName: string) {
-  const blob = new Blob([bytes], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
+  const blob = new Blob([new Uint8Array(bytes)], { type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
