@@ -1,44 +1,45 @@
-# Current Document JSON Body Generator
+# Current Document API Request JSON Generator
 
-This feature prepares the current Template Builder document for the upcoming ERP/API integration layer.
+Template Builder → **More → JSON Body** now prepares a complete request for the headless REST API.
 
-## Where it is
-Template Builder top toolbar → **JSON Body**.
+## Output
+The primary textarea / **Copy Request** action returns a ready-to-send request for:
 
-## What it generates
-The modal scans every Builder Page and produces the external data body required by the current template:
-
-- whole-element bindings
-- `{{field}}` tokens inside text/shapes/QR/barcode content
-- Dynamic Table body bindings
-- Dynamic Table formula source dependencies
-- grouped-summary source fields
-- summary aggregate/formula source dependencies
-- Custom Table bindings
-- image/signature/media bindings
-- Parent / Document key fields
-
-Reusable **Formula Fields themselves are excluded** from the JSON payload because they are calculated by Document Builder. If a Formula Field depends on imported/source fields, those source fields remain part of the request contract because ERP must provide their inputs.
-
-## Shape
-Document/header fields are emitted at the root. Dot-path bindings are converted into nested JSON objects. Repeating Dynamic Table inputs are emitted under `items[]` and the currently selected document's matching source rows are used as sample values.
-
-Example:
+`POST /api/v1/documents/generate`
 
 ```json
 {
-  "InvoiceNo": "INV-1001",
-  "Customer": {
-    "Name": "ABC Traders"
+  "templateId": "<active-template-id>",
+  "output": {
+    "format": "pdf",
+    "fileName": "Tax-Invoice.pdf",
+    "renderMode": "native-auto"
   },
-  "items": [
-    {
-      "ProductName": "Product A",
-      "Qty": 2,
-      "Rate": 500
-    }
-  ]
+  "data": {
+    "invoiceNo": "INV-1001",
+    "customerAccountName": "ABC Traders",
+    "items": [
+      {
+        "productProductsName": "Product A",
+        "quantity": 2,
+        "unitPrice": 500
+      }
+    ]
+  }
 }
 ```
 
-The modal also shows document-field count, item-field count, current item-row count, excluded Formula Fields, warnings, **Copy JSON**, and **Download .json**.
+## API-safe paths
+Imported labels are normalized to stable camelCase API paths. The same normalization is used by the desktop-to-headless template adapter, so copied request data and template bindings stay aligned.
+
+Examples:
+- `Customer: Account Name` → `customerAccountName`
+- `Final Amount` → `finalAmount`
+- `GST %` → `gstPercent`
+- `TCS %` → `tcsPercent`
+- `Product: Products Name` → `productProductsName`
+- `Unit Price` → `unitPrice`
+
+Dot notation remains nested (`Customer.Name` → `customer.name`). Formula outputs remain excluded because Document Builder calculates them internally.
+
+The modal still provides the DB-6A Template Input Contract / schema separately.

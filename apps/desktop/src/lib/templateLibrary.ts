@@ -1,3 +1,5 @@
+import { deleteTemplateFile, persistTemplateFile, readLocalTemplateFiles } from './templateFileStore.ts';
+
 export const TEMPLATE_STORAGE_KEY = 'document-builder.template.db2.v1';
 export const TEMPLATE_LIBRARY_KEY = 'document-builder.template-library.db2fix2.v1';
 export const ACTIVE_TEMPLATE_ID_KEY = 'document-builder.template-library.active-id.v1';
@@ -90,6 +92,7 @@ export function migrateLegacyTemplateToLibrary(storage: Storage): TemplateLibrar
   storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify([entry]));
   storage.setItem(ACTIVE_TEMPLATE_ID_KEY, entry.id);
   notifyLibraryChanged(storage);
+  void persistTemplateFile(entry);
   return [entry];
 }
 
@@ -119,6 +122,7 @@ export function saveTemplateToLibrary(storage: Storage, payload: TemplateLibrary
   // Generate and older Builder code therefore remain backward compatible.
   storage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(entry.payload));
   notifyLibraryChanged(storage);
+  void persistTemplateFile(entry);
   return entry;
 }
 
@@ -205,6 +209,7 @@ export function updateTemplateMetadata(storage: Storage, id: string, patch: { na
   storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify(result));
   if (storage.getItem(ACTIVE_TEMPLATE_ID_KEY) === id) storage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(next.payload));
   notifyLibraryChanged(storage);
+  void persistTemplateFile(next);
   return next;
 }
 
@@ -224,6 +229,7 @@ export function duplicateTemplate(storage: Storage, id: string): TemplateLibrary
   };
   storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify([entry, ...readTemplateLibrary(storage)]));
   notifyLibraryChanged(storage);
+  void persistTemplateFile(entry);
   return entry;
 }
 
@@ -243,7 +249,9 @@ export function createTemplateVersion(storage: Storage, id: string): TemplateLib
   const next = library.map((item) => item.id === copy.id ? { ...item, name: current.name, version, payload: { ...item.payload, name: current.name, version } } : item);
   storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify(next));
   notifyLibraryChanged(storage);
-  return next.find((item) => item.id === copy.id) ?? null;
+  const versioned = next.find((item) => item.id === copy.id) ?? null;
+  if (versioned) void persistTemplateFile(versioned);
+  return versioned;
 }
 
 export function removeTemplateFromLibrary(storage: Storage, id: string) {
@@ -259,6 +267,30 @@ export function removeTemplateFromLibrary(storage: Storage, id: string) {
     }
   }
   notifyLibraryChanged(storage);
+  void deleteTemplateFile(id);
+}
+
+export async function syncTemplateLibraryFromLocalFiles(storage: Storage): Promise<TemplateLibraryEntry[]> {
+  const cachedEntries = readTemplateLibrary(storage);
+  const localEntries = await readLocalTemplateFiles();
+  const merged = new Map<string, TemplateLibraryEntry>();
+  for (const entry of cachedEntries) merged.set(entry.id, entry);
+  for (const entry of localEntries) {
+    const current = merged.get(entry.id);
+    if (!current || Date.parse(entry.updatedAt) >= Date.parse(current.updatedAt)) merged.set(entry.id, entry);
+  }
+  const result = Array.from(merged.values()).sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify(result));
+  const activeId = storage.getItem(ACTIVE_TEMPLATE_ID_KEY);
+  const active = (activeId ? result.find((entry) => entry.id === activeId) : undefined) ?? result[0];
+  if (active) {
+    storage.setItem(ACTIVE_TEMPLATE_ID_KEY, active.id);
+    storage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(active.payload));
+  }
+  // Backfill templates created before DB-6B Fix2 into durable local JSON files.
+  await Promise.allSettled(result.map((entry) => persistTemplateFile(entry)));
+  notifyLibraryChanged(storage);
+  return result;
 }
 
 export function templatePageCount(entry: TemplateLibraryEntry): number {

@@ -12,7 +12,9 @@
   "tauri": {
     "bundle": {
       "active": true,
-      "targets": ["nsis"],
+      "targets": [
+        "nsis"
+      ],
       "identifier": "com.documenttool.app",
       "icon": [
         "icons/32x32.png",
@@ -29,7 +31,12 @@
         "readFile": true,
         "writeFile": true,
         "exists": true,
-        "scope": ["$APPCONFIG/**", "$APPDATA/**"]
+        "scope": [
+          "$APPCONFIG/**",
+          "$APPDATA/**"
+        ],
+        "createDir": true,
+        "removeFile": true
       },
       "dialog": {
         "open": true,

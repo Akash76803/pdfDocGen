@@ -1,7 +1,7 @@
 import type { Alignment,BlockLayout,BorderStyle,CellPadding,BoxStyle,CellStyle,RequiredBlockLayout,RequiredBorderStyle,RequiredBoxStyle,RequiredCellPadding,RequiredCellStyle,RequiredTextStyle,TextStyle } from '@document-tool/contracts';
 
 export const DEFAULT_TEXT_STYLE:RequiredTextStyle={fontFamily:'Arial',fontSize:12,bold:false,italic:false,underline:false,textColor:'#000000',backgroundColor:'#FFFFFF',alignment:'LEFT',lineHeight:1.2};
-export const DEFAULT_BLOCK_LAYOUT:RequiredBlockLayout={widthPercent:100,alignment:'LEFT',marginTop:0,marginRight:0,marginBottom:0,marginLeft:0,keepTogether:false,breakBefore:false,breakAfter:false};
+export const DEFAULT_BLOCK_LAYOUT:RequiredBlockLayout={widthPercent:100,alignment:'LEFT',marginTop:0,marginRight:0,marginBottom:0,marginLeft:0,keepTogether:false,breakBefore:false,breakAfter:false,positionMode:'FLOW',xMm:0,yMm:0,widthMm:0,heightMm:0,pageIndex:0};
 export const DEFAULT_BORDER_STYLE:RequiredBorderStyle={width:1,color:'#CBD5E1',style:'SOLID'};
 export const DEFAULT_CELL_PADDING:RequiredCellPadding={top:2,right:2,bottom:2,left:2};
 export const DEFAULT_BOX_STYLE:RequiredBoxStyle={widthMode:'AUTO',widthPercent:100,widthMm:0,heightMode:'AUTO',heightMm:0,minHeightMm:0,overflow:'EXPAND',backgroundColor:'#FFFFFF',border:{width:1,color:'#CBD5E1',style:'SOLID'},borderRadiusMm:0,padding:{top:2,right:2,bottom:2,left:2},horizontalAlignment:'LEFT',verticalAlignment:'TOP'};

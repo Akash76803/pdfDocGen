@@ -73,12 +73,23 @@ class FormulaParser {
   }
   private func(){
     const name=(this.take() as Extract<Token,{kind:'name'}>).value;
-    const allowed=['SUM','AVG','MIN','MAX','COUNT','FIRST','ROUND']; if(!allowed.includes(name)) throw new Error(`Unsupported formula function ${name}.`);
+    const allowed=['SUM','AVG','MIN','MAX','COUNT','FIRST','ROUND','DISCOUNT']; if(!allowed.includes(name)) throw new Error(`Unsupported formula function ${name}.`);
     this.expect('lparen');
     if(name==='ROUND'){
       const value=this.expr(); let digits=0;
       if(this.peek()?.kind==='comma'){this.take();digits=Math.max(0,Math.min(8,Math.trunc(this.expr())));}
       this.expect('rparen'); const f=10**digits; return Math.round((value+Number.EPSILON)*f)/f;
+    }
+    if(name==='DISCOUNT'){
+      const base=this.expr();
+      if(this.peek()?.kind!=='comma') throw new Error('DISCOUNT requires amount and discount rate.');
+      this.take();
+      const rateInput=this.expr();
+      this.expect('rparen');
+      // Builder percentage fields are normally stored as fractions (0.20 = 20%).
+      // Accept whole-percent input too (20 = 20%) for integration compatibility.
+      const rate=Math.abs(rateInput)>1 ? rateInput/100 : rateInput;
+      return base-(base*rate);
     }
     const ref=this.take(); if(!ref || ref.kind!=='ref') throw new Error(`${name} requires a field token.`);
     this.expect('rparen'); return this.resolveBinding(ref.id,name as any);

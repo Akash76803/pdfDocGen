@@ -1,0 +1,326 @@
+import { toApiSafePath, type DisplayFormatDefinition, type TemplateBlock, type TemplateDefinition, type TextStyle } from '@document-tool/contracts';
+
+type UnknownRecord = Record<string, unknown>;
+type DesktopTemplateEntry = { id:string; name?:string; version?:number; payload:UnknownRecord };
+type FormulaSpec = { id:string; name:string; alias:string; expression:string };
+type GroupedTableSpec = {
+  tableId: string;
+  sourcePath: string;
+  groupBy: string[];
+  columns: Array<{
+    field?: string;
+    operation: string;
+    outputKey: string;
+    label?: string;
+    formula?: string;
+  }>;
+};
+
+const PX_TO_MM = 25.4 / 96;
+const PX_TO_PT = 72 / 96;
+const pxToMm = (value: unknown, fallback = 0) => { const number=Number(value); return Number.isFinite(number)?number*PX_TO_MM:fallback; };
+const numberValue = (value: unknown, fallback: number) => { const number=Number(value); return Number.isFinite(number)?number:fallback; };
+const stringValue = (value: unknown, fallback = '') => typeof value === 'string' ? value : fallback;
+const recordValue = (value: unknown):UnknownRecord => value && typeof value==='object' && !Array.isArray(value) ? value as UnknownRecord : {};
+const arrayValue = (value: unknown):UnknownRecord[] => Array.isArray(value) ? value.filter((item):item is UnknownRecord => !!item && typeof item==='object' && !Array.isArray(item)) : [];
+const align = (value: unknown):'LEFT'|'CENTER'|'RIGHT' => value==='center'?'CENTER':value==='right'?'RIGHT':'LEFT';
+const isIdentifierBoundary = (value:string|undefined) => !value || !/[A-Za-z0-9_.$]/.test(value);
+
+function replaceBareCalculatedReferences(expression:string, references:Array<{name:string;path:string}>, replace:(name:string,path:string)=>string):string {
+  if(!expression.trim()||!references.length)return expression;
+  const candidates=[...references].filter((ref)=>ref.name.trim()).sort((a,b)=>b.name.length-a.name.length);
+  let output=''; let index=0;
+  while(index<expression.length){
+    if(expression.startsWith('{{',index)){
+      const end=expression.indexOf('}}',index+2); if(end>=0){output+=expression.slice(index,end+2);index=end+2;continue;}
+    }
+    let matched=false;
+    for(const ref of candidates){
+      if(expression.slice(index,index+ref.name.length).toLocaleLowerCase()!==ref.name.toLocaleLowerCase())continue;
+      if(!isIdentifierBoundary(index>0?expression[index-1]:undefined)||!isIdentifierBoundary(expression[index+ref.name.length]))continue;
+      let lookahead=index+ref.name.length; while(/\s/.test(expression[lookahead]??''))lookahead++;
+      if(expression[lookahead]==='(')continue;
+      output+=replace(ref.name,ref.path); index+=ref.name.length; matched=true; break;
+    }
+    if(!matched){output+=expression[index];index++;}
+  }
+  return output;
+}
+
+const safeAlias = (value:string) => toApiSafePath(value) || `formula${Math.random().toString(36).slice(2,8)}`;
+const groupedSourcePath = (tableId:string) => `__db5g_group_${safeAlias(tableId)}`;
+
+function buildFormulaState(pages:UnknownRecord[]) {
+  const specs:FormulaSpec[]=[]; const map=new Map<string,string>();
+  for (const page of pages) for (const element of arrayValue(page.elements)) {
+    if (stringValue(element.type)!=='formula') continue;
+    const name=stringValue(element.formulaName).trim(); const expression=stringValue(element.formulaExpression).trim();
+    if (!name || !expression) continue;
+    const alias=safeAlias(name); specs.push({id:stringValue(element.id,alias),name,alias,expression}); map.set(name.toLocaleLowerCase(),alias);
+  }
+  return {specs,map};
+}
+
+function normalizeBinding(raw:string, formulas:Map<string,string>):string {
+  const value=raw.trim(); if(!value) return '';
+  const formula=formulas.get(value.toLocaleLowerCase()); if(formula) return `calc.${formula}`;
+  if(/^calc\./i.test(value)) return value;
+  if(/^(pageNumber|totalPages)$/i.test(value)) return value;
+  return toApiSafePath(value);
+}
+function normalizeTemplateTokens(text:string, formulas:Map<string,string>):string {
+  return String(text??'').replace(/\{\{([^{}\n]+)\}\}/g,(full,rawPath:string)=>{
+    const path=String(rawPath).trim(); if(!path)return full;
+    const normalized=normalizeBinding(path,formulas); return normalized?`{{${normalized}}}`:full;
+  });
+}
+function textStyle(element:UnknownRecord):TextStyle {
+  const font=stringValue(element.fontFamily,'Arial');
+  const safeFont=['Arial','Calibri','Times New Roman','Georgia','Verdana','Tahoma','Courier New','Segoe UI','system-ui','sans-serif','serif','monospace'].includes(font)?font:'Arial';
+  return {fontFamily:safeFont as TextStyle['fontFamily'],fontSize:Math.max(5,numberValue(element.fontSize,14)*PX_TO_PT),bold:numberValue(element.fontWeight,400)>=600,italic:Boolean(element.italic),underline:Boolean(element.underline),textColor:stringValue(element.color,'#111827'),backgroundColor:element.fill&&element.fill!=='transparent'?stringValue(element.fill):undefined,alignment:align(element.textAlign),lineHeight:numberValue(element.lineHeight,1.2)};
+}
+function cellTextStyle(cell:UnknownRecord):TextStyle|undefined {
+  const style=recordValue(cell.style); if(!Object.keys(style).length)return undefined;
+  return {fontSize:Math.max(5,numberValue(style.fontSize,12)*PX_TO_PT),bold:Boolean(style.bold),textColor:stringValue(style.color,'#111827'),backgroundColor:stringValue(style.background,'#FFFFFF'),alignment:align(style.align)};
+}
+function absoluteLayout(element:UnknownRecord,pageIndex:number,breakBefore=false){
+  return {widthPercent:Math.max(1,Math.min(100,numberValue(element.flowWidthPercent,100))),alignment:align(element.textAlign),marginTop:0,marginRight:0,marginBottom:0,marginLeft:0,keepTogether:stringValue(element.type)!=='table',breakBefore,positionMode:'ABSOLUTE' as const,xMm:pxToMm(element.x),yMm:pxToMm(element.y),widthMm:Math.max(0.1,pxToMm(element.width,10)),heightMm:Math.max(0.1,pxToMm(element.height,5)),pageIndex};
+}
+
+function toDisplayFormat(type?:string,formatInput?:unknown):DisplayFormatDefinition|undefined{
+  const format=recordValue(formatInput);
+  if(!type||type==='text')return undefined;
+  if(type==='number'||type==='decimal')return {type:'NUMBER',decimals:type==='number'?0:numberValue(format.decimals,2),useGrouping:format.thousandsSeparator!==false};
+  if(type==='currency')return {type:'CURRENCY',decimals:numberValue(format.decimals,2),useGrouping:format.thousandsSeparator!==false,currencyCode:stringValue(format.currencyCode),currencySymbol:stringValue(format.currencySymbol)};
+  if(type==='percentage')return {type:'PERCENT',decimals:numberValue(format.decimals,2),percentInputMode:format.percentInputMode==='whole'?'WHOLE':'FRACTION'};
+  if(type==='date')return {type:'DATE',dateStyle:'SHORT'};
+  if(type==='datetime')return {type:'DATETIME',dateStyle:'SHORT'};
+  if(type==='checkbox')return {type:'BOOLEAN',trueLabel:stringValue(format.trueValue),falseLabel:stringValue(format.falseValue)};
+  return undefined;
+}
+
+function footerCellValue(cell:UnknownRecord,columns:UnknownRecord[],bodyCells:UnknownRecord[],formulas:Map<string,string>,sourcePath:string):Record<string,unknown> {
+  const summaryMode=stringValue(cell.summaryMode);
+  if(summaryMode==='formula'&&stringValue(cell.summaryFormula).trim()){
+    const bindings:Array<{id:string;label:string;path:string;sourceField:string;targetPath:string;sourcePath:string}>=[];
+    let idx=0;
+    const converted=stringValue(cell.summaryFormula).replace(/\[([^\]]+)\]/g,(_m,nameRaw:string)=>{
+      const name=nameRaw.trim();
+      const colIndex=columns.findIndex((c)=>
+        stringValue(c.label).trim().toLocaleLowerCase()===name.toLocaleLowerCase()||
+        stringValue(c.key).trim().toLocaleLowerCase()===name.toLocaleLowerCase()||
+        stringValue(c.id).trim().toLocaleLowerCase()===name.toLocaleLowerCase()
+      );
+      const col=colIndex>=0?columns[colIndex]:undefined;
+      const bodyCell=colIndex>=0?bodyCells[colIndex]:undefined;
+      const rawPath=stringValue(bodyCell?.binding)||stringValue(col?.key)||name;
+      const path=normalizeBinding(rawPath,formulas)||toApiSafePath(rawPath);
+      const id=`f${idx++}`;
+      bindings.push({id,label:name,path,sourceField:name,targetPath:path,sourcePath});
+      return `{{${id}}}`;
+    });
+    return {operation:'FORMULA',expression:converted,formulaBindings:bindings,sourcePath};
+  }
+  if(summaryMode==='aggregate') {
+    const agg=recordValue(cell.aggregate);
+    const op=stringValue(agg.operation,'sum').toUpperCase();
+    const field=stringValue(agg.field);
+    const colIndex=columns.findIndex((c)=>
+      stringValue(c.label).trim().toLocaleLowerCase()===field.trim().toLocaleLowerCase()||
+      stringValue(c.key).trim().toLocaleLowerCase()===field.trim().toLocaleLowerCase()||
+      stringValue(c.id).trim().toLocaleLowerCase()===field.trim().toLocaleLowerCase()
+    );
+    const col=colIndex>=0?columns[colIndex]:undefined;
+    const bodyCell=colIndex>=0?bodyCells[colIndex]:undefined;
+    const rawPath=stringValue(bodyCell?.binding)||stringValue(col?.key)||field;
+    const path=normalizeBinding(rawPath,formulas)||toApiSafePath(rawPath);
+    return {operation:op,path,sourceField:field,targetPath:path,sourcePath};
+  }
+  if(stringValue(cell.valueMode)==='binding'&&stringValue(cell.binding)){
+    return {operation:'FIELD',path:normalizeBinding(stringValue(cell.binding),formulas)||stringValue(cell.binding)};
+  }
+  return {operation:'STATIC',staticValue:normalizeTemplateTokens(stringValue(cell.content),formulas)};
+}
+
+function tableBlock(element:UnknownRecord,formulas:Map<string,string>,pageIndex:number,groupedTablesOut:GroupedTableSpec[]):TemplateBlock|null {
+  const table=recordValue(element.table); if(!Object.keys(table).length)return null;
+  const columns=arrayValue(table.columns); if(!columns.length)return null;
+  const layout=absoluteLayout(element,pageIndex);
+  const elementId=stringValue(element.id,`table-${Math.random()}`);
+
+  // Custom static table mode
+  if(stringValue(table.mode)==='custom'){
+    const rows=arrayValue(table.rows).length?arrayValue(table.rows):arrayValue(table.customRows);
+    const cells:any[]=[];
+    rows.forEach((row,rowIndex)=>arrayValue(row.cells).forEach((cell,columnIndex)=>{
+      let content:any;
+      if(stringValue(cell.valueMode)==='binding'&&stringValue(cell.binding)){
+        content={type:'FIELD',path:normalizeBinding(stringValue(cell.binding),formulas),style:cellTextStyle(cell)};
+      } else {
+        content={type:'TEXT',text:normalizeTemplateTokens(stringValue(cell.content),formulas),style:cellTextStyle(cell)};
+      }
+      cells.push({
+        id:stringValue(cell.id,`cell-${rowIndex}-${columnIndex}`),
+        row:rowIndex,
+        column:columnIndex,
+        rowSpan:numberValue(cell.rowSpan,1),
+        colSpan:numberValue(cell.colSpan,1),
+        content,
+        style:{
+          backgroundColor:stringValue(recordValue(cell.style).background,'#FFFFFF'),
+          border:{
+            width:numberValue(table.borderWidth,1),
+            color:stringValue(table.borderColor,'#CBD5E1'),
+            style:stringValue(table.borderStyle)==='none'?'NONE':stringValue(table.borderStyle)==='dashed'?'DASHED':'SOLID'
+          },
+          padding:{
+            top:pxToMm(recordValue(cell.style).padding,2),
+            right:pxToMm(recordValue(cell.style).padding,2),
+            bottom:pxToMm(recordValue(cell.style).padding,2),
+            left:pxToMm(recordValue(cell.style).padding,2)
+          },
+          verticalAlignment:stringValue(recordValue(cell.style).verticalAlign)==='bottom'?'BOTTOM':stringValue(recordValue(cell.style).verticalAlign)==='middle'?'CENTER':'TOP'
+        }
+      });
+    }));
+    return {
+      id:elementId,
+      type:'CUSTOM_TABLE',
+      rowCount:rows.length,
+      columnCount:columns.length,
+      cells,
+      tableStyle:{
+        showBorder:stringValue(table.borderStyle,'solid')!=='none'&&numberValue(table.borderWidth,1)>0,
+        widthPercent:layout.widthPercent,
+        border:{width:Math.max(.2,numberValue(table.borderWidth,1)),color:stringValue(table.borderColor,'#CBD5E1'),style:stringValue(table.borderStyle)==='dashed'?'DASHED':'SOLID'},
+        cellPadding:{top:pxToMm(table.defaultPadding,2),right:pxToMm(table.defaultPadding,2),bottom:pxToMm(table.defaultPadding,2),left:pxToMm(table.defaultPadding,2)}
+      },
+      layout
+    } as TemplateBlock;
+  }
+
+  // Check if grouped table
+  const binding=recordValue(table.binding);
+  const grouping=recordValue(binding.grouping);
+  const isGrouped=arrayValue(grouping.groupBy).length>0 && arrayValue(grouping.columns).length>0;
+  const sourcePath=isGrouped?groupedSourcePath(stringValue(table.id,elementId)):'items';
+
+  if(isGrouped){
+    groupedTablesOut.push({
+      tableId:stringValue(table.id,elementId),
+      sourcePath,
+      groupBy:arrayValue(grouping.groupBy).map((g)=>stringValue(g)),
+      columns:arrayValue(grouping.columns).map((col)=>({
+        field:stringValue(col.field),
+        operation:stringValue(col.operation),
+        outputKey:stringValue(col.outputKey),
+        label:stringValue(col.label),
+        formula:stringValue(col.formula),
+      }))
+    });
+  }
+
+  const headerRows=arrayValue(table.headerRows); const bodyRows=arrayValue(table.bodyRows); const headerCells=arrayValue(headerRows[0]?.cells); const bodyCells=arrayValue(bodyRows[0]?.cells);
+  const totalWidth=Math.max(1,columns.reduce((sum,column)=>sum+Math.max(1,numberValue(column.width,1)),0));
+  const calculatedRefs=columns.flatMap((column,index)=>{
+    const bodyCell=bodyCells[index]??{}; if(stringValue(bodyCell.valueMode)!=='formula')return [];
+    const headerCell=headerCells[index]??{}; const label=stringValue(headerCell.content)||stringValue(column.label)||stringValue(column.key,`column${index+1}`);
+    const path=normalizeBinding(label,formulas)||toApiSafePath(label);
+    return Array.from(new Set([label,stringValue(column.label),stringValue(column.key)].filter(Boolean))).map((name)=>({name,path}));
+  });
+
+  const mappedColumns=columns.map((column,index)=>{
+    const bodyCell=bodyCells[index]??{}; const headerCell=headerCells[index]??{};
+    const label=stringValue(headerCell.content)||stringValue(column.label)||stringValue(column.key,`column${index+1}`);
+    const isFormula=stringValue(bodyCell.valueMode)==='formula'&&Boolean(stringValue(bodyCell.formula).trim());
+    const groupedCol=isGrouped?arrayValue(grouping.columns).find((gc)=>stringValue(gc.label).trim().toLocaleLowerCase()===label.trim().toLocaleLowerCase()):undefined;
+    const defaultPath=groupedCol?stringValue(groupedCol.outputKey):stringValue(bodyCell.binding)||(isFormula?label:stringValue(column.key))||`column${index+1}`;
+    const path=isGrouped?defaultPath:(normalizeBinding(defaultPath,formulas)||toApiSafePath(defaultPath));
+    const base:Record<string,unknown>={
+      id:stringValue(column.id,`column-${index+1}`),
+      label,
+      path,
+      sourceField:path,
+      targetPath:path,
+      widthPercent:(Math.max(1,numberValue(column.width,1))/totalWidth)*100,
+      alignment:align(column.align),
+      headerAlignment:align(recordValue(headerCell.style).align??column.align),
+      headerStyle:cellTextStyle(headerCell),
+      cellStyle:cellTextStyle(bodyCell),
+      format:toDisplayFormat(stringValue(column.dataType),column.format)
+    };
+    if(isFormula&&!isGrouped){
+      const bindings:Array<{id:string;label:string;path:string;sourceField:string;targetPath:string;sourcePath:string}>=[]; let i=0;
+      const byKey=new Map<string,string>();
+      const addBinding=(bindingLabel:string,bindingPath?:string)=>{
+        const key=`${bindingLabel.toLocaleLowerCase()}::${bindingPath??''}`; const existing=byKey.get(key); if(existing)return `{{${existing}}}`;
+        const id=`b${i++}`; const p=bindingPath||normalizeBinding(bindingLabel,formulas); bindings.push({id,label:bindingLabel,path:p,sourceField:p,targetPath:p,sourcePath:'items'}); byKey.set(key,id); return `{{${id}}}`;
+      };
+      let expression=stringValue(bodyCell.formula).replace(/\[([^\]]+)\]/g,(_m,nameRaw:string)=>{const bindingLabel=nameRaw.trim();return addBinding(bindingLabel);});
+      expression=replaceBareCalculatedReferences(expression,calculatedRefs,(name,refPath)=>addBinding(name,refPath));
+      base.kind='FORMULA'; base.formulaExpression=expression; base.formulaBindings=bindings;
+    }
+    return base;
+  });
+
+  const footerRows=arrayValue(table.customRows).map((row)=>({
+    id:stringValue(row.id,`footer-${Math.random().toString(36).slice(2,8)}`),
+    cells:arrayValue(row.cells).map((cell,index)=>({
+      id:stringValue(cell.id,`fcell-${index}`),
+      columnId:stringValue(columns[index]?.id),
+      colspan:Math.max(1,numberValue(cell.colSpan,1)),
+      value:footerCellValue(cell,columns,bodyCells,formulas,sourcePath),
+      alignment:align(recordValue(cell.style).align??'right'),
+      style:cellTextStyle(cell),
+    })),
+    backgroundColor:stringValue(recordValue(arrayValue(row.cells)[0]?.style).background,'#FFFFFF'),
+  }));
+
+  return {
+    id:elementId,
+    type:'TABLE',
+    sourcePath,
+    columns:mappedColumns as never,
+    footerRows:footerRows as never,
+    tableStyle:{
+      showHeader:headerRows.length>0,
+      showBorder:stringValue(table.borderStyle,'solid')!=='none'&&numberValue(table.borderWidth,1)>0,
+      widthPercent:100,
+      headerStyle:headerCells[0]?cellTextStyle(headerCells[0]):undefined,
+      cellStyle:bodyCells[0]?cellTextStyle(bodyCells[0]):undefined,
+      border:{width:Math.max(.2,numberValue(table.borderWidth,1)),color:stringValue(table.borderColor,'#CBD5E1'),style:stringValue(table.borderStyle)==='dashed'?'DASHED':'SOLID'},
+      cellPadding:{top:pxToMm(table.defaultPadding,6),right:pxToMm(table.defaultPadding,6),bottom:pxToMm(table.defaultPadding,6),left:pxToMm(table.defaultPadding,6)}
+    },
+    layout:{...layout,keepTogether:false}
+  } as TemplateBlock;
+}
+
+function convertElement(element:UnknownRecord,formulas:Map<string,string>,pageIndex:number,groupedTablesOut:GroupedTableSpec[]):TemplateBlock|null {
+  const type=stringValue(element.type); const id=stringValue(element.id,`block-${Math.random()}`); const layout=absoluteLayout(element,pageIndex); const style=textStyle(element); const binding=normalizeBinding(stringValue(element.binding),formulas);
+  if(type==='text') return binding?{id,type:'FIELD',path:binding,valueStyle:style,textAlignment:align(element.textAlign),layout} as TemplateBlock:{id,type:'TEXT',text:normalizeTemplateTokens(stringValue(element.text),formulas),style,layout} as TemplateBlock;
+  if(type==='divider') return {id,type:'DIVIDER',thickness:Math.max(.2,pxToMm(element.height,.2)),color:stringValue(element.color,'#94A3B8'),style:'SOLID',layout} as TemplateBlock;
+  if(type==='shape'){
+    const child=binding?{id:`${id}:value`,type:'FIELD' as const,path:binding,valueStyle:style,textAlignment:align(element.textAlign)}:{id:`${id}:text`,type:'TEXT' as const,text:normalizeTemplateTokens(stringValue(element.text),formulas),style};
+    return {id,type:'BOX',style:{widthMode:'FIXED_MM',widthMm:layout.widthMm,heightMode:'FIXED',heightMm:layout.heightMm,backgroundColor:stringValue(element.fill,'#FFFFFF'),border:{width:Math.max(0,numberValue(element.shapeStrokeWidth,0)),color:stringValue(element.shapeStrokeColor,stringValue(element.color,'#000000')),style:stringValue(element.shapeStrokeStyle)==='none'?'NONE':stringValue(element.shapeStrokeStyle)==='dashed'?'DASHED':'SOLID'},padding:{top:pxToMm(element.shapePadding,4),right:pxToMm(element.shapePadding,4),bottom:pxToMm(element.shapePadding,4),left:pxToMm(element.shapePadding,4)},horizontalAlignment:align(element.textAlign),verticalAlignment:stringValue(element.shapeTextVerticalAlign)==='top'?'TOP':stringValue(element.shapeTextVerticalAlign)==='bottom'?'BOTTOM':'CENTER'},children:[child] as never,layout} as TemplateBlock;
+  }
+  if(type==='image'||type==='signature'){
+    const source=stringValue(element.imageSource)||stringValue(element.imageOriginalSource); if(!source.startsWith('data:image/'))return null;
+    return {id,type:'IMAGE',sourceType:'DATA_URL',source,altText:type==='signature'?'Signature':'Image',width:layout.widthMm,height:layout.heightMm,maintainAspectRatio:stringValue(element.imageFit,'contain')!=='fill',alignment:align(element.textAlign),layout} as TemplateBlock;
+  }
+  if(type==='table')return tableBlock(element,formulas,pageIndex,groupedTablesOut);
+  return null;
+}
+
+function defaultPageSettings(payload:UnknownRecord){return{preset:stringValue(payload.pageSize,'A4'),orientation:stringValue(payload.orientation,'Portrait'),customWidthMm:210,customHeightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},background:'#ffffff',borderColor:'#d2d8e0',borderWidth:0,borderOffsetMm:0,header:{enabled:false},footer:{enabled:false}};}
+function pageDefinition(settingsInput:unknown):TemplateDefinition['page']{
+  const settings={...defaultPageSettings({}),...recordValue(settingsInput)} as UnknownRecord; const preset=stringValue(settings.preset,'A4').toUpperCase(); const size=preset==='LETTER'||preset==='LEGAL'||preset==='TABLOID'||preset==='LEDGER'||preset==='EXECUTIVE'||/^[AB][0-9]+$/.test(preset)?preset:'CUSTOM'; const margins=recordValue(settings.marginsMm);
+  return {size:size as TemplateDefinition['page']['size'],orientation:stringValue(settings.orientation)==='Landscape'?'LANDSCAPE':'PORTRAIT',margins:{top:numberValue(margins.top,15),right:numberValue(margins.right,15),bottom:numberValue(margins.bottom,15),left:numberValue(margins.left,15)},customWidthMm:numberValue(settings.customWidthMm,210),customHeightMm:numberValue(settings.customHeightMm,297),backgroundColor:stringValue(settings.background,'#ffffff'),border:{enabled:numberValue(settings.borderWidth,0)>0,style:'SOLID',width:numberValue(settings.borderWidth,0),color:stringValue(settings.borderColor,'#d2d8e0'),offset:numberValue(settings.borderOffsetMm,0)},pagination:{repeatHeader:false,headerMode:'FIRST_PAGE_ONLY',footerMode:'FLOW',showPageNumbers:false,keepSummaryTogether:true,keepCustomGridTogether:true}};
+}
+export function isDesktopTemplateEntry(value:unknown):value is DesktopTemplateEntry {if(!value||typeof value!=='object'||Array.isArray(value))return false;const candidate=value as Partial<DesktopTemplateEntry>;return typeof candidate.id==='string'&&!!candidate.payload&&typeof candidate.payload==='object'&&!Array.isArray(candidate.payload);}
+export function adaptDesktopTemplateEntry(entry:DesktopTemplateEntry):TemplateDefinition {
+  const payload=entry.payload; const rawPages=arrayValue(payload.pages); const pages=rawPages.length?rawPages:[{id:'page-1',name:'Page 1',settings:defaultPageSettings(payload),elements:Array.isArray(payload.elements)?payload.elements:[]}]; const firstPage=pages[0]??{}; const firstSettings=recordValue(firstPage.settings); const {specs:formulaSpecs,map:formulaMap}=buildFormulaState(pages);
+  const headerBlocks:TemplateBlock[]=[]; const bodyBlocks:TemplateBlock[]=[]; const footerBlocks:TemplateBlock[]=[];
+  const groupedTables:GroupedTableSpec[]=[];
+  pages.forEach((page,pageIndex)=>{for(const element of arrayValue(page.elements)){if(stringValue(element.type)==='formula')continue;const region=stringValue(element.region,'body');const block=convertElement(element,formulaMap,pageIndex,groupedTables);if(!block)continue;if(region==='header'&&pageIndex===0)headerBlocks.push(block);else if(region==='footer'&&pageIndex===0)footerBlocks.push(block);else if(region==='body')bodyBlocks.push(block);}});
+  return {id:entry.id,name:entry.name||stringValue(payload.name,'Document'),version:entry.version??numberValue(payload.version,1),page:pageDefinition(Object.keys(firstSettings).length?firstSettings:defaultPageSettings(payload)),header:{blocks:headerBlocks},body:{blocks:bodyBlocks},footer:{blocks:footerBlocks},calculatedFields:[],metadata:{source:'desktop-local-template',builderPageCount:pages.length,updatedAt:stringValue(payload.updatedAt),adapter:'DB-6B-Fix8',desktopAbsoluteLayout:true,desktopFormulaFields:formulaSpecs,desktopGroupedTables:groupedTables}};
+}

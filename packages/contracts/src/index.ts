@@ -4,3 +4,5 @@ export * from './renderer.js';
 export * from './grouping.js';
 
 export * from './design.js';
+
+export * from './api-path.js';

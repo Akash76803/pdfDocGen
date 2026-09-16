@@ -46,12 +46,51 @@ describe('current document JSON body', () => {
         {id:'t',type:'table',table},
       ]}],
     });
-    expect(result.body).toMatchObject({ InvoiceNo:'INV-1', Customer:{Name:'ABC'} });
+    expect(result.body).toMatchObject({ invoiceNo:'INV-1', customer:{name:'ABC'} });
     expect(result.body).not.toHaveProperty('GrandTotal');
     expect(result.body.items).toEqual([
-      { ProductName:'A', Qty:2, Rate:100 },
-      { ProductName:'B', Qty:1, Rate:50 },
+      { productName:'A', qty:2, rate:100 },
+      { productName:'B', qty:1, rate:50 },
     ]);
     expect(result.formulaFieldsExcluded).toEqual(['GrandTotal']);
   });
+
+  it('creates a clean ready-to-send API request with safe field names', () => {
+    const businessSource: BuilderDataSource = {
+      id: 'src-business', name: 'Business', sourceType: 'json', importedAt: '2026-09-15T00:00:00Z', warnings: [],
+      fields: [
+        { name: 'Customer: Account Name', label: 'Customer', type: 'string', required: true },
+        { name: 'GSTIN', label: 'GSTIN', type: 'string', required: false },
+        { name: 'TCS %', label: 'TCS', type: 'number', required: false },
+        { name: 'Product: Products Name', label: 'Product', type: 'string', required: false },
+        { name: 'Unit Price', label: 'Unit Price', type: 'number', required: false },
+      ],
+      records: [{ 'Customer: Account Name': 'Aai Laxmi', GSTIN: '27TEST', 'TCS %': 0, 'Product: Products Name': 'Part A', 'Unit Price': 1980 }],
+    };
+    const businessTable: TableDefinition = {
+      ...table,
+      bodyRows: [{ ...table.bodyRows[0]!, cells: [
+        { ...table.bodyRows[0]!.cells[0]!, binding: 'Product: Products Name', valueMode: 'binding' },
+        { ...table.bodyRows[0]!.cells[1]!, binding: 'Unit Price', valueMode: 'binding', formula: undefined },
+      ] }],
+      binding: { repeatSource: 'items' },
+    };
+    const result = buildCurrentDocumentJsonBody({
+      templateId: '7004e453-602e-4173-be10-7239d04b3b3d', templateName: 'Tax Invoice', source: businessSource, record: businessSource.records[0],
+      pages: [{ elements: [
+        { id: 'customer', type: 'text', binding: 'Customer: Account Name' },
+        { id: 'gstin', type: 'text', binding: 'GSTIN' },
+        { id: 'tcs', type: 'text', binding: 'TCS %' },
+        { id: 'table', type: 'table', table: businessTable },
+      ] }],
+    });
+    expect(result.body).toMatchObject({ customerAccountName: 'Aai Laxmi', gstin: '27TEST', tcsPercent: 0 });
+    expect(result.body.items).toEqual([{ productProductsName: 'Part A', unitPrice: 1980 }]);
+    expect(result.request).toMatchObject({
+      templateId: '7004e453-602e-4173-be10-7239d04b3b3d',
+      output: { format: 'pdf', fileName: 'Tax-Invoice.pdf', renderMode: 'native-auto', responseMode: 'binary' },
+      data: result.body,
+    });
+  });
+
 });

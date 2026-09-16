@@ -1,43 +1,28 @@
 # DB-6B — Document Generation REST API
 
-Baseline: Git main commit `74da75458369dabcc1cf57335ed250bd7d9de81a` (DB-6A verified).
+DB-6B provides the headless API boundary for document generation.
 
-## Implemented
-- New headless workspace app: `apps/api`
-- New shared boundary package: `packages/generation-core`
+## Routes
 - `GET /health`
 - `POST /api/v1/documents/generate`
-- Stable request contract: `templateId`, optional `templateVersion`, `output`, `data`
-- Supported output contract values: `pdf`, `docx-exact`, `docx-editable`
-- Synchronous completed response contract with `jobId`, output metadata and Base64 file payload
-- 5 MB request limit
-- Structured transport/request errors
-- Unit/integration tests using an injected generation service
 
-## Architecture rule
-The API does **not** import React, Tauri, localStorage or IndexedDB. Rendering is reached through `DocumentGenerationService`. This keeps the HTTP layer reusable and prevents coupling the future server to the desktop UI.
+## Current generation support
+- PDF `native-auto`: server-safe `TemplateEngine` + native `PdfRenderer`.
+- PDF `exact`: rejected with `EXACT_RENDER_UNAVAILABLE` because Exact mode depends on the browser materialized-preview pipeline.
+- DOCX `docx-editable`: server-safe native WordprocessingML generation from the resolved render model. Text and tables remain editable; PNG/JPEG data-URL images are embedded when present.
+- DOCX `docx-exact`: rejected with `EXACT_DOCX_UNAVAILABLE` because Exact DOCX depends on the browser raster/materialized-preview pipeline.
 
-## Intentional DB-6B boundary
-This candidate completes the HTTP/API contract and generation-service seam. The production runtime adapter that converts a published Builder template + raw JSON into the existing renderer pipeline is intentionally not hard-wired to `apps/desktop`; that extraction/wiring is the next DB-6B integration step before this phase is marked COMPLETE.
+## Runtime configuration
+- `API_TEMPLATE_DIR` defaults to `./data/templates`.
+- `API_MAX_BODY_MB` defaults to 20 MB.
+- `API_ABSOLUTE_MAX_BODY_MB` defaults to 50 MB.
+- Effective body limit is the lower of requested and absolute values.
 
-The default `server.ts` uses `UnconfiguredDocumentGenerationService` and therefore returns HTTP 503 for generation until the headless renderer adapter is wired. Tests inject a real test adapter and verify request/response behavior.
+## Template files
+- default/latest template: `<templateId>.json`
+- immutable version: `<templateId>.v<version>.json`
 
-## Example request
-```json
-{
-  "templateId": "invoice-standard",
-  "templateVersion": 1,
-  "output": { "format": "pdf", "fileName": "INV-1001.pdf", "renderMode": "native-auto" },
-  "data": {
-    "invoiceNo": "INV-1001",
-    "customer": { "name": "Acme" },
-    "items": [{ "description": "Item A", "qty": 2, "rate": 100 }]
-  }
-}
-```
+The filesystem repository is an adapter behind `TemplateRepository`; a database/object-storage-backed repository can replace it later without coupling HTTP routes to desktop browser storage.
 
-## Validation ownership
-Only transport/request-shape checks are included here. Template-schema validation and field-level error contracts belong to DB-6C.
-
-## Async ownership
-This endpoint is synchronous in DB-6B. Queue/progress/job polling belongs to DB-6D.
+## Response metadata
+Successful generation supports two delivery modes. `output.responseMode: "binary"` is the default and returns raw PDF/DOCX bytes with `Content-Type`, `Content-Disposition`, `Content-Length`, and document metadata headers. `output.responseMode: "base64"` preserves the JSON envelope with format, file name, MIME type, byte size, optional page count/warnings, and Base64 file content. Errors remain structured JSON in both modes.

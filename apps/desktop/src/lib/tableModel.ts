@@ -161,7 +161,7 @@ function createColumns(count: number): TableColumn[] {
   }));
 }
 
-function createRow(kind: TableRowKind, columns: number, _index = 0): TableRow {
+function createRow(kind: TableRowKind, columns: number, index = 0): TableRow {
   return {
     id: crypto.randomUUID(), kind, height: kind === 'header' ? 32 : 30,
     autoHeight: true, repeatOnEveryPage: kind === 'header', keepTogether: true,
@@ -367,7 +367,7 @@ export function groupedFinalSummaryConfigFromTable(table: TableDefinition): Grou
   const grouping = table.binding?.grouping;
   if (!grouping || table.customRows.length === 0) return defaultGroupedFinalSummaryConfig(grouping?.columns ?? []);
   const row = table.customRows[0];
-  const columns = grouping.columns.map((_mapping, index): GroupedFinalSummaryColumn => {
+  const columns = grouping.columns.map((mapping, index): GroupedFinalSummaryColumn => {
     const cell = row.cells[index];
     if (!cell) return { operation: 'blank' };
     if (cell.summaryMode === 'formula') return { operation: 'formula', formula: cell.summaryFormula ?? '' };
@@ -929,7 +929,7 @@ export function formatTableValue(value: unknown, dataType: TableDataType = 'text
   return typeof value === 'string' ? value : String(value);
 }
 
-type FormulaToken = { type: 'number' | 'identifier' | 'operator' | 'paren'; value: string };
+type FormulaToken = { type: 'number' | 'identifier' | 'operator' | 'paren' | 'comma'; value: string };
 
 export type FormulaEvaluationOptions = { percentageFields?: Record<string, { inputMode?: 'fraction' | 'whole' }> };
 
@@ -962,6 +962,7 @@ function tokenizeFormula(expression: string, knownFields: string[] = []): Formul
     }
     if ('+-*/'.includes(char)) { tokens.push({ type: 'operator', value: char }); index += 1; continue; }
     if ('()'.includes(char)) { tokens.push({ type: 'paren', value: char }); index += 1; continue; }
+    if (char === ',') { tokens.push({ type: 'comma', value: char }); index += 1; continue; }
     throw new Error(`Unsupported formula token: ${char}`);
   }
   return tokens;
@@ -969,6 +970,90 @@ function tokenizeFormula(expression: string, knownFields: string[] = []): Formul
 
 
 export type TableFormulaColumnReference = { columnId: string; label: string; dataType: TableDataType; reference: string };
+
+
+function bracketBareFormulaReferences(expression: string, references: string[]): string {
+  if (!expression?.trim() || references.length === 0) return expression;
+  const candidates = Array.from(new Set(references.map((value) => value.trim()).filter(Boolean)))
+    .sort((a, b) => b.length - a.length);
+  let output = '';
+  let index = 0;
+  while (index < expression.length) {
+    if (expression[index] === '[') {
+      const end = expression.indexOf(']', index + 1);
+      if (end >= 0) {
+        output += expression.slice(index, end + 1);
+        index = end + 1;
+        continue;
+      }
+    }
+    let matched = false;
+    for (const reference of candidates) {
+      if (expression.slice(index, index + reference.length).toLocaleLowerCase() !== reference.toLocaleLowerCase()) continue;
+      const before = index > 0 ? expression[index - 1] : '';
+      const after = expression[index + reference.length] ?? '';
+      if (before && /[A-Za-z0-9_.$]/.test(before)) continue;
+      if (after && /[A-Za-z0-9_.$]/.test(after)) continue;
+      let lookahead = index + reference.length;
+      while (/\s/.test(expression[lookahead] ?? '')) lookahead += 1;
+      // A name immediately followed by '(' is a function call, not a column reference.
+      if (expression[lookahead] === '(') continue;
+      output += `[${reference}]`;
+      index += reference.length;
+      matched = true;
+      break;
+    }
+    if (!matched) {
+      output += expression[index];
+      index += 1;
+    }
+  }
+  return output;
+}
+
+/**
+ * Normalize bare references to calculated table columns before persistence.
+ * Example: `[Basic Value] - Discount` becomes `[Basic Value] - [Discount]`.
+ * Function calls such as `DISCOUNT(...)` are left unchanged.
+ */
+export function normalizeTableFormulaReferences(table: TableDefinition): TableDefinition {
+  if (table.mode !== 'dynamic') return table;
+  const body = table.bodyRows[0];
+  if (!body) return table;
+  const calculatedNames: string[] = [];
+  let visualColumn = 0;
+  for (const cell of body.cells) {
+    const column = table.columns[visualColumn];
+    visualColumn += Math.max(1, cell.colSpan);
+    if (!column) continue;
+    const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
+    if (mode !== 'formula') continue;
+    if (column.label?.trim()) calculatedNames.push(column.label.trim());
+    if (column.key?.trim() && column.key !== column.label) calculatedNames.push(column.key.trim());
+  }
+  if (calculatedNames.length === 0) return table;
+  const normalizeCell = (cell: TableCell): TableCell => ({
+    ...cell,
+    formula: cell.formula ? bracketBareFormulaReferences(cell.formula, calculatedNames) : cell.formula,
+    summaryFormula: cell.summaryFormula ? bracketBareFormulaReferences(cell.summaryFormula, calculatedNames) : cell.summaryFormula,
+  });
+  const normalizeRow = (row: TableRow): TableRow => ({ ...row, cells: row.cells.map(normalizeCell) });
+  return {
+    ...table,
+    bodyRows: table.bodyRows.map(normalizeRow),
+    customRows: table.customRows.map(normalizeRow),
+    rows: table.rows.map(normalizeRow),
+    binding: table.binding?.grouping ? {
+      ...table.binding,
+      grouping: {
+        ...table.binding.grouping,
+        columns: table.binding.grouping.columns.map((column) => column.operation === 'formula' && column.formula
+          ? { ...column, formula: bracketBareFormulaReferences(column.formula, calculatedNames) }
+          : column),
+      },
+    } : table.binding,
+  };
+}
 
 export function formulaColumnReferences(table: TableDefinition, currentColumnId?: string): TableFormulaColumnReference[] {
   if (table.mode !== 'dynamic') return [];
@@ -1075,6 +1160,17 @@ export function evaluateTableFormula(expression: string | undefined, record: unk
         const parsed = Number(token.value); if (!Number.isFinite(parsed)) throw new Error('Invalid number'); return parsed;
       }
       if (token.type === 'identifier') {
+        if (token.value.toUpperCase() === 'DISCOUNT' && tokens[cursor]?.type === 'paren' && tokens[cursor]?.value === '(') {
+          cursor += 1;
+          const base = parseExpression();
+          const comma = tokens[cursor++];
+          if (!comma || comma.type !== 'comma') throw new Error('DISCOUNT requires amount and discount rate');
+          const rateInput = parseExpression();
+          const close = tokens[cursor++];
+          if (!close || close.type !== 'paren' || close.value !== ')') throw new Error('Missing closing parenthesis');
+          const rate = Math.abs(rateInput) > 1 ? rateInput / 100 : rateInput;
+          return base - (base * rate);
+        }
         const sourceValue = valueAtPath(record, token.value);
         const parsed = numericValue(sourceValue);
         if (parsed == null) throw new Error(`Field ${token.value} is not numeric`);
@@ -1245,7 +1341,7 @@ export function dynamicRows(
   record: NormalizedRecord | null,
   source?: BuilderDataSource | null,
   parentSource?: BuilderDataSource | null,
-): TablePaginationRuntimeRow[] {
+): Array<{ key: string; value: unknown }> {
   if (table.mode !== 'dynamic' || !table.binding?.repeatSource) return [];
 
   const raw: unknown = table.binding.sourceId && source?.id === table.binding.sourceId
@@ -1261,8 +1357,7 @@ export function dynamicRows(
   if (parentKeys.length > 0 && source && record) {
     const selectedParentKey = compositeKey(record, parentKeys);
     if (!selectedParentKey) return [];
-    const childKeys = table.binding.childForeignKey ? configuredKeys(table.binding.childForeignKey, undefined) : parentKeys;
-    filtered = raw.filter((item) => compositeKey(item, childKeys) === selectedParentKey);
+    filtered = raw.filter((item) => compositeKey(item, parentKeys) === selectedParentKey);
   } else {
     // Backward compatibility for the earlier separate Parent Source / Child Foreign Key schema.
     const { parentSourceId, parentKey, childForeignKey } = table.binding;
@@ -1285,7 +1380,7 @@ export function dynamicRows(
   const rowKeys = configuredKeys(table.binding.rowKey, table.binding.rowKeys);
   return filtered.map((item, index) => {
     const configured = compositeKey(item, rowKeys);
-    return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: (item && typeof item === 'object' ? item : {}) as NormalizedRecord };
+    return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: item };
   });
 }
 

@@ -1,0 +1,32 @@
+{
+  "id": "example-invoice",
+  "name": "Example Invoice",
+  "version": 1,
+  "page": {
+    "size": "A4",
+    "orientation": "PORTRAIT",
+    "margins": { "top": 12, "right": 12, "bottom": 12, "left": 12 }
+  },
+  "header": {
+    "blocks": [
+      { "id": "title", "type": "TEXT", "text": "INVOICE", "style": { "fontSize": 20, "bold": true, "alignment": "CENTER" } }
+    ]
+  },
+  "body": {
+    "blocks": [
+      { "id": "invoice-no", "type": "FIELD", "label": "Invoice No", "path": "invoiceNo" },
+      { "id": "customer", "type": "FIELD", "label": "Customer", "path": "customer.name" },
+      {
+        "id": "items-table",
+        "type": "TABLE",
+        "sourcePath": "items",
+        "columns": [
+          { "id": "description", "label": "Description", "path": "description" },
+          { "id": "qty", "label": "Qty", "path": "qty", "alignment": "RIGHT" },
+          { "id": "amount", "label": "Amount", "path": "amount", "alignment": "RIGHT" }
+        ]
+      }
+    ]
+  },
+  "footer": { "blocks": [{ "id": "thanks", "type": "TEXT", "text": "Thank you" }] }
+}

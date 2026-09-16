@@ -3,6 +3,13 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "scripts": { "dev": "node --enable-source-maps dist/server.js", "build": "tsc -b", "typecheck": "tsc --noEmit" },
-  "dependencies": { "@document-tool/generation-core": "*" }
+  "scripts": {
+    "dev": "node --enable-source-maps dist/server.js",
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/contracts": "*",
+    "@document-tool/generation-core": "*"
+  }
 }

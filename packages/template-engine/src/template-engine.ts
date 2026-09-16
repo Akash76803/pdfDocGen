@@ -1,3 +1,4 @@
+import { toApiSafePath } from '@document-tool/contracts';
 import type {
   DocumentGroup,
   RenderBlock,
@@ -31,6 +32,26 @@ import {
   withAlignment,
 } from './style-defaults.js';
 
+
+function resolveTemplatePath(root: Record<string, unknown>, path: string): ReturnType<typeof resolvePath> {
+  const requested = String(path ?? '').trim();
+  if (!requested) return resolvePath(root, requested);
+
+  // Runtime/system aliases are intentionally not part of business request JSON.
+  if (/^pageNumber$/i.test(requested)) return resolvePath(root, 'page.number');
+  if (/^totalPages$/i.test(requested)) return resolvePath(root, 'page.total');
+
+  const direct = resolvePath(root, requested);
+  if (direct.found) return direct;
+
+  // Backward compatibility for templates created before DB-6B Fix4. Those
+  // templates may still store imported labels such as "Invoice No" or
+  // "Customer: Account Name", while the API request correctly uses safe paths.
+  const safePath = toApiSafePath(requested);
+  if (safePath && safePath !== requested) return resolvePath(root, safePath);
+  return direct;
+}
+
 export class TemplateEngine {
   constructor(private readonly validator = new TemplateValidator()) {}
 
@@ -52,6 +73,8 @@ export class TemplateEngine {
       itemDetails: data.itemDetails,
       group: { key: data.key, id: data.id },
       page: { number: 1, total: 1 },
+      pageNumber: 1,
+      totalPages: 1,
       views: {},
       calc: data.header && typeof data.header.calc === 'object' && data.header.calc !== null
         ? { ...(data.header.calc as Record<string, unknown>) }
@@ -87,7 +110,7 @@ export class TemplateEngine {
             layout: resolveBlockLayout(block.layout),
           };
         case 'FIELD': {
-          const result = resolvePath(root, block.path);
+          const result = resolveTemplatePath(root, block.path);
           const value = !result.found || result.value == null ? block.fallback ?? '' : displayString(result.value, block.format);
           if (!result.found || result.value == null) {
             warnings.push({
@@ -216,7 +239,7 @@ export class TemplateEngine {
           if (content.type === 'BLANK') return { type: 'BLANK' as const, value: '', style: textStyle };
           if (content.type === 'TEXT') return { type: 'TEXT' as const, value: resolveRichText(content.text ?? '', content.fieldTokens, root, warnings, block.id), style: textStyle };
           if (content.type === 'FIELD') {
-            const result = resolvePath(root, content.path ?? '');
+            const result = resolveTemplatePath(root, content.path ?? '');
             const value = result.found && result.value != null ? displayString(result.value, content.format) : content.fallback ?? '';
             if (!result.found && content.path) warnings.push({ code: 'FIELD_VALUE_MISSING', message: `No preview value found for ${content.path}.`, blockId: block.id, path: content.path });
             return { type: 'FIELD' as const, value, style: textStyle };
@@ -398,7 +421,7 @@ export class TemplateEngine {
         return { ...common, rows: [], empty: true };
       }
       const rows = tableSourceRows.map((item, rowIndex) =>
-        visibleSourceColumns.map((column) => resolveTableColumnValue(column,item,tableRawRows[rowIndex],rowIndex,block.sourcePath,root)),
+        resolveTableRowValues(visibleSourceColumns,item,tableRawRows[rowIndex],rowIndex,block.sourcePath,root),
       );
       return { ...common, rows, empty: rows.length === 0 };
     };
@@ -539,7 +562,7 @@ function resolveRichText(text:string, fieldTokens:Record<string,{format?:Display
   const resolved=source.replace(/\{\{([^{}\n]+)\}\}/g, (full, rawPath:string) => {
     const path=String(rawPath).trim();
     if(!path) return full;
-    const result=resolvePath(root,path);
+    const result=resolveTemplatePath(root,path);
     const settings=fieldTokens?.[path];
     if(!result.found || result.value == null){
       warnings.push({code:'FIELD_VALUE_MISSING',message:`No preview value found for ${path}.`,blockId,path});
@@ -548,6 +571,67 @@ function resolveRichText(text:string, fieldTokens:Record<string,{format?:Display
     return displayString(result.value,settings?.format);
   });
   return resolved.replace(new RegExp(ESC,'g'),'{{');
+}
+
+
+function setFormulaRowValue(target:Record<string,unknown>,path:string|undefined,value:unknown):void {
+  if(!path)return;
+  const parts=path.split('.').filter(Boolean); if(!parts.length)return;
+  let cursor:Record<string,unknown>=target;
+  for(let index=0;index<parts.length-1;index++){
+    const part=parts[index]!; const current=cursor[part];
+    if(!current||typeof current!=='object'||Array.isArray(current))cursor[part]={};
+    cursor=cursor[part] as Record<string,unknown>;
+  }
+  cursor[parts.at(-1)!]=value;
+}
+
+function resolveTableRowValues(columns:TableColumnDefinition[],item:unknown,rawRow:unknown,rowIndex:number,sourcePath:string,root?:Record<string,unknown>):Array<string|number|boolean|null> {
+  const working:Record<string,unknown>=item&&typeof item==='object'&&!Array.isArray(item)?{...(item as Record<string,unknown>)}:{};
+  const results:Array<string|number|boolean|null>=new Array(columns.length).fill('');
+  const formulaAliases=new Map<string,number>();
+  for(let index=0;index<columns.length;index++){
+    const column=columns[index]!;
+    if((column.kind??'SOURCE')!=='FORMULA')continue;
+    for(const alias of [column.path,column.targetPath,column.sourceField,toSafeRuntimeAlias(column.label)].filter(Boolean) as string[]){
+      formulaAliases.set(alias,index);
+    }
+  }
+  // Resolve ordinary source/static columns immediately. Formula columns are
+  // resolved in bounded dependency passes so a later formula can safely consume
+  // another calculated column regardless of visual column order.
+  for(let index=0;index<columns.length;index++){
+    const column=columns[index]!;
+    if((column.kind??'SOURCE')==='FORMULA')continue;
+    results[index]=resolveTableColumnValue(column,working,rawRow,rowIndex,sourcePath,root);
+  }
+  const unresolved=new Set(columns.map((column,index)=>(column.kind??'SOURCE')==='FORMULA'?index:-1).filter((index)=>index>=0));
+  for(let pass=0;pass<columns.length&&unresolved.size>0;pass++){
+    let progressed=false;
+    for(const index of [...unresolved]){
+      const column=columns[index]!;
+      const dependencies=(column.formulaBindings??[]).flatMap((binding)=>[binding.path,binding.targetPath]).filter(Boolean) as string[];
+      const waiting=dependencies.some((path)=>{const dependencyIndex=formulaAliases.get(path);return dependencyIndex!==undefined&&dependencyIndex!==index&&unresolved.has(dependencyIndex);});
+      if(waiting)continue;
+      try{
+        const raw=evaluateFormula(column.formulaExpression??'',column.formulaBindings??[],{rows:[working],rawRows:rawRow?[rawRow]:[],defaultSourcePath:sourcePath,root});
+        for(const alias of [column.path,column.targetPath,column.sourceField])setFormulaRowValue(working,alias,raw);
+        setFormulaRowValue(working,toSafeRuntimeAlias(column.label),raw);
+        results[index]=formatDisplayValue(raw,column.format);
+        unresolved.delete(index); progressed=true;
+      }catch{
+        // Keep unresolved until a later pass in case a calculated dependency has
+        // not been materialized yet. Final unresolved/circular values render blank.
+      }
+    }
+    if(!progressed)break;
+  }
+  return results;
+}
+function toSafeRuntimeAlias(value:string):string {
+  const parts=String(value??'').trim().replace(/%/g,' Percent ').match(/[A-Za-z0-9]+/g)??[];
+  if(!parts.length)return '';
+  return parts[0]!.toLocaleLowerCase()+parts.slice(1).map((part)=>part.charAt(0).toLocaleUpperCase()+part.slice(1)).join('');
 }
 
 function resolveTableColumnValue(column:TableColumnDefinition,item:unknown,rawRow:unknown,rowIndex:number,sourcePath:string,root?:Record<string,unknown>):string|number|boolean|null {

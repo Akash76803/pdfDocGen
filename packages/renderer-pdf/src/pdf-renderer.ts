@@ -223,9 +223,35 @@ export class CombinedPdfRenderer {
   }
 }
 
+
+async function layoutAbsoluteDesktopDocument(template:TemplateDefinition,model:RenderModel,pageDef:NonNullable<RenderModel['page']>,startedAt:number):Promise<LaidOutPdfDocument>{
+  const geometry=resolvePageGeometry(pageDef);
+  const pageWidth=mm(geometry.widthMm),pageHeight=mm(geometry.heightMm);
+  const images=await prepareImages(model);
+  const configured=Math.max(1,Number(template.metadata?.builderPageCount ?? 1)||1);
+  const all=[...(model.header??[]),...(model.body??[]),...(model.footer??[])];
+  const maxIndex=all.reduce((max,block)=>Math.max(max,block.layout?.pageIndex??0),0);
+  const count=Math.max(configured,maxIndex+1);
+  const pages=Array.from({length:count},()=>makePage(pageWidth,pageHeight,pageDef));
+  const drawAbsolute=(page:PdfPage,block:RenderBlock)=>{
+    const layout=block.layout;
+    const x=mm(Math.max(0,layout.xMm||0));
+    const topMm=Math.max(0,layout.yMm||0);
+    const w=mm(Math.max(.1,layout.widthMm||geometry.contentWidthMm));
+    const y=pageHeight-mm(topMm);
+    const ctx:Ctx={pages,page,pageWidth,pageHeight,left:0,right:0,top:0,bottom:0,contentWidth:pageWidth,y,headerHeight:0,footerHeight:0,model:{...model,page:pageDef},images} as Ctx;
+    drawBlockAt(ctx,block,x,y,w);
+  };
+  for(const block of model.body??[]){const index=Math.max(0,Math.min(count-1,block.layout?.pageIndex??0));drawAbsolute(pages[index]!,block);}
+  // Builder header/footer bands are master-page objects. Repeat them on every
+  // physical page at their saved absolute coordinates.
+  for(const page of pages){for(const block of model.header??[])drawAbsolute(page,block);for(const block of model.footer??[])drawAbsolute(page,block);}
+  return {pages,images:[...images.values()],model:{...model,page:pageDef},pageDef,renderDurationMs:Date.now()-startedAt};
+}
 async function layoutPdfDocument(template:TemplateDefinition,model:RenderModel):Promise<LaidOutPdfDocument>{
   const startedAt=Date.now();
   const pageDef=model.page ?? template.page;
+  if(template.metadata?.desktopAbsoluteLayout===true) return await layoutAbsoluteDesktopDocument(template,model,pageDef,startedAt);
   const geometry=resolvePageGeometry(pageDef);
   const pageWidth=mm(geometry.widthMm),pageHeight=mm(geometry.heightMm);
   const left=mm(geometry.marginLeftMm),right=mm(geometry.marginRightMm),top=mm(geometry.marginTopMm),bottom=mm(geometry.marginBottomMm);

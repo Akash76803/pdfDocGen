@@ -264,7 +264,7 @@ export function Generate({ onNavigate }: { onNavigate: (route: AppRoute) => void
         id: crypto.randomUUID(), templateName: template.name, sourceId: source.id, activeRecordIndex: item.value, documentLabel: item.rawLabel, format,
         fileName: useCombinedPdf ? finalCombinedName : resolveFileNamePattern(filePattern, selectedRecord, template.name, item.rawLabel),
         pdfRenderProfile: format === 'pdf' ? pdfRenderProfile : undefined,
-        pdfRenderMode: format === 'pdf' ? (useNative ? ('native-auto' as NativePdfMode) : ('exact' as NativePdfMode)) : undefined,
+        pdfRenderMode: format === 'pdf' ? (useNative ? 'native-auto' : 'exact') : undefined,
         createdAt: new Date().toISOString(),
         combinedPdf: useCombinedPdf ? { batchId, index, total: selected.length, finalFileName: finalCombinedName } : undefined,
       };

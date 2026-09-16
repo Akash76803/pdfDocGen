@@ -1,4 +1,4 @@
-import type { FieldDefinition, NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
+import { toApiSafePath, type FieldDefinition, type NormalizedRecord, type NormalizedValue } from '@document-tool/contracts';
 import type { BuilderDataSource } from './dataSourceStore.ts';
 import { valueForField } from './dataSourceStore.ts';
 import type { TableCell, TableDefinition, TableRow } from './tableModel.ts';
@@ -26,6 +26,8 @@ export type TemplateJsonBodyResult = {
   formulaFieldsExcluded: string[];
   itemCount: number;
   warnings: string[];
+  request: Record<string, unknown>;
+  requestJson: string;
 };
 
 const SYSTEM_TOKENS = new Set(['pagenumber', 'totalpages']);
@@ -170,6 +172,9 @@ export function buildCurrentDocumentJsonBody(input: {
   pages: JsonBodyPage[];
   source?: BuilderDataSource | null;
   record?: NormalizedRecord | null;
+  templateId?: string;
+  templateName?: string;
+  outputFormat?: 'pdf' | 'docx-editable';
 }): TemplateJsonBodyResult {
   const fields = input.source?.fields ?? [];
   const formulas = new Set<string>();
@@ -220,7 +225,7 @@ export function buildCurrentDocumentJsonBody(input: {
   for (const path of [...documentFields].sort()) {
     if (rowOnly.has(path) && !parentKeys.has(path) && !explicitDocumentFields.has(path)) continue;
     const field = fieldByName.get(path.toLocaleLowerCase());
-    setNested(body, path, serializableValue(valueForField(input.record ?? null, path), field));
+    setNested(body, toApiSafePath(path), serializableValue(valueForField(input.record ?? null, path), field));
   }
 
   const rows = matchingDocumentRows(input.source, input.record, [...parentKeys]);
@@ -229,7 +234,7 @@ export function buildCurrentDocumentJsonBody(input: {
       const item: Record<string, unknown> = {};
       for (const path of [...itemFields].sort()) {
         const field = fieldByName.get(path.toLocaleLowerCase());
-        const outputPath = stripRowPrefix(path, [...repeatSources]);
+        const outputPath = toApiSafePath(stripRowPrefix(path, [...repeatSources]));
         setNested(item, outputPath, serializableValue(valueForField(row, path), field));
       }
       return item;
@@ -241,10 +246,27 @@ export function buildCurrentDocumentJsonBody(input: {
   if (!input.source) warnings.push('No Data Source is selected. Placeholder values are used.');
   if (fields.length === 0 && (documentFields.size > 0 || itemFields.size > 0)) warnings.push('Binding metadata is unavailable, so some template tokens could not be classified.');
   if (itemFields.size > 0 && !parentKeys.size) warnings.push('No Parent / Document key is configured; the sample body contains only the current row in items[].');
+  const templateId = input.templateId?.trim() ?? '';
+  if (!templateId) warnings.push('Save/open a template before copying the API request so templateId can be populated.');
+  const outputFormat = input.outputFormat ?? 'pdf';
+  const extension = outputFormat === 'docx-editable' ? 'docx' : 'pdf';
+  const safeBaseName = (input.templateName?.trim() || 'document').replace(/[\\/:*?"<>|]+/g, '-').replace(/\s+/g, '-');
+  const request: Record<string, unknown> = {
+    templateId,
+    output: {
+      format: outputFormat,
+      fileName: `${safeBaseName}.${extension}`,
+      ...(outputFormat === 'pdf' ? { renderMode: 'native-auto' } : {}),
+      responseMode: 'binary',
+    },
+    data: body,
+  };
 
   return {
     body,
     json: JSON.stringify(body, null, 2),
+    request,
+    requestJson: JSON.stringify(request, null, 2),
     documentFields: [...documentFields].filter((field) => !rowOnly.has(field) || parentKeys.has(field) || explicitDocumentFields.has(field)).sort(),
     itemFields: [...itemFields].sort(),
     formulaFieldsExcluded: [...new Set(formulaNames)].sort(),
@@ -339,8 +361,8 @@ export function buildTemplateInputContract(input: {
     if (element.type === 'table' && element.table?.binding?.repeatSource) repeatSources.add(element.table.binding.repeatSource);
   }
 
-  const documentFields = bodyResult.documentFields.map((path) => contractField(path, fields, imageFields));
-  const itemFields = bodyResult.itemFields.map((path) => contractField(path, fields, imageFields, stripRowPrefix(path, [...repeatSources])));
+  const documentFields = bodyResult.documentFields.map((path) => contractField(path, fields, imageFields, toApiSafePath(path)));
+  const itemFields = bodyResult.itemFields.map((path) => contractField(path, fields, imageFields, toApiSafePath(stripRowPrefix(path, [...repeatSources]))));
   const required = documentFields.filter((field) => field.required).map((field) => field.path).sort();
   const optional = documentFields.filter((field) => !field.required).map((field) => field.path).sort();
   const itemRequired = itemFields.filter((field) => field.required).map((field) => field.path).sort();

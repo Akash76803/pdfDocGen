@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, moveTableColumn, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableSummaryRows, recommendedRowKey, updateTableCell } from './tableModel.ts';
+import { addCustomSummaryRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableSummaryRows, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -27,8 +27,8 @@ describe('DB-4 table model', () => {
   it('adds a custom total row to a dynamic table', () => {
     const table = addCustomSummaryRow(createDynamicTable(5, 'items', 1));
     expect(table.customRows).toHaveLength(1);
-    expect(table.customRows[0].cells[0].content).toBe('Subtotal');
-    expect(table.customRows[0].cells[0].colSpan).toBe(1);
+    expect(table.customRows[0].cells[0].content).toBe('Total');
+    expect(table.customRows[0].cells[0].colSpan).toBe(4);
   });
 });
 
@@ -115,6 +115,7 @@ it('DB-4.1 Fix4 supports composite parent and child row identities in one source
 });
 
 it('DB-4.2 adds and deletes custom rows while preserving unaffected row IDs', () => {
+  const { addTableRow, deleteTableRow } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   const table = createCustomTable(3, 2);
   const firstId = table.rows[0].id;
   const selectedCell = table.rows[0].cells[0].id;
@@ -127,6 +128,7 @@ it('DB-4.2 adds and deletes custom rows while preserving unaffected row IDs', ()
 });
 
 it('DB-4.2 adds a dynamic table column without manually adding runtime body rows', () => {
+  const { addTableColumn } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   const table = createDynamicTable(3, 'Invoice Export', 1);
   const bodyRowId = table.bodyRows[0].id;
   const added = addTableColumn(table, table.bodyRows[0].cells[1].id, 'right');
@@ -137,23 +139,25 @@ it('DB-4.2 adds a dynamic table column without manually adding runtime body rows
 });
 
 it('DB-4.2 expands and contracts colSpan when columns are inserted/deleted inside a merged cell', () => {
+  const { addTableColumn, deleteTableColumn } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   let table = createCustomTable(3, 2);
   const mergedCell = table.rows[0].cells[0];
   table = updateTableCell(table, mergedCell.id, { colSpan: 2 });
   const added = addTableColumn(table, mergedCell.id, 'right');
   expect(added.columns).toHaveLength(4);
-  expect(added.rows[0].cells[0].colSpan).toBe(2);
+  expect(added.rows[0].cells[0].colSpan).toBe(3);
   const deleted = deleteTableColumn(added, added.rows[0].cells[0].id);
   expect(deleted.columns).toHaveLength(3);
-  expect(deleted.rows[0].cells[0].colSpan).toBe(1);
+  expect(deleted.rows[0].cells[0].colSpan).toBe(2);
 });
 
 it('DB-4.2 blocks column reorder while merged colSpan cells exist', () => {
+  const { moveTableColumn } = require('./tableModel.ts') as typeof import('./tableModel.ts');
   let table = createCustomTable(3, 2);
   table = updateTableCell(table, table.rows[0].cells[0].id, { colSpan: 2 });
   const ids = table.columns.map((column) => column.id);
   const moved = moveTableColumn(table, table.rows[0].cells[0].id, 1);
-  expect(moved.columns.map((column: { id: string }) => column.id)).toEqual(ids);
+  expect(moved.columns.map((column) => column.id)).toEqual(ids);
 });
 
 it('DB-4.2 Fix3 creates dynamic columns from header labels and imported repeat fields', () => {
@@ -311,7 +315,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     const rows = Array.from({ length: 20 }, (_, index) => ({ key: `row-${index + 1}`, value: { id: index + 1 } as never }));
     const pages = paginateDynamicTable(table, rows, 300, 300);
     expect(pages.length).toBeGreaterThan(1);
-    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(9);
+    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(10);
     expect(pages[0].unusedHeightPx).toBeLessThan(30);
   });
 
@@ -325,7 +329,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     for (const page of pages) {
       expect(page.usedHeightPx).toBeLessThanOrEqual(page.availableHeightPx);
     }
-    expect(pages[pages.length - 1]?.includeSummary).toBe(true);
+    expect(pages.at(-1)?.includeSummary).toBe(true);
   });
 
 
@@ -368,7 +372,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     table.pagination.keepSummaryTogether = true;
     const rows = Array.from({ length: 14 }, (_, index) => ({ key: `row-${index}`, value: { id: index } as never }));
     const pages = paginateDynamicTable(table, rows, 220, 220);
-    expect(pages[pages.length - 1]?.includeSummary).toBe(true);
+    expect(pages.at(-1)?.includeSummary).toBe(true);
     expect(pages.slice(0, -1).every((page) => page.includeSummary === false)).toBe(true);
     expect(pages.flatMap((page) => page.runtimeRows)).toHaveLength(rows.length);
   });
@@ -551,4 +555,30 @@ describe('DB-4G grouped summary table', () => {
     expect(updated.headerRows[0].cells.map((cell) => cell.style.background)).toEqual(['#333333', '#111111', '#222222']);
   });
 
+});
+
+describe('DB-6B Fix8 DISCOUNT formula parity', () => {
+  it('calculates net amount from fraction discount', () => {
+    expect(evaluateTableFormula('DISCOUNT([Basic Value], [Total Discount])', { 'Basic Value': 1980, 'Total Discount': 0.2 })).toBe(1584);
+  });
+  it('calculates net amount from whole-percent discount', () => {
+    expect(evaluateTableFormula('DISCOUNT([Basic Value], [Total Discount])', { 'Basic Value': 1980, 'Total Discount': 20 })).toBe(1584);
+  });
+});
+
+
+describe('normalizeTableFormulaReferences', () => {
+  it('brackets bare calculated-column references while preserving DISCOUNT function calls', () => {
+    const table = createDynamicTable([
+      { label: 'Basic Value', field: 'Basic Value' },
+      { label: 'Discount', field: 'Discount' },
+      { label: 'Taxable', field: 'Taxable Value' },
+    ]);
+    table.bodyRows[0]!.cells[1] = { ...table.bodyRows[0]!.cells[1]!, valueMode: 'formula', binding: undefined, formula: '[Basic Value] * [Total Discount]' };
+    table.bodyRows[0]!.cells[2] = { ...table.bodyRows[0]!.cells[2]!, valueMode: 'formula', binding: undefined, formula: '[Basic Value] - Discount' };
+    const normalized = normalizeTableFormulaReferences(table);
+    expect(normalized.bodyRows[0]!.cells[2]!.formula).toBe('[Basic Value] - [Discount]');
+    normalized.bodyRows[0]!.cells[2]!.formula = 'DISCOUNT([Basic Value], [Total Discount])';
+    expect(normalizeTableFormulaReferences(normalized).bodyRows[0]!.cells[2]!.formula).toBe('DISCOUNT([Basic Value], [Total Discount])');
+  });
 });

@@ -60,7 +60,7 @@ export function getPageDimensions(page: Pick<PageDefinition,'size'|'orientation'
   return page.orientation === 'LANDSCAPE' ? { widthMm: base.heightMm, heightMm: base.widthMm } : base;
 }
 
-export interface BlockLayout { widthPercent?:number; alignment?:BlockAlignment; marginTop?:number; marginRight?:number; marginBottom?:number; marginLeft?:number; keepTogether?:boolean; breakBefore?:boolean; breakAfter?:boolean; }
+export interface BlockLayout { widthPercent?:number; alignment?:BlockAlignment; marginTop?:number; marginRight?:number; marginBottom?:number; marginLeft?:number; keepTogether?:boolean; breakBefore?:boolean; breakAfter?:boolean; /** DB-6B Fix7: optional desktop-canvas fidelity coordinates. */ positionMode?:'FLOW'|'ABSOLUTE'; xMm?:number; yMm?:number; widthMm?:number; heightMm?:number; pageIndex?:number; }
 export interface TextStyle { fontFamily?:FontFamily; fontSize?:number; bold?:boolean; italic?:boolean; underline?:boolean; textColor?:string; backgroundColor?:string; alignment?:Alignment; lineHeight?:number; }
 export interface BorderStyle { width?:number; thickness?:number; color?:string; style?:BorderLineStyle|'DOTTED'; }
 export interface CellPadding { top?:number; right?:number; bottom?:number; left?:number; }
@@ -174,7 +174,7 @@ export type RenderBlock=RenderTextBlock|RenderFieldBlock|RenderTableBlock|Render
 export interface TemplateRenderResult { model:import('./renderer.js').RenderModel|null; warnings:TemplateWarning[]; errors:TemplateError[]; }
 export interface DiscoveredFieldPaths { scalarFields:string[]; collections:Array<{path:string;fields:string[]}>; }
 
-export interface RequiredBlockLayout { widthPercent:number; alignment:BlockAlignment; marginTop:number; marginRight:number; marginBottom:number; marginLeft:number; keepTogether:boolean; breakBefore:boolean; breakAfter:boolean; }
+export interface RequiredBlockLayout { widthPercent:number; alignment:BlockAlignment; marginTop:number; marginRight:number; marginBottom:number; marginLeft:number; keepTogether:boolean; breakBefore:boolean; breakAfter:boolean; positionMode?:'FLOW'|'ABSOLUTE'; xMm?:number; yMm?:number; widthMm?:number; heightMm?:number; pageIndex?:number; }
 export interface RequiredTextStyle { fontFamily:FontFamily; fontSize:number; bold:boolean; italic:boolean; underline:boolean; textColor:string; backgroundColor:string; alignment:Alignment; lineHeight:number; }
 export interface RequiredBorderStyle { width:number; color:string; style:BorderLineStyle; }
 export interface RequiredCellPadding { top:number;right:number;bottom:number;left:number; }

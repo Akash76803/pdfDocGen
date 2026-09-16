@@ -252,3 +252,5 @@ The Generate workspace is now functional for one-document output. It uses the sa
 
 ## DB-2 Fix4 — Content Border Margin Box
 The configurable page/content border now follows the page margin box instead of the physical paper edge. See `docs/DB2_FIX4_CONTENT_BORDER_MARGIN_BOX.md`.
+
+DB-6B Fix3: API shared local template repository enabled.

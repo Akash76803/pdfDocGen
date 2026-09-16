@@ -5,5 +5,14 @@
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
-  "scripts": { "build": "tsc -b", "typecheck": "tsc --noEmit" }
+  "scripts": {
+    "build": "tsc -b",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@document-tool/contracts": "*",
+    "@document-tool/template-engine": "*",
+    "@document-tool/renderer-pdf": "*",
+    "@document-tool/renderer-docx": "*"
+  }
 }

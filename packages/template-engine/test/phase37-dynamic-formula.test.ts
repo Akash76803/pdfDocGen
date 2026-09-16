@@ -33,3 +33,16 @@ describe('Phase 3.7 dynamic formula engine',()=>{
     expect(summary.rows[0].cells[1].value).toBe('32.00');
   });
 });
+
+describe('DB-6B Fix8 discount formula compatibility',()=>{
+  const discountBindings=[
+    {id:'base',label:'Basic Value',path:'basicValue'},
+    {id:'discount',label:'Total Discount',path:'totalDiscount'},
+  ];
+  it('supports DISCOUNT with fraction rates',()=>{
+    expect(evaluateFormula('DISCOUNT({{base}},{{discount}})',discountBindings,{rows:[{basicValue:1980,totalDiscount:0.2}]})).toBe(1584);
+  });
+  it('supports DISCOUNT with whole-percent rates',()=>{
+    expect(evaluateFormula('DISCOUNT({{base}},{{discount}})',discountBindings,{rows:[{basicValue:1980,totalDiscount:20}]})).toBe(1584);
+  });
+});
