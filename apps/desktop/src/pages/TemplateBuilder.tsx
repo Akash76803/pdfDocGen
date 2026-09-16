@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import type { NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
 import QRCode from 'react-qr-code';
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
@@ -8,7 +9,7 @@ import {
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
 import { RecordPicker } from '../components/RecordPicker.tsx';
-import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState, type NormalizedRecord, type NormalizedValue } from '../lib/dataSourceStore.ts';
+import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState } from '../lib/dataSourceStore.ts';
 import { loadImageAsset, saveImageAsset } from '../lib/imageAssetStore.ts';
 import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
@@ -1227,16 +1228,16 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
             <span><b>{jsonBodyResult.documentFields.length}</b> document fields</span>
             <span><b>{jsonBodyResult.itemFields.length}</b> item fields</span>
             <span><b>{jsonBodyResult.itemCount}</b> item rows</span>
-            <span><b>{jsonBodyResult.formulaFieldsExcluded.length}</b> formulas excluded</span>
+            <span><b>{jsonBodyResult.calculatedFieldsExcluded.length}</b> calculated fields excluded</span>
           </div>
-          <div className="table-modal-note">Ready-to-send REST API request for the current template. Imported field labels are converted to stable API-safe camelCase paths; Formula Fields remain calculated inside Document Builder and are intentionally excluded.</div>
-          {jsonBodyResult.formulaFieldsExcluded.length > 0 && <div className="json-body-excluded"><span>Calculated internally</span><code>{jsonBodyResult.formulaFieldsExcluded.join(', ')}</code></div>}
+          <div className="table-modal-note">Ready-to-send REST API request for the current template. Only external/source inputs are included. Formula Fields, table calculated columns, aggregate/summary outputs, grouped outputs, and system pagination fields remain calculated inside Document Builder; their raw source dependencies are included automatically.</div>
+          {jsonBodyResult.calculatedFieldsExcluded.length > 0 && <div className="json-body-excluded"><span>Calculated internally</span><code>{jsonBodyResult.calculatedFieldsExcluded.join(', ')}</code></div>}
           {jsonBodyResult.warnings.map((warning) => <div key={warning} className="json-body-warning">{warning}</div>)}
           <div className="json-body-excluded"><span>Clean API request</span><code>POST /api/v1/documents/generate</code></div>
           <textarea className="json-body-code" readOnly spellCheck={false} value={jsonBodyResult.requestJson} aria-label="Generated API request JSON" />
           {inputContractResult && <>
             <div className="json-body-excluded"><span>Template Input Contract v{inputContractResult.contract.contractVersion}</span><code>{inputContractResult.contract.required.length} required • {inputContractResult.contract.optional.length} optional • {inputContractResult.contract.collections.items?.fields.length ?? 0} item fields</code></div>
-            <div className="table-modal-note">Stable DB-6A integration contract. Image bindings advertise URL / Base64 / data URL support, while Formula Fields remain calculated internally.</div>
+            <div className="table-modal-note">Stable DB-6A integration contract. Image bindings advertise URL / Base64 / data URL support; all internally calculated outputs are excluded while their leaf/source dependencies remain in the contract.</div>
             <textarea className="json-body-code" readOnly spellCheck={false} value={inputContractResult.json} aria-label="Template input contract" />
           </>}
           <div className="table-modal-actions json-body-actions"><button type="button" className="secondary" onClick={() => { setJsonBodyResult(null); setInputContractResult(null); }}>Close</button><div><button type="button" className="secondary" onClick={() => { void copyCurrentDocumentJsonBody(); }}><Clipboard size={15}/>{jsonBodyCopied ? 'Copied Request' : 'Copy Request'}</button><button type="button" className="secondary" onClick={() => { void copyTemplateInputContract(); }} disabled={!inputContractResult}><Clipboard size={15}/>{inputContractCopied ? 'Copied Schema' : 'Copy Schema'}</button><button type="button" className="secondary" onClick={downloadCurrentDocumentJsonBody}><Download size={15}/>Request .json</button><button type="button" className="primary" onClick={downloadTemplateInputContract} disabled={!inputContractResult}><Download size={15}/>Schema .json</button></div></div>
@@ -3048,11 +3049,10 @@ function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, fo
       if (!unresolved.has(formula.id)) continue;
       const name = formula.formulaName!.trim();
       const value = evaluateDocumentFormulaExpression(formula.formulaExpression, context, aggregateRows);
-      if (value !== null && value !== undefined) {
-        context[name] = value;
-        unresolved.delete(formula.id);
-        progressed = true;
-      }
+      if (value == null) continue;
+      context[name] = value;
+      unresolved.delete(formula.id);
+      progressed = true;
     }
     if (!progressed) break;
   }

@@ -1,18 +1,29 @@
 # Source Baseline
 
-Phase: DB-6B — Document Generation REST API (foundation)
-Git source of truth before this phase: `Akash76803/pdfDocGen` main commit `74da75458369dabcc1cf57335ed250bd7d9de81a`.
+## Authoritative Git baseline for DB-6B Fix11
+- Repository: `Akash76803/pdfDocGen`
+- Branch: `main`
+- Commit: `5f231615448db0671cc583f2d809461504ecf1b8`
+- Commit message: `feat(api): complete PDF generation fidelity, custom tables, grouped summary, and typecheck/test fixes`
+- Baseline date: 2026-09-16
 
-DB-6A at that commit passed GitHub Code Health: dependency install, typecheck, tests and build.
+The Fix11 local package was prepared from the source matching this Git commit. Key baseline blob hashes were verified against GitHub before modification, including:
+- `packages/generation-core/src/desktop-parity.ts` → `cc9dd6277f780902f2f1718c07ae72370d7367ac`
+- `packages/generation-core/src/desktop-formulas.ts` → `f92a0bcd2f5bbad7253bf6425d4b86efaa04e4ca`
+- `packages/generation-core/src/index.ts` → `ebac82509cfad58ea8e0ebef9663e748c31944b7`
+- `apps/api/src/desktop-template-adapter.ts` → `35500c25fe73559848fec91134488101f93221f1`
 
-DB-6B additions in this ZIP are not yet committed to Git. The API transport/contract and generation-service boundary are implemented. Production headless renderer adapter wiring remains pending before DB-6B can be marked COMPLETE.
+## DB-6B Fix11 local changes
+Fix11 adds derived financial formula parity for API requests that omit redundant row totals:
+- missing `Total GST` is derived from CGST + SGST + IGST, with Taxable × GST % as fallback;
+- missing `Final Amount` is derived from Taxable + Total GST;
+- explicit API values are never overwritten;
+- derived values are materialized before grouped/HSN summaries and document Formula Fields.
 
-## DB-6B Fix7 local-first baseline
-- Headless Fidelity Bridge implemented on top of DB-6B Fix6.
-- Formula fields, self-contained static images, and desktop absolute layout metadata are now carried into headless PDF generation.
-- See `README-DB6B-Fix7-Headless-Fidelity-Bridge.md`.
+Fix11 is local-only until the user explicitly requests a Git push. The delivered Fix11 ZIP becomes the authoritative local baseline after delivery.
 
-## DB-6B Fix8
-- Added DISCOUNT(amount, rate) formula parity to desktop table preview and headless template engine.
-- Supports fraction rates (0.20) and whole-percent rates (20).
-- User invoice smoke: 1980->1584, 2170->1736, 5620->4496.
+## DB-6B Fix12 local changes
+- Git source reference: `5d5105951d7513a4183e49806adec634dc1675f4` (latest `main` at implementation start).
+- Clean API input contract: source leaves only; formula/table-calculated/summary/grouped/system outputs excluded; raw dependencies included recursively.
+- Dynamic calculated-column canonical output aliases align with summary aggregate declarations for headless compatibility.
+- Deliverable: `Document-Builder-DB6B-Fix12-Clean-API-Input-Contract.zip`.

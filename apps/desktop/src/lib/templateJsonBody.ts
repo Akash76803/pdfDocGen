@@ -24,6 +24,7 @@ export type TemplateJsonBodyResult = {
   documentFields: string[];
   itemFields: string[];
   formulaFieldsExcluded: string[];
+  calculatedFieldsExcluded: string[];
   itemCount: number;
   warnings: string[];
   request: Record<string, unknown>;
@@ -60,65 +61,225 @@ function formulaCandidates(expression: string | undefined): string[] {
   return [...refs];
 }
 
+type DependencyScope = 'document' | 'item';
+type CalculationDependency = { name: string; scope: DependencyScope };
+type CalculationNode = { displayName: string; dependencies: CalculationDependency[] };
+type CalculationIndex = { byAlias: Map<string, CalculationNode>; displayNames: Set<string> };
+
 function fieldLookup(fields: FieldDefinition[]) {
   return new Map(fields.map((field) => [field.name.toLocaleLowerCase(), field]));
 }
 
-function sourceFieldName(candidate: string | undefined, fields: FieldDefinition[], formulas: Set<string>): string | null {
+function sourceFieldName(candidate: string | undefined, fields: FieldDefinition[]): string | null {
   const raw = candidate?.trim();
   if (!raw) return null;
   const key = raw.toLocaleLowerCase();
   if (SYSTEM_TOKENS.has(key)) return null;
   const lookup = fieldLookup(fields);
-  const matchedField = lookup.get(key);
-  if (matchedField) return matchedField.name;
-  if (formulas.has(key)) return null;
-  return null;
-}
-
-function addCandidate(target: Set<string>, candidate: string | undefined, fields: FieldDefinition[], formulas: Set<string>) {
-  const name = sourceFieldName(candidate, fields, formulas);
-  if (name) target.add(name);
-}
-
-function addTextTokens(target: Set<string>, value: string | undefined, fields: FieldDefinition[], formulas: Set<string>) {
-  for (const token of tokenNames(value)) addCandidate(target, token, fields, formulas);
-}
-
-function addFormulaReferences(target: Set<string>, expression: string | undefined, fields: FieldDefinition[], formulas: Set<string>) {
-  for (const ref of formulaCandidates(expression)) addCandidate(target, ref, fields, formulas);
+  return lookup.get(key)?.name ?? null;
 }
 
 function cells(rows: TableRow[]): TableCell[] {
   return rows.flatMap((row) => row.cells);
 }
 
-function collectCellInputs(target: Set<string>, cell: TableCell, fields: FieldDefinition[], formulas: Set<string>) {
-  addCandidate(target, cell.binding, fields, formulas);
-  addTextTokens(target, cell.content, fields, formulas);
-  addFormulaReferences(target, cell.formula, fields, formulas);
-  addCandidate(target, cell.aggregate?.field, fields, formulas);
-  addFormulaReferences(target, cell.summaryFormula, fields, formulas);
+function addCalculationNode(index: CalculationIndex, displayName: string, aliases: Array<string | undefined>, dependencies: CalculationDependency[]) {
+  const cleanDisplay = displayName.trim();
+  if (cleanDisplay) index.displayNames.add(cleanDisplay);
+  const node: CalculationNode = { displayName: cleanDisplay || displayName, dependencies };
+  for (const alias of aliases) {
+    const key = alias?.trim().toLocaleLowerCase();
+    if (key && !SYSTEM_TOKENS.has(key)) index.byAlias.set(key, node);
+  }
 }
 
-function collectTableInputs(table: TableDefinition, document: Set<string>, items: Set<string>, fields: FieldDefinition[], formulas: Set<string>) {
+function buildCalculationIndex(pages: JsonBodyPage[]): CalculationIndex {
+  const index: CalculationIndex = { byAlias: new Map(), displayNames: new Set() };
+  const elements = pages.flatMap((page) => page.elements);
+
+  // Document Formula Fields are internal outputs. Aggregate references are item-level
+  // dependencies; ordinary references are document-level unless they resolve to another
+  // calculated node later.
+  for (const element of elements) {
+    if (element.type !== 'formula' || !element.formulaName?.trim()) continue;
+    const aggregateRefs = new Set(aggregateFormulaCandidates(element.formulaExpression).map((name) => name.toLocaleLowerCase()));
+    const dependencies = formulaCandidates(element.formulaExpression).map((name) => ({
+      name,
+      scope: aggregateRefs.has(name.toLocaleLowerCase()) ? 'item' as const : 'document' as const,
+    }));
+    addCalculationNode(index, element.formulaName, [element.formulaName], dependencies);
+  }
+
+  // Dynamic table formula columns are row-level calculated outputs. Summary cells in the
+  // same physical column can carry a legacy/source alias (for example Taxable Value for a
+  // calculated Taxable column); treat that alias as the same internal output so it is not
+  // accidentally emitted into the external request.
+  for (const element of elements) {
+    const table = element.type === 'table' ? element.table : undefined;
+    if (!table) continue;
+
+    if (table.mode === 'dynamic') {
+      const bodyCells = table.bodyRows[0]?.cells ?? [];
+      table.columns.forEach((column, columnIndex) => {
+        const cell = bodyCells[columnIndex];
+        if (!cell || cell.valueMode !== 'formula' || !cell.formula?.trim()) return;
+        const aliases: Array<string | undefined> = [column.label, column.key, cell.binding];
+        for (const row of table.customRows) {
+          const summaryCell = row.cells[columnIndex];
+          if (!summaryCell || (summaryCell.summaryMode !== 'aggregate' && summaryCell.summaryMode !== 'formula')) continue;
+          aliases.push(summaryCell.summaryName, summaryCell.aggregate?.field);
+        }
+        const dependencies = formulaCandidates(cell.formula).map((name) => ({ name, scope: 'item' as const }));
+        addCalculationNode(index, column.label || column.key, aliases, dependencies);
+      });
+
+      // Grouped rows are generated inside Document Builder. Their synthetic keys and
+      // aggregate/formula outputs are never external inputs; only their raw dependencies are.
+      for (const grouped of table.binding?.grouping?.columns ?? []) {
+        const dependencies = grouped.operation === 'formula'
+          ? formulaCandidates(grouped.formula).map((name) => ({ name, scope: 'item' as const }))
+          : (grouped.field?.trim() ? [{ name: grouped.field.trim(), scope: 'item' as const }] : []);
+        const groupedAliases = grouped.operation === 'formula' && !grouped.field?.trim()
+          ? [grouped.outputKey, grouped.label]
+          : [grouped.outputKey];
+        addCalculationNode(index, grouped.label || grouped.outputKey, groupedAliases, dependencies);
+      }
+
+      // Final/custom summary outputs are also internal calculations. Register their names and
+      // column aliases where available, but do not replace an existing body-formula mapping.
+      for (const row of table.customRows) {
+        row.cells.forEach((cell, columnIndex) => {
+          if (cell.summaryMode !== 'aggregate' && cell.summaryMode !== 'formula') return;
+          const column = table.columns[columnIndex];
+          const dependencies = cell.summaryMode === 'formula'
+            ? formulaCandidates(cell.summaryFormula).map((name) => ({ name, scope: 'item' as const }))
+            : (cell.aggregate?.field?.trim() ? [{ name: cell.aggregate.field.trim(), scope: 'item' as const }] : []);
+          const aliases = cell.summaryName?.trim() ? [cell.summaryName] : [];
+          addCalculationNode(index, cell.summaryName || column?.label || 'Summary', aliases, dependencies);
+        });
+      }
+    } else {
+      // Custom-table formula cells are document-level calculated content.
+      for (const cell of cells(table.rows)) {
+        if (cell.valueMode !== 'formula' || !cell.formula?.trim()) continue;
+        const name = cell.binding?.trim() || cell.content?.trim();
+        if (!name) continue;
+        addCalculationNode(index, name, [name], formulaCandidates(cell.formula).map((dep) => ({ name: dep, scope: 'document' as const })));
+      }
+    }
+  }
+  return index;
+}
+
+function resolveCandidate(
+  candidate: string | undefined,
+  scope: DependencyScope,
+  document: Set<string>,
+  items: Set<string>,
+  fields: FieldDefinition[],
+  calculations: CalculationIndex,
+  stack = new Set<string>(),
+) {
+  const raw = candidate?.trim();
+  if (!raw) return;
+  const key = raw.toLocaleLowerCase();
+  if (SYSTEM_TOKENS.has(key)) return;
+
+  const calculated = calculations.byAlias.get(key);
+  if (calculated) {
+    if (stack.has(key)) {
+      // A calculated output may intentionally aggregate a raw source field with the same
+      // display name (for example TOTAL GST = SUM([Total GST])). In that self-reference
+      // case, fall back to the actual source field instead of dropping the dependency.
+      const source = sourceFieldName(raw, fields);
+      if (source) (scope === 'item' ? items : document).add(source);
+      return;
+    }
+    const nextStack = new Set(stack);
+    nextStack.add(key);
+    for (const dependency of calculated.dependencies) {
+      resolveCandidate(dependency.name, dependency.scope, document, items, fields, calculations, nextStack);
+    }
+    return;
+  }
+
+  const source = sourceFieldName(raw, fields);
+  if (!source) return;
+  (scope === 'item' ? items : document).add(source);
+}
+
+function resolveTextTokens(
+  value: string | undefined,
+  scope: DependencyScope,
+  document: Set<string>,
+  items: Set<string>,
+  fields: FieldDefinition[],
+  calculations: CalculationIndex,
+) {
+  for (const token of tokenNames(value)) resolveCandidate(token, scope, document, items, fields, calculations);
+}
+
+function resolveFormulaReferences(
+  expression: string | undefined,
+  scope: DependencyScope,
+  document: Set<string>,
+  items: Set<string>,
+  fields: FieldDefinition[],
+  calculations: CalculationIndex,
+) {
+  for (const ref of formulaCandidates(expression)) resolveCandidate(ref, scope, document, items, fields, calculations);
+}
+
+function collectCellInputs(
+  cell: TableCell,
+  scope: DependencyScope,
+  document: Set<string>,
+  items: Set<string>,
+  fields: FieldDefinition[],
+  calculations: CalculationIndex,
+) {
+  if (cell.summaryMode === 'aggregate') {
+    resolveCandidate(cell.aggregate?.field, 'item', document, items, fields, calculations);
+    return;
+  }
+  if (cell.summaryMode === 'formula') {
+    resolveFormulaReferences(cell.summaryFormula, 'item', document, items, fields, calculations);
+    return;
+  }
+  if (cell.valueMode === 'formula') {
+    resolveFormulaReferences(cell.formula, scope, document, items, fields, calculations);
+    return;
+  }
+  resolveCandidate(cell.binding, scope, document, items, fields, calculations);
+  resolveTextTokens(cell.content, scope, document, items, fields, calculations);
+}
+
+function collectTableInputs(
+  table: TableDefinition,
+  document: Set<string>,
+  items: Set<string>,
+  fields: FieldDefinition[],
+  calculations: CalculationIndex,
+) {
   if (table.mode === 'custom') {
-    for (const cell of cells(table.rows)) collectCellInputs(document, cell, fields, formulas);
+    for (const cell of cells(table.rows)) collectCellInputs(cell, 'document', document, items, fields, calculations);
     return;
   }
 
   const binding = table.binding;
-  for (const parentKey of binding?.parentKeys?.filter(Boolean) ?? (binding?.parentKey ? [binding.parentKey] : [])) addCandidate(document, parentKey, fields, formulas);
-  addCandidate(document, binding?.parentKey, fields, formulas);
-  addCandidate(document, binding?.childForeignKey, fields, formulas);
+  for (const parentKey of binding?.parentKeys?.filter(Boolean) ?? (binding?.parentKey ? [binding.parentKey] : [])) {
+    resolveCandidate(parentKey, 'document', document, items, fields, calculations);
+  }
+  resolveCandidate(binding?.parentKey, 'document', document, items, fields, calculations);
+  resolveCandidate(binding?.childForeignKey, 'document', document, items, fields, calculations);
 
-  for (const cell of cells(table.bodyRows)) collectCellInputs(items, cell, fields, formulas);
-  for (const cell of cells(table.customRows)) collectCellInputs(items, cell, fields, formulas);
+  for (const cell of cells(table.bodyRows)) collectCellInputs(cell, 'item', document, items, fields, calculations);
+  for (const cell of cells(table.customRows)) collectCellInputs(cell, 'item', document, items, fields, calculations);
 
-  for (const groupBy of binding?.grouping?.groupBy ?? []) addCandidate(items, groupBy, fields, formulas);
+  for (const groupBy of binding?.grouping?.groupBy ?? []) resolveCandidate(groupBy, 'item', document, items, fields, calculations);
   for (const column of binding?.grouping?.columns ?? []) {
-    addCandidate(items, column.field, fields, formulas);
-    addFormulaReferences(items, column.formula, fields, formulas);
+    if (column.operation === 'formula') resolveFormulaReferences(column.formula, 'item', document, items, fields, calculations);
+    else resolveCandidate(column.field, 'item', document, items, fields, calculations);
   }
 }
 
@@ -171,12 +332,11 @@ function stripRowPrefix(path: string, repeatSources: string[]): string {
   return path;
 }
 
-function matchingDocumentRows(source: BuilderDataSource | null | undefined, record: NormalizedRecord | null | undefined, parentKeys: string[], documentFields?: Set<string>): NormalizedRecord[] {
+function matchingDocumentRows(source: BuilderDataSource | null | undefined, record: NormalizedRecord | null | undefined, parentKeys: string[]): NormalizedRecord[] {
   if (!source || !record) return record ? [record] : [];
-  const keysToMatch = parentKeys.length ? parentKeys : (documentFields ? [...documentFields].filter((key) => valueForField(record, key) !== undefined) : []);
-  if (!keysToMatch.length) return source.records.length ? source.records : [record];
-  const expected = keysToMatch.map((key) => valueForField(record, key));
-  return source.records.filter((row) => keysToMatch.every((key, index) => {
+  if (!parentKeys.length) return [record];
+  const expected = parentKeys.map((key) => valueForField(record, key));
+  return source.records.filter((row) => parentKeys.every((key, index) => {
     const actual = valueForField(row, key);
     return JSON.stringify(actual ?? null) === JSON.stringify(expected[index] ?? null);
   }));
@@ -191,19 +351,13 @@ export function buildCurrentDocumentJsonBody(input: {
   outputFormat?: 'pdf' | 'docx-editable';
 }): TemplateJsonBodyResult {
   const fields = input.source?.fields ?? [];
-  const formulas = new Set<string>();
-  const formulaNames: string[] = [];
-  for (const element of input.pages.flatMap((page) => page.elements)) {
-    if (element.type !== 'formula') continue;
-    const name = element.formulaName?.trim();
-    if (!name) continue;
-    formulas.add(name.toLocaleLowerCase());
-    formulaNames.push(name);
-  }
+  const calculations = buildCalculationIndex(input.pages);
+  const formulaNames = input.pages.flatMap((page) => page.elements)
+    .filter((element) => element.type === 'formula' && Boolean(element.formulaName?.trim()))
+    .map((element) => element.formulaName!.trim());
 
   const documentFields = new Set<string>();
   const explicitDocumentFields = new Set<string>();
-  const formulaDependencyFields = new Set<string>();
   const itemFields = new Set<string>();
   const parentKeys = new Set<string>();
   const repeatSources = new Set<string>();
@@ -211,22 +365,17 @@ export function buildCurrentDocumentJsonBody(input: {
 
   for (const element of allElements) {
     if (element.type === 'formula') {
-      // Formula outputs are intentionally excluded from the external ERP body.
-      // Aggregate formula inputs are row-level dependencies because SUM/AVG/etc.
-      // operate over the repeating item collection in both Desktop and headless API.
-      const aggregateRefs = new Set(aggregateFormulaCandidates(element.formulaExpression));
-      for (const ref of aggregateRefs) addCandidate(itemFields, ref, fields, formulas);
-      for (const ref of formulaCandidates(element.formulaExpression)) {
-        if (!aggregateRefs.has(ref)) addCandidate(formulaDependencyFields, ref, fields, formulas);
-      }
+      // Resolve the Formula Field transitively to its leaf/source dependencies. The formula
+      // output itself never crosses the API boundary.
+      resolveCandidate(element.formulaName, 'document', documentFields, itemFields, fields, calculations);
       continue;
     }
-    addCandidate(explicitDocumentFields, element.binding, fields, formulas);
-    addCandidate(explicitDocumentFields, element.shapeMediaBinding, fields, formulas);
-    if (element.conditionEnabled) addCandidate(explicitDocumentFields, element.conditionField, fields, formulas);
-    addTextTokens(explicitDocumentFields, element.text, fields, formulas);
+    resolveCandidate(element.binding, 'document', explicitDocumentFields, itemFields, fields, calculations);
+    resolveCandidate(element.shapeMediaBinding, 'document', explicitDocumentFields, itemFields, fields, calculations);
+    if (element.conditionEnabled) resolveCandidate(element.conditionField, 'document', explicitDocumentFields, itemFields, fields, calculations);
+    resolveTextTokens(element.text, 'document', explicitDocumentFields, itemFields, fields, calculations);
     if (element.type === 'table' && element.table) {
-      collectTableInputs(element.table, explicitDocumentFields, itemFields, fields, formulas);
+      collectTableInputs(element.table, explicitDocumentFields, itemFields, fields, calculations);
       const binding = element.table.binding;
       for (const key of binding?.parentKeys?.filter(Boolean) ?? (binding?.parentKey ? [binding.parentKey] : [])) parentKeys.add(key);
       if (binding?.repeatSource) repeatSources.add(binding.repeatSource);
@@ -234,7 +383,6 @@ export function buildCurrentDocumentJsonBody(input: {
   }
 
   for (const field of explicitDocumentFields) documentFields.add(field);
-  for (const field of formulaDependencyFields) documentFields.add(field);
 
   // Formula dependencies that are also row-level dependencies belong in `items`,
   // not duplicated at document level unless another non-table element uses them.
@@ -247,7 +395,7 @@ export function buildCurrentDocumentJsonBody(input: {
     setNested(body, toApiSafePath(path), serializableValue(valueForField(input.record ?? null, path), field));
   }
 
-  const rows = matchingDocumentRows(input.source, input.record, [...parentKeys], documentFields);
+  const rows = matchingDocumentRows(input.source, input.record, [...parentKeys]);
   if (itemFields.size > 0) {
     const itemList = (rows.length ? rows : [input.record ?? {}]).map((row) => {
       const item: Record<string, unknown> = {};
@@ -281,6 +429,12 @@ export function buildCurrentDocumentJsonBody(input: {
     data: body,
   };
 
+  const externalSourceNames = new Set([...documentFields, ...itemFields].map((field) => field.toLocaleLowerCase()));
+  const calculatedFieldsExcluded = [...new Set([
+    ...formulaNames,
+    ...[...calculations.displayNames].filter((name) => Boolean(name) && !externalSourceNames.has(name.toLocaleLowerCase())),
+  ])].sort();
+
   return {
     body,
     json: JSON.stringify(body, null, 2),
@@ -289,6 +443,7 @@ export function buildCurrentDocumentJsonBody(input: {
     documentFields: [...documentFields].filter((field) => !rowOnly.has(field) || parentKeys.has(field) || explicitDocumentFields.has(field)).sort(),
     itemFields: [...itemFields].sort(),
     formulaFieldsExcluded: [...new Set(formulaNames)].sort(),
+    calculatedFieldsExcluded,
     itemCount: Array.isArray(body.items) ? body.items.length : 0,
     warnings,
   };
@@ -399,7 +554,7 @@ export function buildTemplateInputContract(input: {
     collections: itemFields.length ? {
       items: { path: 'items', required: itemRequired.length > 0, fields: itemFields, requiredFields: itemRequired, optionalFields: itemOptional },
     } : {},
-    calculatedInternally: bodyResult.formulaFieldsExcluded,
+    calculatedInternally: bodyResult.calculatedFieldsExcluded,
     example: bodyResult.body,
     warnings: bodyResult.warnings,
   };

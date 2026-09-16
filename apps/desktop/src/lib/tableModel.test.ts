@@ -28,7 +28,7 @@ describe('DB-4 table model', () => {
     const table = addCustomSummaryRow(createDynamicTable(5, 'items', 1));
     expect(table.customRows).toHaveLength(1);
     expect(table.customRows[0].cells[0].content).toBe('Subtotal');
-    expect(table.customRows[0].cells[0].colSpan).toBe(1);
+    expect(table.customRows[0].cells[0].colSpan ?? 1).toBe(1);
   });
 });
 

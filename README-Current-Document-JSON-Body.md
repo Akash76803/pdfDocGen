@@ -43,3 +43,7 @@ Examples:
 Dot notation remains nested (`Customer.Name` → `customer.name`). Formula outputs remain excluded because Document Builder calculates them internally.
 
 The modal still provides the DB-6A Template Input Contract / schema separately.
+
+## DB-6B Fix12 clean external-input contract
+
+Copy Request now emits only source/external input fields and recursively resolves calculated outputs to their raw dependencies. Formula Fields, Dynamic Table calculated columns, aggregate/summary outputs, grouped synthetic outputs, and page-number system tokens are excluded from the request. The JSON Body modal lists all internally calculated outputs, and the Template Input Contract uses the same classification.

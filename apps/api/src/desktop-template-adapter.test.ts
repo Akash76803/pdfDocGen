@@ -141,3 +141,30 @@ test('normalizes bare calculated-column references without confusing DISCOUNT fu
   expect(taxable.formulaExpression).toBe('{{b0}} - {{b1}}');
   expect(taxable.formulaBindings?.map((binding)=>binding.path)).toEqual(['basicValue','discount']);
 });
+
+test('uses summary aggregate field as canonical path for a calculated table column', () => {
+  const result = adaptDesktopTemplateEntry({
+    id:'calc-summary-alias',name:'Calculated Summary Alias',version:1,
+    payload:{pages:[{id:'p1',settings:{},elements:[{
+      id:'t1',type:'table',x:0,y:0,width:500,height:100,table:{
+        columns:[
+          {id:'c1',key:'basic',label:'Basic Value',width:100,align:'right'},
+          {id:'c2',key:'taxable',label:'Taxable',width:100,align:'right'},
+        ],
+        headerRows:[{cells:[{content:'Basic Value'},{content:'Taxable'}]}],
+        bodyRows:[{cells:[
+          {binding:'Basic Value'},
+          {valueMode:'formula',formula:'[Basic Value] * 0.8'},
+        ]}],
+        customRows:[{cells:[
+          {content:'Total'},
+          {summaryMode:'aggregate',aggregate:{operation:'sum',field:'Taxable Value'},summaryName:'Taxable Total'},
+        ]}],
+      },
+    }]}]},
+  });
+  const table=result.body.blocks[0];
+  expect(table?.type).toBe('TABLE'); if(table?.type!=='TABLE')throw new Error('Expected TABLE');
+  expect(table.columns[1]?.path).toBe('taxableValue');
+  expect(table.columns[1]?.targetPath).toBe('taxableValue');
+});

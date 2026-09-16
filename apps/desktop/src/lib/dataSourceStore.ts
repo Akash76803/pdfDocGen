@@ -1,5 +1,4 @@
 import type { FieldDefinition, NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
-export type { NormalizedRecord, NormalizedValue };
 
 export type BuilderDataSource = {
   id: string;

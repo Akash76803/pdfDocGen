@@ -144,6 +144,79 @@ function numeric(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+
+function firstNumeric(row: NormalizedRecord, fields: string[]): number | null {
+  for (const field of fields) {
+    const value = numeric(valueFor(row, field));
+    if (value !== null) return value;
+  }
+  return null;
+}
+
+function hasValue(row: NormalizedRecord, field: string): boolean {
+  const value = valueFor(row, field);
+  return value !== undefined && value !== null && value !== '';
+}
+
+function setAliases(row: NormalizedRecord, labels: string[], value: number) {
+  for (const label of labels) {
+    const keys = [label, toApiSafePath(label)];
+    const lowerCamel = label.toLowerCase().replace(/[^a-zA-Z0-9]+(.)/g, (_, chr) => chr.toUpperCase());
+    const camel = lowerCamel.charAt(0).toLowerCase() + lowerCamel.slice(1);
+    keys.push(camel);
+    for (const key of keys) {
+      if (key && !Object.prototype.hasOwnProperty.call(row, key)) {
+        row[key] = value;
+      }
+    }
+  }
+}
+
+/**
+ * Some ERP payloads intentionally omit redundant invoice row totals that the
+ * Desktop source already carries (for example Total GST and Final Amount).
+ * Reconstruct those values only when they are absent, using the same row-level
+ * values already available to the template. Explicit caller values always win.
+ */
+function materializeDerivedFinancialRows(group: DocumentGroup): DocumentGroup {
+  if (!group.items.length) return group;
+  const items = group.items.map((input) => {
+    const row = normalizedRecord(input);
+
+    if (!hasValue(row, 'Total GST')) {
+      const cgst = firstNumeric(row, ['CGST Amount', 'cgstAmount']);
+      const sgst = firstNumeric(row, ['SGST Amount', 'sgstAmount']);
+      const igst = firstNumeric(row, ['IGST Amount', 'igstAmount']);
+      const components = [cgst, sgst, igst].filter((value): value is number => value !== null);
+      let totalGst: number | null = components.length ? components.reduce((sum, value) => sum + value, 0) : null;
+
+      if (totalGst === null) {
+        const taxable = firstNumeric(row, ['Taxable Value', 'Taxable', 'taxableValue', 'taxable']);
+        const gstRateRaw = firstNumeric(row, ['GST %', 'gstPercent']);
+        if (taxable !== null && gstRateRaw !== null) {
+          const gstRate = Math.abs(gstRateRaw) > 1 ? gstRateRaw / 100 : gstRateRaw;
+          totalGst = taxable * gstRate;
+        }
+      }
+
+      if (totalGst !== null && Number.isFinite(totalGst)) {
+        setAliases(row, ['Total GST'], totalGst);
+      }
+    }
+
+    if (!hasValue(row, 'Final Amount')) {
+      const taxable = firstNumeric(row, ['Taxable Value', 'Taxable', 'taxableValue', 'taxable']);
+      const totalGst = firstNumeric(row, ['Total GST', 'totalGst', 'totalGST']);
+      if (taxable !== null && totalGst !== null) {
+        setAliases(row, ['Final Amount'], taxable + totalGst);
+      }
+    }
+
+    return row;
+  });
+  return { ...group, items };
+}
+
 function aggregate(rows: NormalizedRecord[], field: string, operation: string): NormalizedValue {
   const op = operation.toLocaleLowerCase();
   const values = rows.map((row) => valueFor(row, field)).filter((value) => value !== undefined && value !== null && value !== '');
@@ -227,5 +300,5 @@ function materializeGroupedTables(template: TemplateDefinition, group: DocumentG
  * into the DocumentGroup before TemplateEngine renders it.
  */
 export function applyDesktopResolvedDocumentParity(template: TemplateDefinition, group: DocumentGroup): DocumentGroup {
-  return materializeGroupedTables(template, materializeTableFormulaRows(template, group));
+  return materializeGroupedTables(template, materializeDerivedFinancialRows(materializeTableFormulaRows(template, group)));
 }

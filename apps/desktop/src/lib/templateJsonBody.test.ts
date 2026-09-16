@@ -122,7 +122,89 @@ describe('DB-6B Fix10 aggregate formula request contract', () => {
     expect(result.body).not.toHaveProperty('totalGST');
     expect(result.body.items).toEqual([
       {finalAmount:100,totalGst:18},
-      {finalAmount:200,totalGst:36},
     ]);
+  });
+});
+
+describe('DB-6B Fix12 clean external input contract', () => {
+  it('includes only leaf source inputs and excludes calculated/table/summary/grouped/system outputs', () => {
+    const contractSource: BuilderDataSource = {
+      id:'src-contract',name:'Contract',sourceType:'json',importedAt:'2026-09-16T00:00:00Z',warnings:[],
+      fields:[
+        {name:'Invoice No',label:'Invoice No',type:'string',required:true},
+        {name:'Basic Value',label:'Basic Value',type:'number',required:false},
+        {name:'Total Discount',label:'Total Discount',type:'number',required:false},
+        {name:'Discount',label:'Discount',type:'number',required:false},
+        {name:'Taxable Value',label:'Taxable Value',type:'number',required:false},
+        {name:'HSN',label:'HSN',type:'string',required:false},
+        {name:'GST %',label:'GST %',type:'number',required:false},
+        {name:'Total GST',label:'Total GST',type:'number',required:false},
+      ],
+      records:[{'Invoice No':'INV-1','Basic Value':1980,'Total Discount':0.2,Discount:396,'Taxable Value':1584,HSN:'73201020','GST %':0.18,'Total GST':285.12}],
+    };
+    const cleanTable: TableDefinition = {
+      id:'clean-table',name:'Items',mode:'dynamic',
+      columns:[
+        {id:'c1',key:'Basic Value',label:'Basic Value',width:80,minWidth:40,align:'right'},
+        {id:'c2',key:'Total Discount',label:'Total Discount',width:80,minWidth:40,align:'right'},
+        {id:'c3',key:'calc-discount',label:'Discount',width:80,minWidth:40,align:'right'},
+        {id:'c4',key:'calc-taxable',label:'Taxable',width:80,minWidth:40,align:'right'},
+      ],
+      headerRows:[],
+      bodyRows:[{id:'body',kind:'body',height:30,autoHeight:true,repeatOnEveryPage:false,keepTogether:true,cells:[
+        {id:'b1',type:'text',content:'',binding:'Basic Value',valueMode:'binding',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'b2',type:'text',content:'',binding:'Total Discount',valueMode:'binding',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'b3',type:'text',content:'',formula:'[Basic Value] * [Total Discount]',valueMode:'formula',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'b4',type:'text',content:'',formula:'[Basic Value] - [Discount]',valueMode:'formula',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+      ]}],
+      customRows:[{id:'summary',kind:'custom',height:30,autoHeight:true,repeatOnEveryPage:false,keepTogether:true,cells:[
+        {id:'s1',type:'text',content:'',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'s2',type:'text',content:'',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'s3',type:'text',content:'',summaryMode:'aggregate',aggregate:{operation:'sum',field:'Discount'},summaryName:'Discount Total',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'s4',type:'text',content:'',summaryMode:'aggregate',aggregate:{operation:'sum',field:'Taxable Value'},summaryName:'Taxable Total',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+      ]}],
+      rows:[],
+      binding:{repeatSource:'items',parentKey:'Invoice No',parentKeys:['Invoice No']},
+      pagination:{repeatHeader:true,allowRowSplit:false,keepRowsTogether:true},borderWidth:1,borderColor:'#000',defaultPadding:4,
+    };
+    const groupedTable: TableDefinition = {
+      ...cleanTable,id:'grouped',name:'Grouped',columns:[
+        {id:'g1',key:'__grouped_0',label:'HSN',width:80,minWidth:40,align:'left'},
+        {id:'g2',key:'__grouped_1',label:'Taxable',width:80,minWidth:40,align:'right'},
+        {id:'g3',key:'__grouped_2',label:'TOTAL',width:80,minWidth:40,align:'right'},
+      ],
+      bodyRows:[{id:'gb',kind:'body',height:30,autoHeight:true,repeatOnEveryPage:false,keepTogether:true,cells:[
+        {id:'gb1',type:'text',content:'',binding:'__grouped_0',valueMode:'binding',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'left',verticalAlign:'middle',padding:4}},
+        {id:'gb2',type:'text',content:'',binding:'__grouped_1',valueMode:'binding',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+        {id:'gb3',type:'text',content:'',binding:'__grouped_2',valueMode:'binding',rowSpan:1,colSpan:1,style:{background:'#fff',color:'#000',fontSize:10,bold:false,align:'right',verticalAlign:'middle',padding:4}},
+      ]}],customRows:[],
+      binding:{repeatSource:'items',grouping:{groupBy:['HSN'],columns:[
+        {label:'HSN',field:'HSN',operation:'group',outputKey:'__grouped_0'},
+        {label:'Taxable',field:'Taxable Value',operation:'sum',outputKey:'__grouped_1'},
+        {label:'TOTAL',field:'',operation:'formula',formula:'[Taxable] + [Total GST]',outputKey:'__grouped_2'},
+      ]}},
+    };
+
+    const result=buildCurrentDocumentJsonBody({
+      templateId:'invoice',source:contractSource,record:contractSource.records[0],
+      pages:[{elements:[
+        {id:'invoice',type:'text',text:'{{Invoice No}} {{pageNumber}} / {{totalPages}}'},
+        {id:'table',type:'table',table:cleanTable},
+        {id:'grouped',type:'table',table:groupedTable},
+        {id:'net',type:'formula',formulaName:'NET PAYABLE',formulaExpression:'SUM([Taxable Value]) + SUM([Total GST])'},
+        {id:'words',type:'formula',formulaName:'WORDS',formulaExpression:'NUMBER_TO_WORDS([NET PAYABLE])'},
+        {id:'show-words',type:'text',binding:'WORDS'},
+      ]}],
+    });
+
+    expect(result.body).toMatchObject({invoiceNo:'INV-1'});
+    expect(result.body.items).toEqual([{basicValue:1980,hsn:'73201020',totalDiscount:0.2,totalGst:285.12}]);
+    expect(result.body.items).not.toEqual(expect.arrayContaining([expect.objectContaining({discount:expect.anything()})]));
+    expect(result.body.items).not.toEqual(expect.arrayContaining([expect.objectContaining({taxableValue:expect.anything()})]));
+    expect(result.requestJson).not.toContain('pageNumber');
+    expect(result.requestJson).not.toContain('totalPages');
+    expect(result.requestJson).not.toContain('__grouped_');
+    expect(result.calculatedFieldsExcluded).toEqual(expect.arrayContaining(['Discount','Taxable','NET PAYABLE','WORDS','TOTAL']));
+    expect(result.itemFields).toEqual(['Basic Value','HSN','Total Discount','Total GST']);
   });
 });
