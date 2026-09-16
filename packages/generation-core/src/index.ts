@@ -1,8 +1,9 @@
-import { toApiSafePath, type DocumentGroup, type NormalizedRecord, type NormalizedValue, type TemplateDefinition } from '@document-tool/contracts';
+import type { DocumentGroup, NormalizedRecord, NormalizedValue, TemplateDefinition } from '@document-tool/contracts';
 import { TemplateEngine } from '@document-tool/template-engine';
 import { PdfRenderer } from '@document-tool/renderer-pdf';
 import { buildHeadlessEditableDocx } from './headless-editable-docx.js';
 import { applyDesktopFormulaFields } from './desktop-formulas.js';
+import { applyDesktopResolvedDocumentParity } from './desktop-parity.js';
 
 export type DocumentOutputFormat = 'pdf' | 'docx-exact' | 'docx-editable';
 export type DocumentResponseMode = 'binary' | 'base64';
@@ -99,16 +100,7 @@ function toNormalizedValue(value: unknown): NormalizedValue {
 }
 
 function toNormalizedRecord(value: Record<string, unknown>): NormalizedRecord {
-  const result: NormalizedRecord = {};
-  for (const [key, item] of Object.entries(value)) {
-    result[key] = toNormalizedValue(item);
-    // Also index under the safe camelCase path so templates can always resolve
-    // fields regardless of whether the API caller sends "Product: Products Name"
-    // or "productProductsName". Both keys point to the same normalized value.
-    const safe = toApiSafePath(key);
-    if (safe && safe !== key) result[safe] = toNormalizedValue(item);
-  }
-  return result;
+  return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, toNormalizedValue(item)]));
 }
 
 function rawDataToDocumentGroup(data: Record<string, unknown>): DocumentGroup {
@@ -153,7 +145,9 @@ export class HeadlessDocumentGenerationService implements DocumentGenerationServ
       throw new TemplateNotFoundError(command.templateId, command.templateVersion);
     }
 
-    const group = applyDesktopFormulaFields(template, rawDataToDocumentGroup(command.data));
+    const normalizedGroup = rawDataToDocumentGroup(command.data);
+    const parityGroup = applyDesktopResolvedDocumentParity(template, normalizedGroup);
+    const group = applyDesktopFormulaFields(template, parityGroup);
     const rendered = this.templateEngine.buildRenderModel(template, group);
     if (!rendered.model || rendered.errors.length) {
       throw new TemplateRenderFailedError('Template could not be rendered with the supplied data.', { errors: rendered.errors, warnings: rendered.warnings });
@@ -207,3 +201,4 @@ export class HeadlessDocumentGenerationService implements DocumentGenerationServ
 export class NativePdfDocumentGenerationService extends HeadlessDocumentGenerationService {}
 
 export { buildHeadlessEditableDocx } from './headless-editable-docx.js';
+export { applyDesktopResolvedDocumentParity } from './desktop-parity.js';

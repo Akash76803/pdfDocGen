@@ -94,3 +94,35 @@ describe('current document JSON body', () => {
   });
 
 });
+
+describe('DB-6B Fix10 aggregate formula request contract', () => {
+  it('puts SUM formula dependencies in items instead of the document root', () => {
+    const aggregateSource: BuilderDataSource = {
+      id:'src-agg',name:'Agg',sourceType:'json',importedAt:'2026-09-16T00:00:00Z',warnings:[],
+      fields:[
+        {name:'Invoice No',label:'Invoice No',type:'string',required:true},
+        {name:'Final Amount',label:'Final Amount',type:'number',required:false},
+        {name:'Total GST',label:'Total GST',type:'number',required:false},
+      ],
+      records:[
+        {'Invoice No':'INV-1','Final Amount':100,'Total GST':18},
+        {'Invoice No':'INV-1','Final Amount':200,'Total GST':36},
+      ],
+    };
+    const result=buildCurrentDocumentJsonBody({
+      source:aggregateSource,record:aggregateSource.records[0],
+      pages:[{elements:[
+        {id:'invoice',type:'text',binding:'Invoice No'},
+        {id:'net',type:'formula',formulaName:'NET PAYABLE AMOUNT',formulaExpression:'SUM([Final Amount])'},
+        {id:'gst',type:'formula',formulaName:'TOTAL GST',formulaExpression:'SUM([Total GST])'},
+      ]}],
+    });
+    expect(result.body).toMatchObject({invoiceNo:'INV-1'});
+    expect(result.body).not.toHaveProperty('finalAmount');
+    expect(result.body).not.toHaveProperty('totalGST');
+    expect(result.body.items).toEqual([
+      {finalAmount:100,totalGst:18},
+      {finalAmount:200,totalGst:36},
+    ]);
+  });
+});

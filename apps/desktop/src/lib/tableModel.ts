@@ -1354,7 +1354,7 @@ export function dynamicRows(
   // Primary flat-source model: restrict both Detail and Grouped Summary tables to the
   // currently selected Parent / Document before any grouping or aggregation happens.
   const parentKeys = configuredKeys(table.binding.parentKey, table.binding.parentKeys);
-  if (parentKeys.length > 0 && source && record) {
+  if (parentKeys.length > 0 && source && record && !table.binding?.childForeignKey) {
     const selectedParentKey = compositeKey(record, parentKeys);
     if (!selectedParentKey) return [];
     filtered = raw.filter((item) => compositeKey(item, parentKeys) === selectedParentKey);

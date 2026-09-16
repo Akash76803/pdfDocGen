@@ -82,3 +82,47 @@ it('evaluates desktop formula fields before rendering', async () => {
   const raw=new TextDecoder().decode(result.bytes);
   expect(raw).toContain('(1969.12)');
 });
+
+it('materializes desktop table formulas before grouped summaries', async () => {
+  const parityTemplate: TemplateDefinition = {
+    id:'parity-template',name:'Parity Template',version:1,
+    page:{size:'A4',orientation:'PORTRAIT',margins:{top:0,right:0,bottom:0,left:0}},
+    header:{blocks:[]},footer:{blocks:[]},
+    body:{blocks:[{
+      id:'items-table',type:'TABLE',sourcePath:'items',
+      columns:[
+        {id:'basic',label:'Basic Value',path:'basicValue'},
+        {id:'rate',label:'Total Discount',path:'totalDiscount'},
+        {id:'discount',label:'Discount',path:'discount',kind:'FORMULA',formulaExpression:'{{b0}} * {{b1}}',formulaBindings:[
+          {id:'b0',label:'Basic Value',path:'basicValue',sourceField:'basicValue',targetPath:'basicValue',sourcePath:'items'},
+          {id:'b1',label:'Total Discount',path:'totalDiscount',sourceField:'totalDiscount',targetPath:'totalDiscount',sourcePath:'items'},
+        ]},
+        {id:'taxable',label:'Taxable',path:'taxable',kind:'FORMULA',formulaExpression:'{{b0}} - {{b1}}',formulaBindings:[
+          {id:'b0',label:'Basic Value',path:'basicValue',sourceField:'basicValue',targetPath:'basicValue',sourcePath:'items'},
+          {id:'b1',label:'Discount',path:'discount',sourceField:'discount',targetPath:'discount',sourcePath:'items'},
+        ]},
+      ],
+    } as any]},
+    metadata:{desktopGroupedTables:[{
+      tableId:'hsn-summary',sourcePath:'__db5g_group_hsn',groupBy:['hsn'],columns:[
+        {field:'hsn',operation:'group',outputKey:'__grouped_0',label:'HSN'},
+        {field:'taxable',operation:'sum',outputKey:'__grouped_1',label:'Taxable'},
+        {field:'gstPercent',operation:'avg',outputKey:'__grouped_2',label:'GST %'},
+        {field:'totalGST',operation:'sum',outputKey:'__grouped_3',label:'Total GST'},
+        {operation:'formula',outputKey:'__grouped_7',label:'TOTAL',formula:'[Total GST] + [Taxable]'},
+      ],
+    }]},
+  };
+  const { applyDesktopResolvedDocumentParity } = await import('../src/index.ts');
+  const group = applyDesktopResolvedDocumentParity(parityTemplate, {
+    id:'d',key:'d',header:{},items:[
+      {basicValue:1980,totalDiscount:0.2,hsn:'73201020',gstPercent:0.18,totalGST:285.12},
+      {basicValue:2170,totalDiscount:0.2,hsn:'73201020',gstPercent:0.18,totalGST:312.48},
+    ],sourceItems:[],itemDetails:[],sourceRowIndexes:[0,1],warnings:[],valid:true,
+  });
+  expect(group.items[0]).toMatchObject({discount:396,taxable:1584});
+  expect(group.items[1]).toMatchObject({discount:434,taxable:1736});
+  expect(group.header.__db5g_group_hsn).toEqual([expect.objectContaining({
+    __grouped_0:'73201020',__grouped_1:3320,__grouped_2:0.18,__grouped_3:597.6,__grouped_7:3917.6,
+  })]);
+});

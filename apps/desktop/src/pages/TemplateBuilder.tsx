@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 import type { AppRoute } from '../components/AppShell.tsx';
 import { RecordPicker } from '../components/RecordPicker.tsx';
-import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState } from '../lib/dataSourceStore.ts';
+import { DATA_EVENT, activeRecord, activeSource, displayValue, loadDataState, loadDataStateAsync, saveDataSelection, valueForField, type BuilderDataState, type NormalizedRecord, type NormalizedValue } from '../lib/dataSourceStore.ts';
 import { loadImageAsset, saveImageAsset } from '../lib/imageAssetStore.ts';
 import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
@@ -1370,7 +1370,7 @@ function sanitizeExportFileName(value: string) {
   return cleaned || 'Document';
 }
 
-function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
+function CanvasElement({ item, selected, zoom, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, repeatedBandElement = false, onSelect, onChange, onLayoutChange, onSelectionChange, onHistoryStart, onHistoryEnd }: { item: BuilderElement; selected: boolean; zoom: number; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onSelect: () => void; onChange: (patch: Partial<BuilderElement>) => void; onLayoutChange: (patch: Partial<BuilderElement>) => void; onSelectionChange: (table: TableDefinition) => void; onHistoryStart: () => void; onHistoryEnd: () => void }) {
   const drag = useRef<{ sx: number; sy: number; x: number; y: number } | null>(null);
   const resize = useRef<{ sx: number; sy: number; width: number; height: number } | null>(null);
   const scale = zoom / 100;
@@ -1441,7 +1441,7 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
   </div>;
 }
 
-function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
+function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
   const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
   if (item.conditionEnabled && item.conditionField && !evaluateElementCondition(item, resolveBuilderField(item.conditionField))) return null;
   const bound = item.binding ? resolveBuilderField(item.binding) : undefined;
@@ -1896,7 +1896,7 @@ function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof active
 }
 
 function Inspector({ tab, onInspectorTab, selected, source, record, formulaElements, formulaAggregateRows, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
-  tab: InspectorTab; onInspectorTab: (tab: InspectorTab) => void; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: Array<Record<string, unknown>>; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
+  tab: InspectorTab; onInspectorTab: (tab: InspectorTab) => void; selected: BuilderElement | null; source: ReturnType<typeof activeSource>; record: ReturnType<typeof activeRecord>; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; dynamicTokenFields: TemplateTokenField[]; dataState: BuilderDataState; pageSettings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void;
   onPageSettings: (patch: Partial<PageSettings>) => void; onPageName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void;
   onUpdate: (patch: Partial<BuilderElement>) => void; onDelete: () => void; onDuplicate: () => void; onArrange: (action: 'front' | 'forward' | 'backward' | 'back') => void; onMoveFlow: (direction: -1 | 1) => void; onFlowRowAction: (action: 'newRow'|'joinPrevious'|'joinNext'|'left'|'right') => void; relativeElements: BuilderElement[]; onSetInsertRegion: (region: PageRegion) => void; onEditTableConfiguration: (elementId: string) => void;
 }) {
@@ -2149,7 +2149,7 @@ function conditionOperatorLabel(op: NonNullable<BuilderElement['conditionOperato
 function evaluateElementCondition(item: BuilderElement, rawValue: unknown) {
   const op=item.conditionOperator??'equals';
   const expected=item.conditionValue??'';
-  const actual=displayValue(rawValue as any).trim();
+  const actual=displayValue(rawValue as NormalizedValue | undefined).trim();
   if(op==='isEmpty')return !actual;
   if(op==='isNotEmpty')return Boolean(actual);
   if(op==='contains')return actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
@@ -2963,8 +2963,8 @@ function formulaTokenFieldsForElements(formulas: BuilderElement[]): TemplateToke
   });
 }
 
-function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[]): Array<Record<string, unknown>> {
-  const rows = source.records as unknown as Array<Record<string, unknown>>;
+function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[]): NormalizedRecord[] {
+  const rows = source.records.filter((item): item is NormalizedRecord => !!item && typeof item === 'object');
   if (!record || typeof record !== 'object') return rows;
   const identityTable = elements.find((item) => {
     if (item.type !== 'table' || item.table?.mode !== 'dynamic' || item.table.binding?.sourceId !== source.id) return false;
@@ -2974,8 +2974,8 @@ function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof acti
   const parentKeys = identityTable?.table?.binding?.parentKeys?.filter(Boolean)
     ?? (identityTable?.table?.binding?.parentKey ? [identityTable.table.binding.parentKey] : []);
   if (parentKeys.length === 0) return rows;
-  const same = (left: unknown, right: unknown) => displayValue(left as any).trim() === displayValue(right as any).trim();
-  return rows.filter((row) => parentKeys.every((key) => same(valueForField(row as any, key), valueForField(record as any, key))));
+  const same = (left: unknown, right: unknown) => displayValue(left as NormalizedValue | undefined).trim() === displayValue(right as NormalizedValue | undefined).trim();
+  return rows.filter((row) => parentKeys.every((key) => same(valueForField(row, key), valueForField(record, key))));
 }
 
 function formulaAggregateNumericValue(value: unknown): number | null {
@@ -2987,8 +2987,8 @@ function formulaAggregateNumericValue(value: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function formulaAggregateValue(rows: Array<Record<string, unknown>>, field: string, operation: 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX'): number {
-  const values = rows.map((row) => valueForField(row as any, field)).filter((value) => value !== undefined && value !== null && value !== '');
+function formulaAggregateValue(rows: NormalizedRecord[], field: string, operation: 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX'): number {
+  const values = rows.map((row) => valueForField(row, field)).filter((value) => value !== undefined && value !== null && value !== '');
   if (operation === 'COUNT') return values.length;
   const numeric = values.map(formulaAggregateNumericValue).filter((value): value is number => value != null);
   if (operation === 'SUM') return numeric.reduce((total, value) => total + value, 0);
@@ -3015,7 +3015,7 @@ function unwrapWholeFormulaFunction(expression: string, functionNames: string[])
   return { name, inner: trimmed.slice(open + 1, -1).trim() };
 }
 
-function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: Array<Record<string, unknown>>): string | number | null {
+function evaluateDocumentFormulaExpression(expression: string | undefined, scalarContext: Record<string, unknown>, aggregateRows: NormalizedRecord[]): string | number | null {
   if (!expression?.trim()) return null;
 
   // DB-4.6 Number to Words: keep conversion at the document-formula layer so the
@@ -3038,7 +3038,7 @@ function evaluateDocumentFormulaExpression(expression: string | undefined, scala
   return evaluateTableFormula(replaced, scalarContext);
 }
 
-function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>, excludeId?: string) {
+function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: NormalizedRecord[], excludeId?: string) {
   const context: Record<string, unknown> = record && typeof record === 'object' ? { ...(record as Record<string, unknown>) } : {};
   const usable = formulas.filter((item) => item.id !== excludeId && item.formulaName?.trim() && item.formulaExpression?.trim());
   const unresolved = new Set(usable.map((item) => item.id));
@@ -3048,22 +3048,23 @@ function buildDocumentFormulaContext(record: ReturnType<typeof activeRecord>, fo
       if (!unresolved.has(formula.id)) continue;
       const name = formula.formulaName!.trim();
       const value = evaluateDocumentFormulaExpression(formula.formulaExpression, context, aggregateRows);
-      if (value == null) continue;
-      context[name] = value;
-      unresolved.delete(formula.id);
-      progressed = true;
+      if (value !== null && value !== undefined) {
+        context[name] = value;
+        unresolved.delete(formula.id);
+        progressed = true;
+      }
     }
     if (!progressed) break;
   }
   return context;
 }
 
-function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>) {
+function evaluateDocumentFormulaElement(item: BuilderElement, record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: NormalizedRecord[]) {
   if (item.type !== 'formula' || !item.formulaExpression?.trim()) return null;
   return evaluateDocumentFormulaExpression(item.formulaExpression, buildDocumentFormulaContext(record, formulas, aggregateRows, item.id), aggregateRows);
 }
 
-function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: Array<Record<string, unknown>>): Record<string, unknown> {
+function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas: BuilderElement[], aggregateRows: NormalizedRecord[]): Record<string, unknown> {
   const context = buildDocumentFormulaContext(record, formulas, aggregateRows);
   const values: Record<string, unknown> = {};
   for (const formula of formulas) {
@@ -3075,7 +3076,7 @@ function documentFormulaValues(record: ReturnType<typeof activeRecord>, formulas
   return values;
 }
 
-function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string, aggregateRows: Array<Record<string, unknown>>) {
+function valueForBuilderField(record: ReturnType<typeof activeRecord>, sourceFields: TemplateTokenField[], formulas: BuilderElement[], field: string, aggregateRows: NormalizedRecord[]) {
   const formula = formulas.find((item) => item.formulaName?.trim().toLocaleLowerCase() === field.trim().toLocaleLowerCase());
   if (formula) return evaluateDocumentFormulaElement(formula, record, formulas, aggregateRows);
   if (!record) return undefined;

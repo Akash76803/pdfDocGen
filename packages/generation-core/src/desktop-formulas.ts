@@ -1,18 +1,6 @@
 import { toApiSafePath, type DocumentGroup, type NormalizedRecord, type TemplateDefinition } from '@document-tool/contracts';
 
 type FormulaSpec={id?:string;name:string;alias:string;expression:string};
-type GroupedTableSpec = {
-  tableId: string;
-  sourcePath: string;
-  groupBy: string[];
-  columns: Array<{
-    field?: string;
-    operation: string;
-    outputKey: string;
-    label?: string;
-    formula?: string;
-  }>;
-};
 
 function formulaSpecs(template:TemplateDefinition):FormulaSpec[]{
   const raw=template.metadata?.desktopFormulaFields;
@@ -43,98 +31,18 @@ function unwrapFunction(expression:string,names:string[]){const t=expression.tri
 type Token={type:'number'|'op'|'paren';value:string};
 function arithmetic(expression:string,context:NormalizedRecord):number|null{
   let expanded=expression.replace(/\[([^\]]+)\]/g,(_m,name:string)=>{const n=numeric(valueFor(context,name.trim()));return n==null?'NaN':String(n);});
+  // Bare safe identifiers are supported for modern Copy Request paths and formula aliases.
   const keys=Object.keys(context).sort((a,b)=>b.length-a.length);for(const key of keys){const n=numeric(context[key]);if(n==null)continue;expanded=expanded.replace(new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}\\b`,'g'),String(n));}
   const tokens:Token[]=[];const re=/\s*(\d+(?:\.\d+)?|[()+\-*/])\s*/gy;let index=0;while(index<expanded.length){re.lastIndex=index;const m=re.exec(expanded);if(!m||m.index!==index)return null;const v=m[1]!;tokens.push({type:/^\d/.test(v)?'number':v==='('||v===')'?'paren':'op',value:v});index=re.lastIndex;}
   let cursor=0;const factor=():number=>{const t=tokens[cursor++];if(!t)throw Error();if(t.type==='op'&&(t.value==='+'||t.value==='-')){const v=factor();return t.value==='-'?-v:v;}if(t.type==='paren'&&t.value==='('){const v=expr();if(tokens[cursor++]?.value!==')')throw Error();return v;}if(t.type==='number')return Number(t.value);throw Error();};const term=():number=>{let v=factor();while(tokens[cursor]?.type==='op'&&['*','/'].includes(tokens[cursor]!.value)){const op=tokens[cursor++]!.value,r=factor();if(op==='/'&&r===0)throw Error();v=op==='*'?v*r:v/r;}return v;};const expr=():number=>{let v=term();while(tokens[cursor]?.type==='op'&&['+','-'].includes(tokens[cursor]!.value)){const op=tokens[cursor++]!.value,r=term();v=op==='+'?v+r:v-r;}return v;};try{const result=expr();return cursor===tokens.length&&Number.isFinite(result)?result:null;}catch{return null;}
 }
 function evaluate(expression:string,context:NormalizedRecord,rows:NormalizedRecord[]):string|number|null{
-  const words=unwrapFunction(expression,['NUMBER_TO_WORDS','AMOUNT_IN_WORDS','INR_WORDS','AMOUNT_TO_WORDS']);if(words){const v=evaluate(words,context,rows);return typeof v==='number'?amountWords(v):null;}
+  const words=unwrapFunction(expression,['NUMBER_TO_WORDS','AMOUNT_IN_WORDS','INR_WORDS']);if(words){const v=evaluate(words,context,rows);return typeof v==='number'?amountWords(v):null;}
   const replaced=expression.replace(/\b(SUM|COUNT|AVG|MIN|MAX)\s*\(\s*(?:\[([^\]]+)\]|([A-Za-z_$][A-Za-z0-9_.$]*))?\s*\)/gi,(_m,opRaw,bracket,bare)=>String(aggregate(rows,String(bracket||bare||'').trim(),String(opRaw).toUpperCase() as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX')));
   return arithmetic(replaced,context);
 }
-
-function processGroupedTables(template:TemplateDefinition,group:DocumentGroup):NormalizedRecord{
-  const rawGrouped=template.metadata?.desktopGroupedTables;
-  if(!Array.isArray(rawGrouped)||!rawGrouped.length)return{};
-  const extraHeader:NormalizedRecord={};
-  for(const spec of rawGrouped as GroupedTableSpec[]){
-    if(!spec.sourcePath||!spec.groupBy?.length||!spec.columns?.length)continue;
-    const buckets=new Map<string,NormalizedRecord[]>();
-    const order:string[]=[];
-    for(const item of group.items){
-      const parts=spec.groupBy.map((field)=>String(valueFor(item,field)??'').trim()).filter(Boolean);
-      const key=parts.join('|');
-      if(!key)continue;
-      if(!buckets.has(key)){buckets.set(key,[]);order.push(key);}
-      buckets.get(key)!.push(item);
-    }
-    const groupedRows:NormalizedRecord[]=order.map((groupKey)=>{
-      const items=buckets.get(groupKey)??[];
-      const row:NormalizedRecord={};
-      const context:NormalizedRecord={};
-      const formulaCols:typeof spec.columns=[];
-
-      spec.columns.forEach((col)=>{
-        if(col.operation.toLowerCase()==='formula'){
-          formulaCols.push(col);
-          row[col.outputKey]=null;
-          return;
-        }
-        const op=col.operation.toUpperCase() as 'SUM'|'COUNT'|'AVG'|'MIN'|'MAX';
-        const val=col.field?aggregate(items,col.field,op):(op==='COUNT'?items.length:0);
-        row[col.outputKey]=val;
-        context[col.outputKey]=val;
-        if(col.label?.trim())context[col.label.trim()]=val;
-        if(col.field)context[col.field]=val;
-      });
-
-      const first=items[0]??{};
-      for(const field of spec.groupBy){
-        const fVal=valueFor(first,field);
-        if(fVal!==undefined){
-          row[field]=fVal as any;
-          context[field]=fVal as any;
-        }
-      }
-
-      for(const col of formulaCols){
-        if(col.formula){
-          const val=evaluate(col.formula,context,items);
-          if(val!=null){
-            row[col.outputKey]=val;
-            if(col.label?.trim())context[col.label.trim()]=val;
-          }
-        }
-      }
-      return row;
-    });
-    extraHeader[spec.sourcePath]=groupedRows as any;
-  }
-  return extraHeader;
-}
-
 export function applyDesktopFormulaFields(template:TemplateDefinition,group:DocumentGroup):DocumentGroup{
-  const groupedExtra=processGroupedTables(template,group);
-  const context:NormalizedRecord={...group.header,...groupedExtra};
-  const calc:NormalizedRecord={};
-  const specs=formulaSpecs(template);
-  if(specs.length){
-    const unresolved=new Set(specs.map((s)=>s.id??s.alias));
-    for(let pass=0;pass<specs.length&&unresolved.size;pass++){
-      let progressed=false;
-      for(const spec of specs){
-        const id=spec.id??spec.alias;
-        if(!unresolved.has(id))continue;
-        const value=evaluate(spec.expression,context,group.items);
-        if(value==null)continue;
-        context[spec.name]=value;
-        context[spec.alias]=value;
-        calc[spec.alias]=value;
-        unresolved.delete(id);
-        progressed=true;
-      }
-      if(!progressed)break;
-    }
-  }
-  return {...group,header:{...group.header,...groupedExtra,calc}};
+  const specs=formulaSpecs(template);if(!specs.length)return group;const context:NormalizedRecord={...group.header};const calc:NormalizedRecord={};const unresolved=new Set(specs.map((s)=>s.id??s.alias));
+  for(let pass=0;pass<specs.length&&unresolved.size;pass++){let progressed=false;for(const spec of specs){const id=spec.id??spec.alias;if(!unresolved.has(id))continue;const value=evaluate(spec.expression,context,group.items);if(value==null)continue;context[spec.name]=value;context[spec.alias]=value;calc[spec.alias]=value;unresolved.delete(id);progressed=true;}if(!progressed)break;}
+  return {...group,header:{...group.header,calc}};
 }

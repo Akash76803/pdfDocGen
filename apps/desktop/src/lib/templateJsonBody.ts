@@ -37,6 +37,16 @@ function tokenNames(value: string | undefined): string[] {
   return [...value.matchAll(/\{\{\s*([^{}]+?)\s*\}\}/g)].map((match) => match[1]?.trim()).filter((item): item is string => Boolean(item));
 }
 
+function aggregateFormulaCandidates(expression: string | undefined): string[] {
+  if (!expression) return [];
+  const refs = new Set<string>();
+  for (const match of expression.matchAll(/\b(?:SUM|COUNT|AVG|MIN|MAX)\s*\(\s*(?:\[([^\]]+)\]|([A-Za-z_$][A-Za-z0-9_.$]*))?\s*\)/gi)) {
+    const name = (match[1] ?? match[2] ?? '').trim();
+    if (name) refs.add(name);
+  }
+  return [...refs];
+}
+
 function formulaCandidates(expression: string | undefined): string[] {
   if (!expression) return [];
   const refs = new Set<string>();
@@ -58,9 +68,12 @@ function sourceFieldName(candidate: string | undefined, fields: FieldDefinition[
   const raw = candidate?.trim();
   if (!raw) return null;
   const key = raw.toLocaleLowerCase();
-  if (SYSTEM_TOKENS.has(key) || formulas.has(key)) return null;
+  if (SYSTEM_TOKENS.has(key)) return null;
   const lookup = fieldLookup(fields);
-  return lookup.get(key)?.name ?? null;
+  const matchedField = lookup.get(key);
+  if (matchedField) return matchedField.name;
+  if (formulas.has(key)) return null;
+  return null;
 }
 
 function addCandidate(target: Set<string>, candidate: string | undefined, fields: FieldDefinition[], formulas: Set<string>) {
@@ -158,11 +171,12 @@ function stripRowPrefix(path: string, repeatSources: string[]): string {
   return path;
 }
 
-function matchingDocumentRows(source: BuilderDataSource | null | undefined, record: NormalizedRecord | null | undefined, parentKeys: string[]): NormalizedRecord[] {
+function matchingDocumentRows(source: BuilderDataSource | null | undefined, record: NormalizedRecord | null | undefined, parentKeys: string[], documentFields?: Set<string>): NormalizedRecord[] {
   if (!source || !record) return record ? [record] : [];
-  if (!parentKeys.length) return [record];
-  const expected = parentKeys.map((key) => valueForField(record, key));
-  return source.records.filter((row) => parentKeys.every((key, index) => {
+  const keysToMatch = parentKeys.length ? parentKeys : (documentFields ? [...documentFields].filter((key) => valueForField(record, key) !== undefined) : []);
+  if (!keysToMatch.length) return source.records.length ? source.records : [record];
+  const expected = keysToMatch.map((key) => valueForField(record, key));
+  return source.records.filter((row) => keysToMatch.every((key, index) => {
     const actual = valueForField(row, key);
     return JSON.stringify(actual ?? null) === JSON.stringify(expected[index] ?? null);
   }));
@@ -197,9 +211,14 @@ export function buildCurrentDocumentJsonBody(input: {
 
   for (const element of allElements) {
     if (element.type === 'formula') {
-      // Formula outputs are intentionally excluded from the external ERP body,
-      // but direct source fields referenced by formulas are still input dependencies.
-      addFormulaReferences(formulaDependencyFields, element.formulaExpression, fields, formulas);
+      // Formula outputs are intentionally excluded from the external ERP body.
+      // Aggregate formula inputs are row-level dependencies because SUM/AVG/etc.
+      // operate over the repeating item collection in both Desktop and headless API.
+      const aggregateRefs = new Set(aggregateFormulaCandidates(element.formulaExpression));
+      for (const ref of aggregateRefs) addCandidate(itemFields, ref, fields, formulas);
+      for (const ref of formulaCandidates(element.formulaExpression)) {
+        if (!aggregateRefs.has(ref)) addCandidate(formulaDependencyFields, ref, fields, formulas);
+      }
       continue;
     }
     addCandidate(explicitDocumentFields, element.binding, fields, formulas);
@@ -228,7 +247,7 @@ export function buildCurrentDocumentJsonBody(input: {
     setNested(body, toApiSafePath(path), serializableValue(valueForField(input.record ?? null, path), field));
   }
 
-  const rows = matchingDocumentRows(input.source, input.record, [...parentKeys]);
+  const rows = matchingDocumentRows(input.source, input.record, [...parentKeys], documentFields);
   if (itemFields.size > 0) {
     const itemList = (rows.length ? rows : [input.record ?? {}]).map((row) => {
       const item: Record<string, unknown> = {};

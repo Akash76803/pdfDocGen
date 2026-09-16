@@ -224,6 +224,17 @@ export class CombinedPdfRenderer {
 }
 
 
+function resolveDeferredPageTokens<T>(value:T,pageNumber:number,totalPages:number):T {
+  if(typeof value==='string') return value.replace(/__DB_PAGE_NUMBER__/g,String(pageNumber)).replace(/__DB_TOTAL_PAGES__/g,String(totalPages)) as T;
+  if(Array.isArray(value)) return value.map((item)=>resolveDeferredPageTokens(item,pageNumber,totalPages)) as T;
+  if(value&&typeof value==='object'){
+    const output:Record<string,unknown>={};
+    for(const [key,item] of Object.entries(value as Record<string,unknown>)) output[key]=resolveDeferredPageTokens(item,pageNumber,totalPages);
+    return output as T;
+  }
+  return value;
+}
+
 async function layoutAbsoluteDesktopDocument(template:TemplateDefinition,model:RenderModel,pageDef:NonNullable<RenderModel['page']>,startedAt:number):Promise<LaidOutPdfDocument>{
   const geometry=resolvePageGeometry(pageDef);
   const pageWidth=mm(geometry.widthMm),pageHeight=mm(geometry.heightMm);
@@ -233,19 +244,21 @@ async function layoutAbsoluteDesktopDocument(template:TemplateDefinition,model:R
   const maxIndex=all.reduce((max,block)=>Math.max(max,block.layout?.pageIndex??0),0);
   const count=Math.max(configured,maxIndex+1);
   const pages=Array.from({length:count},()=>makePage(pageWidth,pageHeight,pageDef));
-  const drawAbsolute=(page:PdfPage,block:RenderBlock)=>{
-    const layout=block.layout;
+  const drawAbsolute=(page:PdfPage,block:RenderBlock,pageIndex:number)=>{
+    const resolvedBlock=resolveDeferredPageTokens(block,pageIndex+1,count);
+    const layout=resolvedBlock.layout;
     const x=mm(Math.max(0,layout.xMm||0));
     const topMm=Math.max(0,layout.yMm||0);
     const w=mm(Math.max(.1,layout.widthMm||geometry.contentWidthMm));
     const y=pageHeight-mm(topMm);
     const ctx:Ctx={pages,page,pageWidth,pageHeight,left:0,right:0,top:0,bottom:0,contentWidth:pageWidth,y,headerHeight:0,footerHeight:0,model:{...model,page:pageDef},images} as Ctx;
-    drawBlockAt(ctx,block,x,y,w);
+    drawBlockAt(ctx,resolvedBlock,x,y,w);
   };
-  for(const block of model.body??[]){const index=Math.max(0,Math.min(count-1,block.layout?.pageIndex??0));drawAbsolute(pages[index]!,block);}
+  for(const block of model.body??[]){const index=Math.max(0,Math.min(count-1,block.layout?.pageIndex??0));drawAbsolute(pages[index]!,block,index);}
   // Builder header/footer bands are master-page objects. Repeat them on every
-  // physical page at their saved absolute coordinates.
-  for(const page of pages){for(const block of model.header??[])drawAbsolute(page,block);for(const block of model.footer??[])drawAbsolute(page,block);}
+  // physical page at their saved absolute coordinates, resolving page tokens
+  // only after the physical page count is known.
+  pages.forEach((page,index)=>{for(const block of model.header??[])drawAbsolute(page,block,index);for(const block of model.footer??[])drawAbsolute(page,block,index);});
   return {pages,images:[...images.values()],model:{...model,page:pageDef},pageDef,renderDurationMs:Date.now()-startedAt};
 }
 async function layoutPdfDocument(template:TemplateDefinition,model:RenderModel):Promise<LaidOutPdfDocument>{

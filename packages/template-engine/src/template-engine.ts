@@ -72,9 +72,11 @@ export class TemplateEngine {
       sourceItems: data.sourceItems ?? [],
       itemDetails: data.itemDetails,
       group: { key: data.key, id: data.id },
-      page: { number: 1, total: 1 },
-      pageNumber: 1,
-      totalPages: 1,
+      page: template.metadata?.desktopAbsoluteLayout === true
+        ? { number: '__DB_PAGE_NUMBER__', total: '__DB_TOTAL_PAGES__' }
+        : { number: 1, total: 1 },
+      pageNumber: template.metadata?.desktopAbsoluteLayout === true ? '__DB_PAGE_NUMBER__' : 1,
+      totalPages: template.metadata?.desktopAbsoluteLayout === true ? '__DB_TOTAL_PAGES__' : 1,
       views: {},
       calc: data.header && typeof data.header.calc === 'object' && data.header.calc !== null
         ? { ...(data.header.calc as Record<string, unknown>) }
@@ -374,12 +376,17 @@ export class TemplateEngine {
         const rowStyle = resolveTextStyle(row.style, { ...DEFAULT_TEXT_STYLE, fontSize: 10, bold: true });
         return {
           id: row.id,
-          cells: row.cells.filter((cell)=>!cell.columnId || visibleIds.has(cell.columnId)).map((cell) => ({
-            id: cell.id, columnId: cell.columnId, colspan: Math.min(cell.colspan ?? 1,Math.max(1,columns.length)),
-            value: evaluateAggregate({ ...cell.value, sourcePath: cell.value.sourcePath ?? block.sourcePath }, root, tableSourceRows, tableRawRows, block.sourcePath),
-            alignment: cell.alignment ?? cell.style?.alignment ?? 'RIGHT',
-            style: resolveTextStyle(cell.style, rowStyle),
-          })),
+          cells: row.cells.filter((cell)=>!cell.columnId || visibleIds.has(cell.columnId)).map((cell) => {
+            const rawValue = evaluateAggregate({ ...cell.value, sourcePath: cell.value.sourcePath ?? block.sourcePath }, root, tableSourceRows, tableRawRows, block.sourcePath);
+            const sourceColumn = cell.columnId ? visibleSourceColumns.find((column)=>column.id===cell.columnId) : undefined;
+            const formatted = sourceColumn && cell.value.operation !== 'STATIC' ? formatDisplayValue(rawValue, sourceColumn.format) : rawValue;
+            return {
+              id: cell.id, columnId: cell.columnId, colspan: Math.min(cell.colspan ?? 1,Math.max(1,columns.length)),
+              value: formatted == null ? '' : typeof formatted === 'boolean' ? String(formatted) : formatted,
+              alignment: cell.alignment ?? cell.style?.alignment ?? 'RIGHT',
+              style: resolveTextStyle(cell.style, rowStyle),
+            };
+          }),
           style: rowStyle,
           backgroundColor: row.backgroundColor ?? '#FFFFFF',
         };
