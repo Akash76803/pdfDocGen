@@ -122,6 +122,7 @@ describe('DB-6B Fix10 aggregate formula request contract', () => {
     expect(result.body).not.toHaveProperty('totalGST');
     expect(result.body.items).toEqual([
       {finalAmount:100,totalGst:18},
+      {finalAmount:200,totalGst:36},
     ]);
   });
 });

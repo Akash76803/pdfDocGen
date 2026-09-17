@@ -1,4 +1,4 @@
-import { describe, expect, it, test } from 'vitest';
+import { describe,expect,it,test } from 'vitest';
 import { resolvePath } from '../src/path-resolver.js';
 describe('safe path resolver',()=>{
  it('resolves nested, numeric and boolean values',()=>{const x={a:{b:2,c:false}};expect(resolvePath(x,'a.b')).toEqual({found:true,value:2});expect(resolvePath(x,'a.c')).toEqual({found:true,value:false});});

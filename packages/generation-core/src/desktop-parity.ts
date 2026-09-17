@@ -144,6 +144,16 @@ function numeric(value: unknown): number | null {
   return Number.isFinite(number) ? number : null;
 }
 
+function roundStable(value: number, decimals = 10): number {
+  if (!Number.isFinite(value)) return value;
+  const factor = 10 ** decimals;
+  return Math.round((value + Number.EPSILON) * factor) / factor;
+}
+
+function roundCurrency(value: number): number {
+  return roundStable(value, 2);
+}
+
 
 function firstNumeric(row: NormalizedRecord, fields: string[]): number | null {
   for (const field of fields) {
@@ -151,11 +161,6 @@ function firstNumeric(row: NormalizedRecord, fields: string[]): number | null {
     if (value !== null) return value;
   }
   return null;
-}
-
-function hasValue(row: NormalizedRecord, field: string): boolean {
-  const value = valueFor(row, field);
-  return value !== undefined && value !== null && value !== '';
 }
 
 function setAliases(row: NormalizedRecord, labels: string[], value: number) {
@@ -183,33 +188,36 @@ function materializeDerivedFinancialRows(group: DocumentGroup): DocumentGroup {
   const items = group.items.map((input) => {
     const row = normalizedRecord(input);
 
-    if (!hasValue(row, 'Total GST')) {
+    let totalGst = firstNumeric(row, ['Total GST', 'totalGst', 'totalGST']);
+    if (totalGst === null) {
       const cgst = firstNumeric(row, ['CGST Amount', 'cgstAmount']);
       const sgst = firstNumeric(row, ['SGST Amount', 'sgstAmount']);
       const igst = firstNumeric(row, ['IGST Amount', 'igstAmount']);
       const components = [cgst, sgst, igst].filter((value): value is number => value !== null);
-      let totalGst: number | null = components.length ? components.reduce((sum, value) => sum + value, 0) : null;
+      totalGst = components.length ? roundCurrency(components.reduce((sum, value) => sum + value, 0)) : null;
 
       if (totalGst === null) {
         const taxable = firstNumeric(row, ['Taxable Value', 'Taxable', 'taxableValue', 'taxable']);
         const gstRateRaw = firstNumeric(row, ['GST %', 'gstPercent']);
         if (taxable !== null && gstRateRaw !== null) {
           const gstRate = Math.abs(gstRateRaw) > 1 ? gstRateRaw / 100 : gstRateRaw;
-          totalGst = taxable * gstRate;
+          totalGst = roundCurrency(taxable * gstRate);
         }
       }
-
-      if (totalGst !== null && Number.isFinite(totalGst)) {
-        setAliases(row, ['Total GST'], totalGst);
-      }
+    }
+    if (totalGst !== null && Number.isFinite(totalGst)) {
+      // Preserve the caller's value and also expose the canonical label/safe alias so
+      // grouped specs and document formulas resolve identically regardless of casing.
+      setAliases(row, ['Total GST'], totalGst);
     }
 
-    if (!hasValue(row, 'Final Amount')) {
+    let finalAmount = firstNumeric(row, ['Final Amount', 'finalAmount']);
+    if (finalAmount === null) {
       const taxable = firstNumeric(row, ['Taxable Value', 'Taxable', 'taxableValue', 'taxable']);
-      const totalGst = firstNumeric(row, ['Total GST', 'totalGst', 'totalGST']);
-      if (taxable !== null && totalGst !== null) {
-        setAliases(row, ['Final Amount'], taxable + totalGst);
-      }
+      if (taxable !== null && totalGst !== null) finalAmount = roundCurrency(taxable + totalGst);
+    }
+    if (finalAmount !== null && Number.isFinite(finalAmount)) {
+      setAliases(row, ['Final Amount'], finalAmount);
     }
 
     return row;
@@ -223,8 +231,8 @@ function aggregate(rows: NormalizedRecord[], field: string, operation: string): 
   if (op === 'group' || op === 'first') return (values[0] ?? null) as NormalizedValue;
   if (op === 'count') return values.length;
   const numbers = values.map(numeric).filter((value): value is number => value !== null);
-  if (op === 'sum') return numbers.reduce((sum, value) => sum + value, 0);
-  if (op === 'avg' || op === 'average') return numbers.length ? numbers.reduce((sum, value) => sum + value, 0) / numbers.length : 0;
+  if (op === 'sum') return roundStable(numbers.reduce((sum, value) => sum + value, 0));
+  if (op === 'avg' || op === 'average') return numbers.length ? roundStable(numbers.reduce((sum, value) => sum + value, 0) / numbers.length) : 0;
   if (op === 'min') return numbers.length ? Math.min(...numbers) : 0;
   if (op === 'max') return numbers.length ? Math.max(...numbers) : 0;
   return (values[0] ?? null) as NormalizedValue;
@@ -244,7 +252,7 @@ function evaluateGroupedFormula(expression: string, valuesByLabel: Map<string, N
     row[label] = value;
     row[toApiSafePath(label)] = value;
   }
-  return evaluateFormula(converted, bindings, { rows: [row], defaultSourcePath: 'items' });
+  return roundStable(evaluateFormula(converted, bindings, { rows: [row], defaultSourcePath: 'items' }));
 }
 
 function materializeGroupedTables(template: TemplateDefinition, group: DocumentGroup): DocumentGroup {

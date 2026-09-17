@@ -334,7 +334,7 @@ function stripRowPrefix(path: string, repeatSources: string[]): string {
 
 function matchingDocumentRows(source: BuilderDataSource | null | undefined, record: NormalizedRecord | null | undefined, parentKeys: string[]): NormalizedRecord[] {
   if (!source || !record) return record ? [record] : [];
-  if (!parentKeys.length) return [record];
+  if (!parentKeys.length) return source.records.length ? source.records : [record];
   const expected = parentKeys.map((key) => valueForField(record, key));
   return source.records.filter((row) => parentKeys.every((key, index) => {
     const actual = valueForField(row, key);
@@ -412,7 +412,7 @@ export function buildCurrentDocumentJsonBody(input: {
   const warnings: string[] = [];
   if (!input.source) warnings.push('No Data Source is selected. Placeholder values are used.');
   if (fields.length === 0 && (documentFields.size > 0 || itemFields.size > 0)) warnings.push('Binding metadata is unavailable, so some template tokens could not be classified.');
-  if (itemFields.size > 0 && !parentKeys.size) warnings.push('No Parent / Document key is configured; the sample body contains only the current row in items[].');
+  if (itemFields.size > 0 && !parentKeys.size) warnings.push('No Parent / Document key is configured; repeating item dependencies use all available source rows. Configure a Parent / Document key to isolate one document.');
   const templateId = input.templateId?.trim() ?? '';
   if (!templateId) warnings.push('Save/open a template before copying the API request so templateId can be populated.');
   const outputFormat = input.outputFormat ?? 'pdf';

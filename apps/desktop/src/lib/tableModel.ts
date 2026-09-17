@@ -602,7 +602,7 @@ function mapEveryTableRow(table: TableDefinition, mapper: (row: TableRow) => Tab
 export function addTableColumn(table: TableDefinition, cellId: string | undefined, where: 'left' | 'right', duplicate = false): TableDefinition {
   const loc = findTableCellLocation(table, cellId);
   const baseIndex = loc?.columnIndex ?? table.columns.length - 1;
-  const insertionIndex = Math.max(0, Math.min(table.columns.length, baseIndex + (where === 'right' ? Math.max(1, loc?.cell.colSpan ?? 1) : 0)));
+  const insertionIndex = Math.max(0, Math.min(table.columns.length, baseIndex + (where === 'right' ? 1 : 0)));
   const sourceIndex = duplicate ? baseIndex : undefined;
   const sourceColumn = duplicate && table.columns[baseIndex] ? table.columns[baseIndex] : undefined;
   const newColumn: TableColumn = sourceColumn
@@ -1529,7 +1529,7 @@ function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableW
       const charsPerLine = Math.max(1, Math.floor(usableWidth / Math.max(3.5, fontSize * 0.56)));
       const explicitLines = String(text || '').split(/\r?\n/);
       const lineCount = explicitLines.reduce((sum, line) => sum + Math.max(1, Math.ceil(Math.max(1, line.length) / charsPerLine)), 0);
-      const estimated = Math.ceil(lineCount * fontSize * 1.25 + padding * 2 + 3);
+      const estimated = Math.ceil(lineCount * fontSize * 1.25 + padding * 2 + 1);
       rowHeight = Math.max(rowHeight, estimated);
     }
     total += rowHeight;

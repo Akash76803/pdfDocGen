@@ -27,3 +27,24 @@ Fix11 is local-only until the user explicitly requests a Git push. The delivered
 - Clean API input contract: source leaves only; formula/table-calculated/summary/grouped/system outputs excluded; raw dependencies included recursively.
 - Dynamic calculated-column canonical output aliases align with summary aggregate declarations for headless compatibility.
 - Deliverable: `Document-Builder-DB6B-Fix12-Clean-API-Input-Contract.zip`.
+
+## DB-6B Fix13 local changes
+- Git source reference: `5ec6dde6bab247ab365a566c0eef97a53cee0027` (latest `main` verified at Fix13 implementation start).
+- Dynamic Table overflow is now page-aware in the Desktop-native API renderer.
+- Builder FLOW elements remain flow-aware through the API adapter; true floating elements remain absolute.
+- Post-table summaries/HSN/shapes reflow after the runtime table end instead of overlapping long tables.
+- Physical overflow continuations repeat table headers and global Header/Footer masters; deferred page tokens use the final physical page count.
+- Deliverable: `Document-Builder-DB6B-Fix13-Dynamic-Table-Pagination-Post-Table-Reflow.zip`.
+
+## DB-6B Fix13.1 local repair
+- Source package: DB-6B Fix13, itself based on Git `main` commit `5ec6dde6bab247ab365a566c0eef97a53cee0027`.
+- Repairs only the user-reported verification-gate regressions (types/tests/casing/test imports).
+- Fix13 Dynamic Table pagination/post-table reflow implementation is intentionally preserved.
+- Deliverable: `Document-Builder-DB6B-Fix13.1-Verification-Gate-Repair.zip`.
+
+## DB-6B Fix13.3 — Final Verification Gate Stabilization
+- Local baseline: Fix13.2 package derived from Git main `5ec6dde6bab247ab365a566c0eef97a53cee0027`.
+- Formula aggregate rows are typed as `NormalizedRecord[]` end-to-end in TemplateBuilder component boundaries.
+- Financial derivation and grouped aggregate/formula arithmetic normalize floating-point residue while preserving caller-supplied values.
+- Fix13 Dynamic Table pagination/post-table reflow renderer logic is unchanged.
+- Internal targeted verification: contracts/template-engine/generation-core TypeScript build PASS; actual compiled generation-core invoice parity smoke PASS; modified TS/TSX transpile PASS.

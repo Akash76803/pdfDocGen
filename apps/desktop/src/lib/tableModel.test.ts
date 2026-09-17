@@ -142,10 +142,10 @@ it('DB-4.2 expands and contracts colSpan when columns are inserted/deleted insid
   table = updateTableCell(table, mergedCell.id, { colSpan: 2 });
   const added = addTableColumn(table, mergedCell.id, 'right');
   expect(added.columns).toHaveLength(4);
-  expect(added.rows[0].cells[0].colSpan).toBe(2);
+  expect(added.rows[0].cells[0].colSpan).toBe(3);
   const deleted = deleteTableColumn(added, added.rows[0].cells[0].id);
   expect(deleted.columns).toHaveLength(3);
-  expect(deleted.rows[0].cells[0].colSpan).toBe(1);
+  expect(deleted.rows[0].cells[0].colSpan).toBe(2);
 });
 
 it('DB-4.2 blocks column reorder while merged colSpan cells exist', () => {
@@ -311,7 +311,7 @@ describe('DB-4.4 Phase 3 pagination hardening', () => {
     const rows = Array.from({ length: 20 }, (_, index) => ({ key: `row-${index + 1}`, value: { id: index + 1 } as never }));
     const pages = paginateDynamicTable(table, rows, 300, 300);
     expect(pages.length).toBeGreaterThan(1);
-    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(9);
+    expect(pages[0].runtimeRows.length).toBeGreaterThanOrEqual(10);
     expect(pages[0].unusedHeightPx).toBeLessThan(30);
   });
 

@@ -240,12 +240,89 @@ async function layoutAbsoluteDesktopDocument(template:TemplateDefinition,model:R
   const pageWidth=mm(geometry.widthMm),pageHeight=mm(geometry.heightMm);
   const images=await prepareImages(model);
   const configured=Math.max(1,Number(template.metadata?.builderPageCount ?? 1)||1);
-  const all=[...(model.header??[]),...(model.body??[]),...(model.footer??[])];
-  const maxIndex=all.reduce((max,block)=>Math.max(max,block.layout?.pageIndex??0),0);
-  const count=Math.max(configured,maxIndex+1);
-  const pages=Array.from({length:count},()=>makePage(pageWidth,pageHeight,pageDef));
+  const maxBodyIndex=(model.body??[]).reduce((max,block)=>Math.max(max,block.layout?.pageIndex??0),0);
+  const builderPageCount=Math.max(configured,maxBodyIndex+1);
+  const bodyTopMm=Math.max(0,Number(template.metadata?.desktopBodyTopMm ?? geometry.marginTopMm)||geometry.marginTopMm);
+  const bodyBottomMm=Math.max(0,Number(template.metadata?.desktopBodyBottomMm ?? geometry.marginBottomMm)||geometry.marginBottomMm);
+  const pages:PdfPage[]=[];
+  const floatingQueue:Array<{pageIndex:number;block:RenderBlock}>=[];
+  const rowToleranceMm=.05;
+
+  type DesktopFlowRow={savedTopMm:number;savedHeightMm:number;blocks:RenderBlock[]};
+  const flowRowsFor=(builderPageIndex:number):DesktopFlowRow[]=>{
+    const flow=(model.body??[])
+      .filter((block)=>(block.layout?.pageIndex??0)===builderPageIndex && block.layout?.positionMode==='FLOW')
+      .sort((a,b)=>(a.layout?.yMm??0)-(b.layout?.yMm??0) || (a.layout?.xMm??0)-(b.layout?.xMm??0));
+    const rows:DesktopFlowRow[]=[];
+    for(const block of flow){
+      const top=Math.max(0,block.layout?.yMm??bodyTopMm);
+      const last=rows[rows.length-1];
+      if(last && Math.abs(last.savedTopMm-top)<=rowToleranceMm){
+        last.blocks.push(block);
+        last.savedHeightMm=Math.max(last.savedHeightMm,Math.max(.1,block.layout?.heightMm??0));
+      }else rows.push({savedTopMm:top,savedHeightMm:Math.max(.1,block.layout?.heightMm??0),blocks:[block]});
+    }
+    return rows;
+  };
+
+  const flowModel:RenderModel={...model,header:[],footer:[],page:pageDef};
+  for(let builderPageIndex=0;builderPageIndex<builderPageCount;builderPageIndex++){
+    const basePage=makePage(pageWidth,pageHeight,pageDef);
+    pages.push(basePage);
+    const basePhysicalIndex=pages.length-1;
+    const bodyForPage=(model.body??[]).filter((block)=>(block.layout?.pageIndex??0)===builderPageIndex);
+    for(const block of bodyForPage) if(block.layout?.positionMode!=='FLOW') floatingQueue.push({pageIndex:basePhysicalIndex,block});
+
+    const rows=flowRowsFor(builderPageIndex);
+    if(!rows.length) continue;
+    const ctx:Ctx={
+      pages,page:basePage,pageWidth,pageHeight,left:0,right:0,
+      top:mm(bodyTopMm),bottom:mm(bodyBottomMm),contentWidth:pageWidth,
+      y:pageHeight-mm(Math.max(bodyTopMm,rows[0]!.savedTopMm)),
+      headerHeight:0,footerHeight:0,model:flowModel,images,
+    };
+    let previousSavedBottomMm=bodyTopMm;
+    let firstRow=true;
+    for(const row of rows){
+      const gapMm=firstRow
+        ? Math.max(0,row.savedTopMm-bodyTopMm)
+        : Math.max(0,row.savedTopMm-previousSavedBottomMm);
+      if(firstRow) ctx.y=pageHeight-mm(bodyTopMm);
+      ctx.y-=mm(gapMm);
+      firstRow=false;
+
+      const single=row.blocks.length===1?row.blocks[0]:undefined;
+      if(single?.type==='TABLE'){
+        const x=mm(Math.max(0,single.layout.xMm??0));
+        const w=mm(Math.max(.1,single.layout.widthMm??geometry.contentWidthMm));
+        // Reuse the stable flow paginator for Desktop dynamic tables. It measures
+        // wrapped row heights, repeats the table header on every continuation
+        // page, keeps the footer/total row with the final data rows, and updates
+        // ctx.y to the real runtime end of the table.
+        renderDataTable(ctx,single,x,w,0,0);
+      }else{
+        const measured=row.blocks.map((block)=>{
+          const w=mm(Math.max(.1,block.layout.widthMm??geometry.contentWidthMm));
+          return Math.max(mm(Math.max(.1,block.layout.heightMm??0)),measureBlock(block,w,images));
+        });
+        const rowHeight=Math.max(mm(row.savedHeightMm),...measured);
+        const available=Math.max(0,ctx.y-mm(bodyBottomMm));
+        if(rowHeight>available+mm(PAGINATION_EPSILON_MM) && ctx.y<pageHeight-mm(bodyTopMm)-mm(PAGINATION_EPSILON_MM)) newPage(ctx);
+        const rowTop=ctx.y;
+        row.blocks.forEach((block)=>{
+          const x=mm(Math.max(0,block.layout.xMm??0));
+          const w=mm(Math.max(.1,block.layout.widthMm??geometry.contentWidthMm));
+          drawBlockAt(ctx,block,x,rowTop,w);
+        });
+        ctx.y=rowTop-rowHeight;
+      }
+      previousSavedBottomMm=row.savedTopMm+row.savedHeightMm;
+    }
+  }
+
+  const finalCount=pages.length;
   const drawAbsolute=(page:PdfPage,block:RenderBlock,pageIndex:number)=>{
-    const resolvedBlock=resolveDeferredPageTokens(block,pageIndex+1,count);
+    const resolvedBlock=resolveDeferredPageTokens(block,pageIndex+1,finalCount);
     const layout=resolvedBlock.layout;
     const x=mm(Math.max(0,layout.xMm||0));
     const topMm=Math.max(0,layout.yMm||0);
@@ -254,10 +331,14 @@ async function layoutAbsoluteDesktopDocument(template:TemplateDefinition,model:R
     const ctx:Ctx={pages,page,pageWidth,pageHeight,left:0,right:0,top:0,bottom:0,contentWidth:pageWidth,y,headerHeight:0,footerHeight:0,model:{...model,page:pageDef},images} as Ctx;
     drawBlockAt(ctx,resolvedBlock,x,y,w);
   };
-  for(const block of model.body??[]){const index=Math.max(0,Math.min(count-1,block.layout?.pageIndex??0));drawAbsolute(pages[index]!,block,index);}
+
+  for(const queued of floatingQueue){
+    const page=pages[Math.max(0,Math.min(finalCount-1,queued.pageIndex))]!;
+    drawAbsolute(page,queued.block,queued.pageIndex);
+  }
   // Builder header/footer bands are master-page objects. Repeat them on every
-  // physical page at their saved absolute coordinates, resolving page tokens
-  // only after the physical page count is known.
+  // physical page after runtime table pagination so deferred page tokens see the
+  // final physical page count (including table continuation pages).
   pages.forEach((page,index)=>{for(const block of model.header??[])drawAbsolute(page,block,index);for(const block of model.footer??[])drawAbsolute(page,block,index);});
   return {pages,images:[...images.values()],model:{...model,page:pageDef},pageDef,renderDurationMs:Date.now()-startedAt};
 }

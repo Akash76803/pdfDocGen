@@ -75,6 +75,8 @@ test('preserves desktop absolute geometry, formula definitions, and embedded sta
     ]}] },
   });
   expect(result.metadata?.desktopAbsoluteLayout).toBe(true);
+  expect(result.metadata?.desktopBodyTopMm).toBeDefined();
+  expect(result.metadata?.desktopBodyBottomMm).toBeDefined();
   expect(result.metadata?.desktopFormulaFields).toEqual(expect.arrayContaining([expect.objectContaining({name:'Grand Total',alias:'grandTotal'})]));
   const field=result.body.blocks.find((block)=>block.id==='v1');
   expect(field?.type).toBe('FIELD');

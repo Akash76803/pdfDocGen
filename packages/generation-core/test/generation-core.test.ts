@@ -108,7 +108,7 @@ it('materializes desktop table formulas before grouped summaries', async () => {
         {field:'hsn',operation:'group',outputKey:'__grouped_0',label:'HSN'},
         {field:'taxable',operation:'sum',outputKey:'__grouped_1',label:'Taxable'},
         {field:'gstPercent',operation:'avg',outputKey:'__grouped_2',label:'GST %'},
-        {field:'totalGST',operation:'sum',outputKey:'__grouped_3',label:'Total GST'},
+        {field:'totalGst',operation:'sum',outputKey:'__grouped_3',label:'Total GST'},
         {operation:'formula',outputKey:'__grouped_7',label:'TOTAL',formula:'[Total GST] + [Taxable]'},
       ],
     }]},
@@ -116,8 +116,8 @@ it('materializes desktop table formulas before grouped summaries', async () => {
   const { applyDesktopResolvedDocumentParity } = await import('../src/index.ts');
   const group = applyDesktopResolvedDocumentParity(parityTemplate, {
     id:'d',key:'d',header:{},items:[
-      {basicValue:1980,totalDiscount:0.2,hsn:'73201020',gstPercent:0.18,totalGST:285.12},
-      {basicValue:2170,totalDiscount:0.2,hsn:'73201020',gstPercent:0.18,totalGST:312.48},
+      {basicValue:1980,totalDiscount:0.2,hsn:'73201020',gstPercent:0.18,totalGst:285.12},
+      {basicValue:2170,totalDiscount:0.2,hsn:'73201020',gstPercent:0.18,totalGst:312.48},
     ],sourceItems:[],itemDetails:[],sourceRowIndexes:[0,1],warnings:[],valid:true,
   });
   expect(group.items[0]).toMatchObject({discount:396,taxable:1584});
@@ -181,10 +181,8 @@ it('derives omitted Total GST and Final Amount before grouped/document formulas'
   expect(parity.items[1]).toMatchObject({discount:434,taxableValue:1736,totalGst:312.48,finalAmount:2048.48});
   expect(parity.items[2]).toMatchObject({discount:1124,taxableValue:4496,totalGst:809.28,finalAmount:5305.28});
   expect(parity.header.__db5g_group_hsn).toEqual([expect.objectContaining({
-    __grouped_1:7816,__grouped_3:1406.88,__grouped_4:703.44,__grouped_5:703.44,__grouped_6:0,
+    __grouped_1:7816,__grouped_2:0.18,__grouped_3:1406.88,__grouped_4:703.44,__grouped_5:703.44,__grouped_6:0,__grouped_7:9222.88,
   })]);
-  expect((parity.header.__db5g_group_hsn as any)[0].__grouped_2).toBeCloseTo(0.18, 4);
-  expect((parity.header.__db5g_group_hsn as any)[0].__grouped_7).toBeCloseTo(9222.88, 2);
   const resolved = applyDesktopFormulaFields(parityTemplate, parity);
   expect(resolved.header.calc).toMatchObject({totalGst:1406.88,netPayableAmount:9222.88});
   expect(String((resolved.header.calc as any).finalAmountInWord)).toContain('Nine Thousand Two Hundred Twenty-Two Rupees');

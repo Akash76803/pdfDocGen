@@ -75,7 +75,12 @@ function cellTextStyle(cell:UnknownRecord):TextStyle|undefined {
   return {fontSize:Math.max(5,numberValue(style.fontSize,12)*PX_TO_PT),bold:Boolean(style.bold),textColor:stringValue(style.color,'#111827'),backgroundColor:stringValue(style.background,'#FFFFFF'),alignment:align(style.align)};
 }
 function absoluteLayout(element:UnknownRecord,pageIndex:number,breakBefore=false){
-  return {widthPercent:Math.max(1,Math.min(100,numberValue(element.flowWidthPercent,100))),alignment:align(element.textAlign),marginTop:0,marginRight:0,marginBottom:0,marginLeft:0,keepTogether:stringValue(element.type)!=='table',breakBefore,positionMode:'ABSOLUTE' as const,xMm:pxToMm(element.x),yMm:pxToMm(element.y),widthMm:Math.max(0.1,pxToMm(element.width,10)),heightMm:Math.max(0.1,pxToMm(element.height,5)),pageIndex};
+  // Preserve the Builder distinction between true floating objects and flow
+  // content. The native PDF renderer still receives projected x/y/width
+  // geometry for both, but FLOW blocks may reflow when a dynamic table grows
+  // beyond its design-time height.
+  const positionMode=stringValue(element.layoutMode,'floating')==='flow'?'FLOW':'ABSOLUTE';
+  return {widthPercent:Math.max(1,Math.min(100,numberValue(element.flowWidthPercent,100))),alignment:align(element.textAlign),marginTop:0,marginRight:0,marginBottom:0,marginLeft:0,keepTogether:stringValue(element.type)!=='table',breakBefore,positionMode:positionMode as 'FLOW'|'ABSOLUTE',xMm:pxToMm(element.x),yMm:pxToMm(element.y),widthMm:Math.max(0.1,pxToMm(element.width,10)),heightMm:Math.max(0.1,pxToMm(element.height,5)),pageIndex};
 }
 
 const PAGE_SIZES:Record<string,{widthMm:number;heightMm:number}>={
@@ -160,5 +165,8 @@ export function adaptDesktopTemplateEntry(entry:DesktopTemplateEntry):TemplateDe
   const payload=entry.payload; const rawPages=arrayValue(payload.pages); const basePages=rawPages.length?rawPages:[{id:'page-1',name:'Page 1',settings:defaultPageSettings(payload),elements:Array.isArray(payload.elements)?payload.elements:[]}]; const pages=basePages.map(projectFlowElements); const firstPage=pages[0]??{}; const firstSettings=recordValue(firstPage.settings); const {specs:formulaSpecs,map:formulaMap}=buildFormulaState(pages);
   const headerBlocks:TemplateBlock[]=[]; const bodyBlocks:TemplateBlock[]=[]; const footerBlocks:TemplateBlock[]=[]; const groupedTables:GroupedTableSpec[]=[];
   pages.forEach((page,pageIndex)=>{for(const element of arrayValue(page.elements)){if(stringValue(element.type)==='formula')continue;const region=stringValue(element.region,'body');const block=convertElement(element,formulaMap,pageIndex,groupedTables);if(!block)continue;if(region==='header'&&pageIndex===0)headerBlocks.push(block);else if(region==='footer'&&pageIndex===0)footerBlocks.push(block);else if(region==='body')bodyBlocks.push(block);}});
-  return {id:entry.id,name:entry.name||stringValue(payload.name,'Document'),version:entry.version??numberValue(payload.version,1),page:pageDefinition(Object.keys(firstSettings).length?firstSettings:defaultPageSettings(payload)),header:{blocks:headerBlocks},body:{blocks:bodyBlocks},footer:{blocks:footerBlocks},calculatedFields:[],metadata:{source:'desktop-local-template',builderPageCount:pages.length,updatedAt:stringValue(payload.updatedAt),adapter:'DB-6B-Fix10',desktopAbsoluteLayout:true,desktopFormulaFields:formulaSpecs,desktopGroupedTables:groupedTables,desktopFlowProjected:true}};
+  const margins=recordValue(firstSettings.marginsMm); const headerSettings=recordValue(firstSettings.header); const footerSettings=recordValue(firstSettings.footer);
+  const bodyTopMm=numberValue(margins.top,15)+(headerSettings.enabled===true?numberValue(headerSettings.heightMm,20)+numberValue(headerSettings.gapMm,5):0);
+  const bodyBottomMm=numberValue(margins.bottom,15)+(footerSettings.enabled===true?numberValue(footerSettings.heightMm,15)+numberValue(footerSettings.gapMm,5):0);
+  return {id:entry.id,name:entry.name||stringValue(payload.name,'Document'),version:entry.version??numberValue(payload.version,1),page:pageDefinition(Object.keys(firstSettings).length?firstSettings:defaultPageSettings(payload)),header:{blocks:headerBlocks},body:{blocks:bodyBlocks},footer:{blocks:footerBlocks},calculatedFields:[],metadata:{source:'desktop-local-template',builderPageCount:pages.length,updatedAt:stringValue(payload.updatedAt),adapter:'DB-6B-Fix13',desktopAbsoluteLayout:true,desktopFormulaFields:formulaSpecs,desktopGroupedTables:groupedTables,desktopFlowProjected:true,desktopBodyTopMm:bodyTopMm,desktopBodyBottomMm:bodyBottomMm}};
 }
