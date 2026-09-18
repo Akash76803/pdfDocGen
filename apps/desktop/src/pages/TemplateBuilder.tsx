@@ -1296,6 +1296,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
                 <div className="virtual-page-label">{activePage?.name || 'Page'}{virtualPageIndex > 0 ? ` · Continuation ${virtualPageIndex + 1}` : ''}<span>{virtualPageIndex + 1} / {virtualPageCount}</span></div>
                 <div className="document-page" data-export-page="true" data-builder-page-id={activePage?.id} data-continuation-index={virtualPageIndex} data-document-page-index={documentPageOffset + virtualPageIndex} style={{ ...pageCanvasStyle(pageSettings), transform: `scale(${zoom / 100})` }} onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
                   <PageContentBorder settings={pageSettings}/>
+                  <PageWatermarkPreview settings={pageSettings} runtimePageIndex={documentPageOffset + virtualPageIndex} layer="behind"/>
                   {pageSettings.showGuides && <PageGuides settings={pageSettings}/>} 
                   {virtualPageIndex === 0 && elements.length === 0 && <div className="page-empty"><span>{pageSettings.preset} DOCUMENT</span><strong>Start building your template</strong><small>Click an element from the left panel. You can then move, resize and edit it.</small></div>}
                   {elements.map((item) => {
@@ -1343,6 +1344,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
 
                     return <CanvasElement key={`${item.id}:vp:${virtualPageIndex}`} item={renderItem} selected={item.id === selectedId} zoom={zoom} pageSettings={pageSettings} record={record} source={source} sources={dataState.sources} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} virtualPageIndex={isPaginatedTable ? tableFragmentIndex : virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={documentOutputPageCount} virtualPageMode={isPaginatedTable} repeatedBandElement={(activePageId !== masterPage?.id || virtualPageIndex > 0) && (isHeader || isFooter)} onSelect={() => setSelectedId(item.id)} onHistoryStart={beginHistoryGesture} onHistoryEnd={endHistoryGesture} onSelectionChange={(table) => { setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, table } : entry)); }} onLayoutChange={(patch) => { if (shouldCommitMeasuredFlowHeight(virtualPageIndex, isPaginatedTable)) setElementsRaw((current) => synchronizeFlowRowHeights(current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry))); }} onChange={(patch) => updateCanvasElement(item, patch)}/>;
                   })}
+                  <PageWatermarkPreview settings={pageSettings} runtimePageIndex={documentPageOffset + virtualPageIndex} layer="above"/>
                 </div>
               </div>
             ))}
@@ -1782,6 +1784,17 @@ function PageGuides({ settings }: { settings: PageSettings }) {
   </>;
 }
 
+function PageWatermarkPreview({ settings, runtimePageIndex, layer }: { settings: PageSettings; runtimePageIndex: number; layer: 'behind'|'above' }) {
+  const watermark=settings.watermark;
+  if(!watermark.enabled||watermark.layer!==layer||(watermark.applyTo==='first'&&runtimePageIndex>0))return null;
+  const positions:Record<string,{left:string;top:string}>={center:{left:'50%',top:'50%'},'top-left':{left:'15%',top:'15%'},'top-right':{left:'85%',top:'15%'},'bottom-left':{left:'15%',top:'85%'},'bottom-right':{left:'85%',top:'85%'},custom:{left:\`\${Math.max(0,Math.min(100,watermark.customXPercent))}%\`,top:\`\${Math.max(0,Math.min(100,watermark.customYPercent))}%\`}};
+  const point=positions[watermark.position]??positions.center!;
+  const common:CSSProperties={position:'absolute',left:point.left,top:point.top,transform:\`translate(-50%, -50%) rotate(\${watermark.rotation}deg)\`,opacity:Math.max(0,Math.min(100,watermark.opacity))/100,pointerEvents:'none',userSelect:'none',zIndex:layer==='above'?50:0};
+  if(watermark.type==='image'&&watermark.imageSource)return <img aria-hidden="true" src={watermark.imageSource} alt="" style={{...common,width:\`\${Math.max(5,Math.min(150,watermark.scale))}%\`,height:'auto',maxHeight:'80%',objectFit:'contain'}}/>;
+  if(watermark.type==='text'&&watermark.text)return <div aria-hidden="true" style={{...common,color:watermark.color,fontSize:Math.max(8,watermark.fontSize),fontWeight:700,whiteSpace:'nowrap',lineHeight:1}}>{watermark.text}</div>;
+  return null;
+}
+
 function PageProperties({ settings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onChange, onName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onEditHeader, onEditFooter }: { settings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void; onChange: (patch: Partial<PageSettings>) => void; onName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void; onEditHeader: () => void; onEditFooter: () => void }) {
   const [linkMargins, setLinkMargins] = useState(false);
   const [linkBleed, setLinkBleed] = useState(true);
@@ -1797,6 +1810,8 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
   const activePage = pages.find((page) => page.id === activePageId) ?? pages[0];
   const marginLinkedValue = Number(mmToUnit(settings.marginsMm.top,unit).toFixed(2));
   const bleedLinkedValue = Number(mmToUnit(settings.bleedMm.top,unit).toFixed(2));
+  const updateWatermark = (patch: Partial<PageSettings['watermark']>) => onChange({ watermark: { ...settings.watermark, ...patch } });
+  const importWatermarkImage = (event: ChangeEvent<HTMLInputElement>) => { const file=event.target.files?.[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>updateWatermark({ enabled:true,type:'image',imageSource:String(reader.result??'') }); reader.readAsDataURL(file); event.currentTarget.value=''; };
   return <div className="page-properties-stack professional-page-settings">
     <div className="page-settings-intro"><div><strong>Page setup</strong><span>{activePage?.name ?? pageName} · {settings.preset} {settings.orientation}</span></div>{help('Configure physical page size, print margins, header/footer masters, bleed and appearance. Advanced sections stay collapsed until you need them.')}</div>
 
@@ -1853,6 +1868,27 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
         <div className="section-inline-control"><span>Values</span><button type="button" className={linkBleed?'mini-toggle active':'mini-toggle'} onClick={() => setLinkBleed(!linkBleed)}>{linkBleed?'Linked':'Independent'}</button></div>
         {linkBleed ? <label>All sides<input type="number" min="0" step="0.5" value={bleedLinkedValue} onChange={(e) => updateEdges('bleedMm','top',Number(e.target.value),true)}/></label> : <div className="edge-grid">{(['top','right','bottom','left'] as const).map((side) => <label key={side}>{side[0].toUpperCase()+side.slice(1)}<input type="number" min="0" step="0.5" value={Number(mmToUnit(settings.bleedMm[side],unit).toFixed(2))} onChange={(e) => updateEdges('bleedMm',side,Number(e.target.value),false)}/></label>)}</div>}
         <div className="preset-row"><button type="button" className="secondary compact" onClick={() => onChange({ bleedMm:{top:0,right:0,bottom:0,left:0} })}>None</button><button type="button" className="secondary compact" onClick={() => onChange({ bleedMm:{top:3,right:3,bottom:3,left:3} })}>3 mm print</button></div>
+      </div>
+    </details>
+
+    <details className="inspector-accordion" open>
+      <summary><span><span className="section-symbol">W</span>Watermark {settings.watermark.enabled ? <small>On · {settings.watermark.type === 'text' ? 'Text' : 'Image'}</small> : <small>Off</small>} {help('Page-level watermark repeats automatically on generated continuation pages and API PDFs.')}</span><ChevronDown size={15}/></summary>
+      <div className="inspector-accordion-content">
+        <div className="section-inline-control"><span>Watermark</span><button type="button" className={settings.watermark.enabled?'mini-toggle active':'mini-toggle'} onClick={() => updateWatermark({ enabled: !settings.watermark.enabled })}>{settings.watermark.enabled?'Enabled':'Disabled'}</button></div>
+        <label>Type<select value={settings.watermark.type} onChange={(e) => updateWatermark({ type:e.target.value as PageSettings['watermark']['type'] })}><option value="text">Text</option><option value="image">Image / Logo</option></select></label>
+        {settings.watermark.type === 'text' ? <>
+          <label>Text<input value={settings.watermark.text} placeholder="CONFIDENTIAL" onChange={(e) => updateWatermark({ text:e.target.value })}/></label>
+          <div className="property-grid"><label>Font size<input type="number" min="8" max="240" value={settings.watermark.fontSize} onChange={(e) => updateWatermark({ fontSize:Math.max(8,Number(e.target.value)||8) })}/></label><label>Color<input type="color" value={settings.watermark.color} onChange={(e) => updateWatermark({ color:e.target.value })}/></label></div>
+        </> : <>
+          <label>Image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={importWatermarkImage}/></label>
+          {settings.watermark.imageSource ? <div className="page-size-readout">Watermark image loaded</div> : <div className="auto-page-note">Choose a logo/stamp image.</div>}
+          <label>Image width (% of page)<input type="number" min="5" max="150" value={settings.watermark.scale} onChange={(e) => updateWatermark({ scale:Math.max(5,Math.min(150,Number(e.target.value)||5)) })}/></label>
+        </>}
+        <div className="property-grid"><label>Opacity %<input type="number" min="0" max="100" value={settings.watermark.opacity} onChange={(e) => updateWatermark({ opacity:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label><label>Rotation °<input type="number" min="-180" max="180" value={settings.watermark.rotation} onChange={(e) => updateWatermark({ rotation:Math.max(-180,Math.min(180,Number(e.target.value)||0)) })}/></label></div>
+        <label>Position<select value={settings.watermark.position} onChange={(e) => updateWatermark({ position:e.target.value as PageSettings['watermark']['position'] })}><option value="center">Center</option><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option><option value="custom">Custom</option></select></label>
+        {settings.watermark.position === 'custom' ? <div className="property-grid"><label>X %<input type="number" min="0" max="100" value={settings.watermark.customXPercent} onChange={(e) => updateWatermark({ customXPercent:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label><label>Y %<input type="number" min="0" max="100" value={settings.watermark.customYPercent} onChange={(e) => updateWatermark({ customYPercent:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label></div> : null}
+        <div className="property-grid"><label>Pages<select value={settings.watermark.applyTo} onChange={(e) => updateWatermark({ applyTo:e.target.value as PageSettings['watermark']['applyTo'] })}><option value="all">All output pages</option><option value="first">First output page only</option></select></label><label>Layer<select value={settings.watermark.layer} onChange={(e) => updateWatermark({ layer:e.target.value as PageSettings['watermark']['layer'] })}><option value="behind">Behind content</option><option value="above">Above content</option></select></label></div>
+        <p className="table-cell-help">Watermark is stored with page settings, so dynamic-table continuation pages, Native PDF, API generation and combined PDF use the same configuration.</p>
       </div>
     </details>
 
