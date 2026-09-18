@@ -1787,10 +1787,10 @@ function PageGuides({ settings }: { settings: PageSettings }) {
 function PageWatermarkPreview({ settings, runtimePageIndex, layer }: { settings: PageSettings; runtimePageIndex: number; layer: 'behind'|'above' }) {
   const watermark=settings.watermark;
   if(!watermark.enabled||watermark.layer!==layer||(watermark.applyTo==='first'&&runtimePageIndex>0))return null;
-  const positions:Record<string,{left:string;top:string}>={center:{left:'50%',top:'50%'},'top-left':{left:'15%',top:'15%'},'top-right':{left:'85%',top:'15%'},'bottom-left':{left:'15%',top:'85%'},'bottom-right':{left:'85%',top:'85%'},custom:{left:\`\${Math.max(0,Math.min(100,watermark.customXPercent))}%\`,top:\`\${Math.max(0,Math.min(100,watermark.customYPercent))}%\`}};
+  const positions:Record<string,{left:string;top:string}>={center:{left:'50%',top:'50%'},'top-left':{left:'15%',top:'15%'},'top-right':{left:'85%',top:'15%'},'bottom-left':{left:'15%',top:'85%'},'bottom-right':{left:'85%',top:'85%'},custom:{left:`${Math.max(0,Math.min(100,watermark.customXPercent))}%`,top:`${Math.max(0,Math.min(100,watermark.customYPercent))}%`}};
   const point=positions[watermark.position]??positions.center!;
-  const common:CSSProperties={position:'absolute',left:point.left,top:point.top,transform:\`translate(-50%, -50%) rotate(\${watermark.rotation}deg)\`,opacity:Math.max(0,Math.min(100,watermark.opacity))/100,pointerEvents:'none',userSelect:'none',zIndex:layer==='above'?50:0};
-  if(watermark.type==='image'&&watermark.imageSource)return <img aria-hidden="true" src={watermark.imageSource} alt="" style={{...common,width:\`\${Math.max(5,Math.min(150,watermark.scale))}%\`,height:'auto',maxHeight:'80%',objectFit:'contain'}}/>;
+  const common:CSSProperties={position:'absolute',left:point.left,top:point.top,transform:`translate(-50%, -50%) rotate(${watermark.rotation}deg)`,opacity:Math.max(0,Math.min(100,watermark.opacity))/100,pointerEvents:'none',userSelect:'none',zIndex:layer==='above'?50:0};
+  if(watermark.type==='image'&&watermark.imageSource)return <img aria-hidden="true" src={watermark.imageSource} alt="" style={{...common,width:`${Math.max(5,Math.min(150,watermark.scale))}%`,height:'auto',maxHeight:'80%',objectFit:'contain'}}/>;
   if(watermark.type==='text'&&watermark.text)return <div aria-hidden="true" style={{...common,color:watermark.color,fontSize:Math.max(8,watermark.fontSize),fontWeight:700,whiteSpace:'nowrap',lineHeight:1}}>{watermark.text}</div>;
   return null;
 }
