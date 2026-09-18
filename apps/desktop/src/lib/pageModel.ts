@@ -2,6 +2,26 @@ export type PagePreset = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | 'Tabloid' | '
 export type PageOrientation = 'Portrait' | 'Landscape';
 export type PageUnit = 'mm' | 'cm' | 'in';
 export type PageRepeatMode = 'every' | 'first' | 'exceptFirst';
+export type WatermarkType = 'text' | 'image';
+export type WatermarkPosition = 'center' | 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right' | 'custom';
+export type WatermarkApplyTo = 'all' | 'first';
+export type WatermarkLayer = 'behind' | 'above';
+export type WatermarkSettings = {
+  enabled: boolean;
+  type: WatermarkType;
+  text: string;
+  imageSource?: string;
+  opacity: number;
+  rotation: number;
+  fontSize: number;
+  color: string;
+  position: WatermarkPosition;
+  scale: number;
+  customXPercent: number;
+  customYPercent: number;
+  applyTo: WatermarkApplyTo;
+  layer: WatermarkLayer;
+};
 export type ContentBorderAlignment = 'inside' | 'center' | 'outside';
 
 export type EdgeValues = { top: number; right: number; bottom: number; left: number };
@@ -24,6 +44,7 @@ export type PageSettings = {
   showGuides: boolean;
   header: PageBandSettings;
   footer: PageBandSettings;
+  watermark: WatermarkSettings;
 };
 
 export const PAGE_PRESETS: Record<Exclude<PagePreset, 'Custom'>, { widthMm: number; heightMm: number }> = {
@@ -44,6 +65,7 @@ export function defaultPageSettings(): PageSettings {
     background: '#ffffff', borderColor: '#d2d8e0', borderWidth: 1, borderAlignment: 'inside', borderOffsetMm: 0, showGuides: true,
     header: { enabled: false, heightMm: 20, gapMm: 5, repeat: 'every' },
     footer: { enabled: false, heightMm: 15, gapMm: 5, repeat: 'every' },
+    watermark: { enabled: false, type: 'text', text: 'CONFIDENTIAL', opacity: 20, rotation: -45, fontSize: 56, color: '#64748B', position: 'center', scale: 60, customXPercent: 50, customYPercent: 50, applyTo: 'all', layer: 'behind' },
   };
 }
 
@@ -57,6 +79,7 @@ export function normalizePageSettings(input?: Partial<PageSettings> | null): Pag
     bleedMm: { ...defaults.bleedMm, ...(input.bleedMm ?? {}) },
     header: { ...defaults.header, ...(input.header ?? {}) },
     footer: { ...defaults.footer, ...(input.footer ?? {}) },
+    watermark: { ...defaults.watermark, ...(input.watermark ?? {}) },
   };
 }
 
