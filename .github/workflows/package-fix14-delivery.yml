@@ -1,0 +1,23 @@
+name: Package DB6B Fix14 Delivery
+
+on:
+  push:
+    branches:
+      - package/db6b-fix14-delivery
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create source archive
+        run: git archive --format=zip --output=Document-Builder-DB6B-Fix14-Source.zip HEAD
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Document-Builder-DB6B-Fix14-Source
+          path: Document-Builder-DB6B-Fix14-Source.zip
+          if-no-files-found: error
