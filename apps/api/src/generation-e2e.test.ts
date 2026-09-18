@@ -70,4 +70,49 @@ describe('DB-6B real generation API smoke',()=>{
     expect(response.status).toBe(422);
     expect(await response.json()).toMatchObject({error:{code:'EXACT_DOCX_UNAVAILABLE'}});
   });
+
+  it('generates two real PDFs as one combined PDF through the batch route',async()=>{
+    const base=await start();
+    const response=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'e2e-invoice',
+      output:{format:'pdf',outputMode:'combined',fileName:'two-invoices'},
+      documents:[
+        {id:'INV-E2E-1',data:{invoiceNo:'INV-E2E-1',customer:{name:'Acme'},items:[{description:'Widget A',qty:2}]}},
+        {id:'INV-E2E-2',data:{invoiceNo:'INV-E2E-2',customer:{name:'Beta'},items:[{description:'Widget B',qty:3}]}},
+      ],
+    })});
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toBe('application/pdf');
+    expect(response.headers.get('content-disposition')).toContain('two-invoices.pdf');
+    expect(response.headers.get('x-document-page-count')).toBe('2');
+    const bytes=Buffer.from(await response.arrayBuffer());
+    expect(bytes.byteLength).toBeGreaterThan(200);
+    expect(bytes.subarray(0,5).toString('ascii')).toBe('%PDF-');
+    const text=bytes.toString('latin1');
+    expect(text).toContain('INV-E2E-1');
+    expect(text).toContain('INV-E2E-2');
+  });
+
+  it('generates two real separate PDFs as one JSON response collection',async()=>{
+    const base=await start();
+    const response=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'e2e-invoice',
+      output:{format:'pdf',outputMode:'separate'},
+      documents:[
+        {id:'INV-E2E-1',data:{invoiceNo:'INV-E2E-1',customer:{name:'Acme'},items:[{description:'Widget A',qty:2}]}},
+        {id:'INV-E2E-2',data:{invoiceNo:'INV-E2E-2',customer:{name:'Beta'},items:[{description:'Widget B',qty:3}]}},
+      ],
+    })});
+    expect(response.status).toBe(200);
+    expect(response.headers.get('content-type')).toContain('application/json');
+    const body=await response.json() as any;
+    expect(body.output).toMatchObject({format:'pdf',outputMode:'separate',documentCount:2,pageCount:2});
+    expect(body.files).toHaveLength(2);
+    for(const file of body.files){
+      const bytes=Buffer.from(file.content,'base64');
+      expect(bytes.byteLength).toBeGreaterThan(100);
+      expect(bytes.subarray(0,5).toString('ascii')).toBe('%PDF-');
+    }
+  });
+
 });
