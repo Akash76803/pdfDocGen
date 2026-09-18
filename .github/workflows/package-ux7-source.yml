@@ -1,0 +1,24 @@
+name: Package UX7 Source ZIP
+
+on:
+  push:
+    branches:
+      - feat/ux7-watermark-system
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: |
+          zip -r Document-Builder-UX7-Watermark-System.zip . -x ".git/*" ".github/workflows/package-ux7-source.yml"
+      - name: Upload source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Document-Builder-UX7-Watermark-System
+          path: Document-Builder-UX7-Watermark-System.zip
+          if-no-files-found: error
