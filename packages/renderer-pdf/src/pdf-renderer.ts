@@ -428,9 +428,9 @@ function pageWatermarkBaseOpCount(pageDef:NonNullable<RenderModel['page']>):numb
 }
 function watermarkGraphicsState(page:PdfPage,opacity:number):string{
   const clamped=Math.max(0,Math.min(1,opacity));
-  const name=\`GSWM\${Math.round(clamped*1000)}\`;
-  const entry=\`/\${name} << /Type /ExtGState /ca \${f(clamped)} /CA \${f(clamped)} >>\`;
-  if(!page.extGStates?.includes(\`/\${name} \`)) page.extGStates=page.extGStates?\`\${page.extGStates} \${entry}\`:entry;
+  const name=`GSWM${Math.round(clamped*1000)}`;
+  const entry=`/${name} << /Type /ExtGState /ca ${f(clamped)} /CA ${f(clamped)} >>`;
+  if(!page.extGStates?.includes(`/${name} `)) page.extGStates=page.extGStates?`${page.extGStates} ${entry}`:entry;
   return name;
 }
 function watermarkCenter(page:PdfPage,position:string,width:number,height:number,customXPercent:number,customYPercent:number){
@@ -450,7 +450,7 @@ function watermarkTextOp(page:PdfPage,pageDef:NonNullable<RenderModel['page']>):
   const size=Math.max(6,wm.fontSize??42);const width=measuredTextWidth(text,size,'F2');const height=size;
   const center=watermarkCenter(page,wm.position??'CENTER',width,height,wm.customXPercent??50,wm.customYPercent??50);
   const angle=((wm.rotation??-45)*Math.PI)/180,c=Math.cos(angle),s=Math.sin(angle);const [r,g,b]=rgb(wm.color??'#64748B');const gs=watermarkGraphicsState(page,wm.opacity??.2);
-  return \`q /\${gs} gs BT /F2 \${f(size)} Tf \${r} \${g} \${b} rg \${f(c)} \${f(s)} \${f(-s)} \${f(c)} \${f(center.x)} \${f(center.y)} Tm \${f(-width/2)} \${f(-size*.3)} Td (\${escapePdf(text)}) Tj ET Q\`;
+  return `q /${gs} gs BT /F2 ${f(size)} Tf ${r} ${g} ${b} rg ${f(c)} ${f(s)} ${f(-s)} ${f(c)} ${f(center.x)} ${f(center.y)} Tm ${f(-width/2)} ${f(-size*.3)} Td (${escapePdf(text)}) Tj ET Q`;
 }
 function watermarkImageOp(page:PdfPage,pageDef:NonNullable<RenderModel['page']>,images:Map<string,PdfImage>):string|undefined{
   const wm=pageDef.watermark;if(!wm?.enabled||wm.type!=='IMAGE'||!wm.imageSource)return;
@@ -458,7 +458,7 @@ function watermarkImageOp(page:PdfPage,pageDef:NonNullable<RenderModel['page']>,
   const scale=Math.max(.05,Math.min(1.5,wm.scale??.6));let width=page.width*scale,height=width*(image.height/image.width);const maxHeight=page.height*.8;if(height>maxHeight){height=maxHeight;width=height*(image.width/image.height);}
   const center=watermarkCenter(page,wm.position??'CENTER',width,height,wm.customXPercent??50,wm.customYPercent??50);
   const angle=((wm.rotation??0)*Math.PI)/180,c=Math.cos(angle),s=Math.sin(angle);const tx=center.x-c*width/2+s*height/2,ty=center.y-s*width/2-c*height/2;const gs=watermarkGraphicsState(page,wm.opacity??.15);
-  return \`q /\${gs} gs \${f(c*width)} \${f(s*width)} \${f(-s*height)} \${f(c*height)} \${f(tx)} \${f(ty)} cm /\${image.name} Do Q\`;
+  return `q /${gs} gs ${f(c*width)} ${f(s*width)} ${f(-s*height)} ${f(c*height)} ${f(tx)} ${f(ty)} cm /${image.name} Do Q`;
 }
 function applyPageWatermarks(pages:PdfPage[],pageDef:NonNullable<RenderModel['page']>,images:Map<string,PdfImage>){
   const wm=pageDef.watermark;if(!wm?.enabled)return;
