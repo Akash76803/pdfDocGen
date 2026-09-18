@@ -5,6 +5,7 @@ import {
   type DocumentGenerationService,
   type DocumentOutputFormat,
   type DocumentResponseMode,
+  type GenerateDocumentBatchCommand,
   type GenerateDocumentCommand,
 } from '@document-tool/generation-core';
 import { resolveApiBodyLimitConfig, type ApiBodyLimitConfig } from './config.js';
@@ -32,6 +33,8 @@ function payloadTooLarge(config: ApiBodyLimitConfig): CodedError {
 
 const FORMATS = new Set<DocumentOutputFormat>(['pdf','docx-exact','docx-editable']);
 const RESPONSE_MODES = new Set<DocumentResponseMode>(['binary','base64']);
+const BATCH_OUTPUT_MODES = new Set(['separate','combined'] as const);
+const BATCH_PAGE_NUMBERING = new Set(['per-document','global'] as const);
 const TEMPLATE_ROUTE = /^\/api\/v1\/templates\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
 
 function applyCors(req: IncomingMessage, res: ServerResponse) {
@@ -114,6 +117,55 @@ export function parseGenerateDocumentCommand(value: unknown): GenerateDocumentCo
   };
 }
 
+export function parseGenerateDocumentBatchCommand(value: unknown): GenerateDocumentBatchCommand {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('Request body must be a JSON object.'), { code:'INVALID_REQUEST' });
+  const input = value as Record<string, unknown>;
+  const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
+  if (!templateId) throw Object.assign(new Error('templateId is required.'), { code:'INVALID_REQUEST' });
+
+  const outputRaw = input.output;
+  if (!outputRaw || typeof outputRaw !== 'object' || Array.isArray(outputRaw)) throw Object.assign(new Error('output is required.'), { code:'INVALID_REQUEST' });
+  const outputObj = outputRaw as Record<string, unknown>;
+  const format = outputObj.format;
+  if (typeof format !== 'string' || !FORMATS.has(format as DocumentOutputFormat)) throw Object.assign(new Error('output.format must be pdf, docx-exact, or docx-editable.'), { code:'INVALID_REQUEST' });
+  const outputMode = outputObj.outputMode;
+  if (typeof outputMode !== 'string' || !BATCH_OUTPUT_MODES.has(outputMode as 'separate'|'combined')) throw Object.assign(new Error('output.outputMode must be separate or combined.'), { code:'INVALID_REQUEST' });
+  const responseMode = outputObj.responseMode;
+  if (responseMode !== undefined && (typeof responseMode !== 'string' || !RESPONSE_MODES.has(responseMode as DocumentResponseMode))) throw Object.assign(new Error('output.responseMode must be binary or base64.'), { code:'INVALID_REQUEST' });
+  const pageNumbering = outputObj.pageNumbering;
+  if (pageNumbering !== undefined && (typeof pageNumbering !== 'string' || !BATCH_PAGE_NUMBERING.has(pageNumbering as 'per-document'|'global'))) throw Object.assign(new Error('output.pageNumbering must be per-document or global.'), { code:'INVALID_REQUEST' });
+  if (outputMode === 'combined' && format !== 'pdf') throw Object.assign(new Error('Combined batch output currently supports PDF only.'), { code:'INVALID_REQUEST' });
+  if (outputMode === 'separate' && responseMode === 'binary') throw Object.assign(new Error('Separate batch output returns a JSON file collection; use base64 responseMode or omit responseMode.'), { code:'INVALID_REQUEST' });
+
+  const documentsRaw = input.documents;
+  if (!Array.isArray(documentsRaw) || documentsRaw.length === 0) throw Object.assign(new Error('documents must be a non-empty array.'), { code:'INVALID_REQUEST' });
+  const documents = documentsRaw.map((item, index) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) throw Object.assign(new Error(`documents[${index}] must be a JSON object.`), { code:'INVALID_REQUEST' });
+    const document = item as Record<string, unknown>;
+    const data = document.data;
+    if (!data || typeof data !== 'object' || Array.isArray(data)) throw Object.assign(new Error(`documents[${index}].data must be a JSON object.`), { code:'INVALID_REQUEST' });
+    return {
+      id: typeof document.id === 'string' ? document.id : undefined,
+      fileName: typeof document.fileName === 'string' ? document.fileName : undefined,
+      data: data as Record<string, unknown>,
+    };
+  });
+
+  return {
+    templateId,
+    templateVersion: typeof input.templateVersion === 'number' ? input.templateVersion : undefined,
+    output: {
+      format: format as DocumentOutputFormat,
+      outputMode: outputMode as 'separate'|'combined',
+      fileName: typeof outputObj.fileName === 'string' ? outputObj.fileName : undefined,
+      renderMode: outputObj.renderMode === 'exact' ? 'exact' : outputObj.renderMode === 'native-auto' ? 'native-auto' : undefined,
+      responseMode: responseMode as DocumentResponseMode | undefined,
+      pageNumbering: pageNumbering as 'per-document'|'global'|undefined,
+    },
+    documents,
+  };
+}
+
 function errorStatus(code: string) {
   return code === 'PAYLOAD_TOO_LARGE' ? 413
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
@@ -150,6 +202,70 @@ export function createApiHandler(deps: ApiDependencies) {
         const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'TEMPLATE_SAVE_FAILED';
         const message = error instanceof Error ? error.message : 'Template operation failed.';
         return sendJson(res, errorStatus(code), { error:{ code, message } } satisfies ApiError);
+      }
+    }
+
+    if (method === 'POST' && url.pathname === '/api/v1/documents/generate/batch') {
+      try {
+        const command = parseGenerateDocumentBatchCommand(await readJson(req, bodyLimitConfig));
+        if (!deps.generationService.generateBatch) throw new GenerationServiceUnavailableError('Batch document generation adapter is not configured.');
+        const result = await deps.generationService.generateBatch(command);
+
+        if (result.outputMode === 'combined') {
+          if (!result.combined) throw Object.assign(new Error('Combined generation completed without a combined file.'), { code:'GENERATION_FAILED' });
+          if ((command.output.responseMode ?? 'binary') === 'binary') return sendBinary(res, result.combined);
+          return sendJson(res, 200, {
+            jobId: result.jobId || randomUUID(),
+            status: result.status,
+            templateId: result.templateId,
+            templateVersion: result.templateVersion,
+            output: {
+              format: result.format,
+              outputMode: result.outputMode,
+              fileName: result.combined.fileName,
+              contentType: result.combined.contentType,
+              sizeBytes: result.combined.bytes.byteLength,
+              documentCount: result.documentCount,
+              pageCount: result.totalPageCount,
+              warnings: result.warnings ?? [],
+            },
+            documents: result.documents,
+            file: { encoding:'base64', content:Buffer.from(result.combined.bytes).toString('base64') },
+          });
+        }
+
+        const files = result.files ?? [];
+        return sendJson(res, 200, {
+          jobId: result.jobId || randomUUID(),
+          status: result.status,
+          templateId: result.templateId,
+          templateVersion: result.templateVersion,
+          output: {
+            format: result.format,
+            outputMode: result.outputMode,
+            documentCount: result.documentCount,
+            pageCount: result.totalPageCount,
+            warnings: result.warnings ?? [],
+          },
+          documents: result.documents,
+          files: files.map((file, index) => ({
+            id: result.documents[index]?.id ?? `document-${index + 1}`,
+            format: file.format,
+            fileName: file.fileName,
+            contentType: file.contentType,
+            sizeBytes: file.bytes.byteLength,
+            pageCount: file.pageCount,
+            warnings: file.warnings ?? [],
+            encoding: 'base64',
+            content: Buffer.from(file.bytes).toString('base64'),
+          })),
+        });
+      } catch (error) {
+        if (error instanceof GenerationServiceUnavailableError) return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
+        const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'GENERATION_FAILED';
+        const message = error instanceof Error ? error.message : 'Batch document generation failed.';
+        const details = typeof error === 'object' && error && 'details' in error ? (error as { details?: unknown }).details : undefined;
+        return sendJson(res, errorStatus(code), { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
       }
     }
 
