@@ -40,7 +40,12 @@ export type PageNumberPosition = 'BOTTOM_LEFT'|'BOTTOM_CENTER'|'BOTTOM_RIGHT';
 export type HeaderMode = 'EVERY_PAGE'|'FIRST_PAGE_ONLY'|'EXCEPT_FIRST';
 export type FooterMode = 'REPEAT_PAGE'|'FLOW'|'LAST_PAGE_ONLY'|'FIRST_PAGE_ONLY'|'EXCEPT_FIRST';
 export interface PaginationSettings { repeatHeader?:boolean; /** Explicit header policy; when omitted legacy repeatHeader is used. */ headerMode?:HeaderMode; /** @deprecated use footerMode */ repeatFooter?:boolean; footerMode?:FooterMode; showPageNumbers?:boolean; pageNumberPosition?:PageNumberPosition; keepSummaryTogether?:boolean; keepCustomGridTogether?:boolean; }
-export interface PageDefinition { size:PageSize; orientation:PageOrientation; margins:PageMargins; customWidthMm?:number; customHeightMm?:number; backgroundColor?:string; border?:PageBorder; pagination?:PaginationSettings; }
+export type PageWatermarkType = 'TEXT'|'IMAGE';
+export type PageWatermarkPosition = 'CENTER'|'TOP_LEFT'|'TOP_RIGHT'|'BOTTOM_LEFT'|'BOTTOM_RIGHT'|'CUSTOM';
+export type PageWatermarkApplyTo = 'ALL'|'FIRST_PAGE';
+export type PageWatermarkLayer = 'BEHIND'|'ABOVE';
+export interface PageWatermarkDefinition { enabled?:boolean; type?:PageWatermarkType; text?:string; imageSource?:string; opacity?:number; rotation?:number; fontSize?:number; color?:string; position?:PageWatermarkPosition; scale?:number; customXPercent?:number; customYPercent?:number; applyTo?:PageWatermarkApplyTo; layer?:PageWatermarkLayer; }
+export interface PageDefinition { size:PageSize; orientation:PageOrientation; margins:PageMargins; customWidthMm?:number; customHeightMm?:number; backgroundColor?:string; border?:PageBorder; pagination?:PaginationSettings; watermark?:PageWatermarkDefinition; }
 
 export interface PageDimensions { widthMm:number; heightMm:number; }
 export const PAGE_SIZE_DIMENSIONS: Readonly<Record<Exclude<PageSize,'CUSTOM'>, PageDimensions>> = {
