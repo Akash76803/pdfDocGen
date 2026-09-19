@@ -23,6 +23,7 @@ import { toVisibilityRule, type BuilderConditionalRendering } from './conditiona
 import {
   dynamicRows,
   evaluateTableFormula,
+  isTableGapColumn,
   type TableDataFormat,
   type TableDataType,
   type TableDefinition,
@@ -376,7 +377,7 @@ function convertTable(element:BuilderElement,layout:any,tableMedia:TableMediaSpe
   const columns=t.columns.map((c,index)=>{
     const cell=body?.cells[index];const h=header?.cells[index];const media=cell?tableMedia.find((item)=>item.cellId===cell.id):undefined;const groupedColumn=grouping?.columns[index];
     const defaultPath=grouping?(groupedColumn?.outputKey||c.key):(cell?.binding||c.key);
-    const columnVisibility=nativeVisibility(c.conditionalRendering,formulaMap);const visibilityScope=c.conditionScope==='anyRow'?'ANY_ROW':c.conditionScope==='allRows'?'ALL_ROWS':'DOCUMENT';const base:any={id:c.id,label:h?.content||groupedColumn?.label||c.label||c.key,path:media?.syntheticPath||defaultPath,sourceField:defaultPath,targetPath:defaultPath,widthPercent:(Math.max(1,c.width)/totalWidth)*100,alignment:alignment(c.align),headerAlignment:alignment(h?.style.align||c.align),headerStyle:h?cellTextStyle(h.style):undefined,cellStyle:cell?cellTextStyle(cell.style):undefined,format:toDisplayFormat(c.dataType,c.format),...(columnVisibility?{visibility:columnVisibility,visibilityScope}:{})};
+    const columnVisibility=nativeVisibility(c.conditionalRendering,formulaMap);const visibilityScope=c.conditionScope==='anyRow'?'ANY_ROW':c.conditionScope==='allRows'?'ALL_ROWS':'DOCUMENT';const base:any={id:c.id,label:h?.content||groupedColumn?.label||c.label||c.key,path:media?.syntheticPath||defaultPath,layoutRole:isTableGapColumn(t,index)?'SPACER':'CONTENT',sourceField:defaultPath,targetPath:defaultPath,widthPercent:(Math.max(1,c.width)/totalWidth)*100,alignment:alignment(c.align),headerAlignment:alignment(h?.style.align||c.align),headerStyle:h?cellTextStyle(h.style):undefined,cellStyle:cell?cellTextStyle(cell.style):undefined,format:toDisplayFormat(c.dataType,c.format),...(columnVisibility?{visibility:columnVisibility,visibilityScope}:{})};
     if(media){base.kind=media.kind==='qr'?'QR':'IMAGE';base.imageWidthMm=Math.max(10,pxToMm(c.width*.72));base.imageHeightMm=Math.max(10,pxToMm(body?.height??30)*.9);}
     else if(!grouping&&cell?.valueMode==='formula'&&cell.formula){const converted=convertFormulaExpression(cell.formula,t,sourcePath);base.kind='FORMULA';base.formulaExpression=converted.expression;base.formulaBindings=converted.bindings;}
     return base;
