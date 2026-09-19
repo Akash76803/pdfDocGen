@@ -437,7 +437,12 @@ export class TemplateEngine {
       return {
         model: {
           variables: root,
-          page: template.page,
+          page: {
+            ...template.page,
+            watermark: template.page.watermark
+              ? { ...template.page.watermark, enabled: template.page.watermark.enabled !== false && evaluateVisibilityRule(template.page.watermark.visibility, root) }
+              : undefined,
+          },
           header: template.header.blocks.filter(isVisible).map(convert),
           body: template.body.blocks.filter(isVisible).map(convert),
           footer: template.footer.blocks.filter(isVisible).map(convert),
