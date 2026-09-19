@@ -73,6 +73,22 @@ describe('Phase 4.12 conditional visibility rules',()=>{
     expect(table.headerGroups[0]).toMatchObject({startColumnId:'cgst',colspan:2});
   });
 
+  it('preserves a spacer column width when a conditional neighbor hides',()=>{
+    const model=new TemplateEngine().buildRenderModel(base([{
+      id:'tb-gap',type:'TABLE',sourcePath:'items',
+      columns:[
+        {id:'left',label:'Words',path:'product',widthPercent:40},
+        {id:'gap',label:'',path:'gap',widthPercent:10,layoutRole:'SPACER'},
+        {id:'optional',label:'Optional',path:'discount',widthPercent:20,visibility:{path:'status',operator:'EQUALS',value:'DRAFT'}},
+        {id:'right',label:'Net',path:'rate',widthPercent:30},
+      ],
+    }] as any),group as any).model!;
+    const table=model.body[0] as any;
+    expect(table.columns.map((column:any)=>[column.id,column.widthPercent])).toEqual([
+      ['left',40],['gap',10],['right',50],
+    ]);
+  });
+
   it('filters table rows before totals/rendering and supports ANY_ROW / ALL_ROWS column scopes',()=>{
     const scopedGroup={...group,items:[
       {product:'A',qty:2,discount:0,rate:100},
