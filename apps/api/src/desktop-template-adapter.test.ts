@@ -170,3 +170,56 @@ test('uses summary aggregate field as canonical path for a calculated table colu
   expect(table.columns[1]?.path).toBe('taxableValue');
   expect(table.columns[1]?.targetPath).toBe('taxableValue');
 });
+
+
+test('UX-8 maps universal multi-rule conditions into renderer visibility rules', () => {
+  const result = adaptDesktopTemplateEntry({
+    id:'ux8-conditions',name:'UX8 Conditions',version:1,
+    payload:{pages:[{id:'p1',settings:{},elements:[{
+      id:'conditional-text',type:'text',text:'Approved High Value',x:0,y:0,width:200,height:30,
+      conditionalRendering:{
+        enabled:true,action:'show',match:'all',
+        rules:[
+          {id:'r1',field:'Status',operator:'equals',value:'Approved'},
+          {id:'r2',field:'Grand Total',operator:'greaterThanOrEqual',value:'10000'},
+        ],
+      },
+    },{
+      id:'conditional-hide',type:'divider',x:0,y:40,width:200,height:2,
+      conditionalRendering:{
+        enabled:true,action:'hide',match:'any',
+        rules:[
+          {id:'r3',field:'Status',operator:'equals',value:'Cancelled'},
+          {id:'r4',field:'Grand Total',operator:'lessThanOrEqual',value:'0'},
+        ],
+      },
+    }]}]},
+  });
+  expect(result.body.blocks[0]?.visibility).toEqual({
+    logic:'ALL',
+    conditions:[
+      {path:'status',operator:'EQUALS',value:'Approved'},
+      {path:'grandTotal',operator:'GREATER_OR_EQUAL',value:'10000'},
+    ],
+    negate:false,
+  });
+  expect(result.body.blocks[1]?.visibility).toEqual({
+    logic:'ANY',
+    conditions:[
+      {path:'status',operator:'EQUALS',value:'Cancelled'},
+      {path:'grandTotal',operator:'LESS_OR_EQUAL',value:'0'},
+    ],
+    negate:true,
+  });
+});
+
+test('UX-8 keeps legacy single-condition templates compatible', () => {
+  const result = adaptDesktopTemplateEntry({
+    id:'ux8-legacy',name:'Legacy Condition',version:1,
+    payload:{pages:[{id:'p1',settings:{},elements:[{
+      id:'legacy-text',type:'text',text:'Legacy',x:0,y:0,width:100,height:20,
+      conditionEnabled:true,conditionField:'Payment Status',conditionOperator:'isNotEmpty',conditionValue:'',
+    }]}]},
+  });
+  expect(result.body.blocks[0]?.visibility).toEqual({path:'paymentStatus',operator:'NOT_EMPTY'});
+});
