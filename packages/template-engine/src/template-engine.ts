@@ -363,6 +363,7 @@ export class TemplateEngine {
         return scope === 'ANY_ROW' ? matches.some(Boolean) : matches.length > 0 && matches.every(Boolean);
       };
       const visibleSourceColumns = block.columns.filter(columnVisible);
+      const stabilizedWidths = stabilizeConditionalTableWidths(block.columns, visibleSourceColumns);
       const columns = visibleSourceColumns.map((column) => ({
         id: column.id,
         label: column.label,
@@ -370,7 +371,7 @@ export class TemplateEngine {
         kind: column.kind ?? 'SOURCE',
         sourceField: column.sourceField,
         targetPath: column.targetPath,
-        widthPercent: column.widthPercent,
+        widthPercent: stabilizedWidths.get(column.id) ?? column.widthPercent,
         alignment: column.alignment ?? cellStyle.alignment,
         headerAlignment: column.headerAlignment ?? column.alignment ?? headerStyle.alignment,
         headerStyle: resolveTextStyle(column.headerStyle, headerStyle),
@@ -479,6 +480,45 @@ export class TemplateEngine {
 }
 
 
+
+function stabilizeConditionalTableWidths(
+  allColumns: import('@document-tool/contracts').TableColumnDefinition[],
+  visibleColumns: import('@document-tool/contracts').TableColumnDefinition[],
+): Map<string,number> {
+  const result=new Map<string,number>();
+  if(!visibleColumns.length) return result;
+  const raw=allColumns.map((column)=>Math.max(0,Number(column.widthPercent) || 0));
+  const rawTotal=raw.reduce((sum,value)=>sum+value,0);
+  const base=rawTotal>0?raw.map((value)=>value*100/rawTotal):allColumns.map(()=>100/allColumns.length);
+  const visibleIds=new Set(visibleColumns.map((column)=>column.id));
+  visibleColumns.forEach((column)=> {
+    const index=allColumns.findIndex((candidate)=>candidate.id===column.id);
+    result.set(column.id,index>=0?(base[index]??0):0);
+  });
+  if(visibleColumns.length===allColumns.length) return result;
+
+  const visibleIndexes=allColumns.flatMap((column,index)=>visibleIds.has(column.id)?[index]:[]);
+  const contentIndexes=visibleIndexes.filter((index)=>allColumns[index]?.layoutRole!=='SPACER');
+  const recipientPool=contentIndexes.length?contentIndexes:visibleIndexes;
+  for(let hiddenIndex=0;hiddenIndex<allColumns.length;hiddenIndex+=1){
+    const hidden=allColumns[hiddenIndex]!;
+    if(visibleIds.has(hidden.id)) continue;
+    const freed=base[hiddenIndex]??0;
+    if(freed<=0 || !recipientPool.length) continue;
+    const recipient=[...recipientPool].sort((a,b)=>{
+      const da=Math.abs(a-hiddenIndex), db=Math.abs(b-hiddenIndex);
+      if(da!==db) return da-db;
+      return (a>=hiddenIndex?0:1)-(b>=hiddenIndex?0:1);
+    })[0]!;
+    const id=allColumns[recipient]!.id;
+    result.set(id,(result.get(id)??0)+freed);
+  }
+  const sum=[...result.values()].reduce((total,value)=>total+value,0);
+  if(sum>0 && Math.abs(sum-100)>1e-7){
+    for(const [id,value] of result) result.set(id,value*100/sum);
+  }
+  return result;
+}
 
 type SourceRowsWithRaw = { rows:unknown[]; rawRows:unknown[]; found:boolean };
 
