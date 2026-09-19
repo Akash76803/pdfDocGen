@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, paginateDynamicTable, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectConditionalRuntimeTable, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes, type TablePaginationRuntimeRow } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, paginateDynamicTable, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectConditionalRuntimeTable, projectTableVisibleColumns, selectTableColumn, stableConditionalColumnWidths, tableColumnSelectionCellId, visibleTableColumnIndexes, type TablePaginationRuntimeRow } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -685,5 +685,26 @@ describe('UX-8.4 Fix2 conditional table auto reflow', () => {
     const pages=paginateDynamicTable(layout.table,rows,1000,1000,600,layout.columnWidths);
     expect(rows).toHaveLength(2);
     expect(pages[0]!.usedHeightPx).toBeLessThan(200);
+  });
+});
+
+
+describe('UX-8.4 Fix3 hidden conditional column recovery', () => {
+  it('selects a hidden column through the original table schema', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.columns[1]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'r',field:'ShowDiscount',operator:'equals',value:'Yes'}]};
+    const cellId=tableColumnSelectionCellId(table,table.columns[1]!.id);
+    expect(cellId).toBe(table.bodyRows[0]!.cells[1]!.id);
+    const selected=selectTableColumn(table,table.columns[1]!.id);
+    expect(selected.selectedCellId).toBe(cellId);
+  });
+
+  it('does not change table structure when selecting a hidden column for recovery', () => {
+    const table=createDynamicTable(4,'items',1);
+    const beforeColumns=table.columns.map((column)=>column.id);
+    const beforeBodyCells=table.bodyRows[0]!.cells.map((cell)=>cell.id);
+    const selected=selectTableColumn(table,table.columns[2]!.id);
+    expect(selected.columns.map((column)=>column.id)).toEqual(beforeColumns);
+    expect(selected.bodyRows[0]!.cells.map((cell)=>cell.id)).toEqual(beforeBodyCells);
   });
 });
