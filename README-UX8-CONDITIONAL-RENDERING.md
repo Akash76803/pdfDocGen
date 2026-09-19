@@ -153,6 +153,29 @@ Verification:
 
 Manual visual smoke remains pending for the reported invoice cases.
 
+## UX-8.4 Fix3 — Hidden Conditional Column Recovery UX
+
+Implemented:
+- Columns workspace now contains a permanent **All Columns** manager sourced from the original table schema.
+- Columns remain selectable from the manager even when their condition currently hides them from the canvas/output.
+- Selecting a hidden column restores its original schema cell selection, so the existing Column + Conditional Column inspector becomes editable again.
+- Conditional columns show a dedicated **Conditional** badge in the manager.
+- A one-click **Disable** action turns off the selected column condition without requiring the column to be visible on canvas.
+- Disabling the condition immediately allows the normal conditional-render pipeline to bring the column back.
+- Recovery selection does not mutate table rows/columns, widths or cell identities.
+- No persistence-schema change was required; recovery uses the original table structure that already remains intact behind the projected runtime table.
+
+Verification:
+- Node 20.20.2 / npm 10.8.2
+- npm ci PASS (198 packages)
+- typecheck PASS
+- 68/68 test files PASS
+- 379/379 tests PASS
+- build PASS (4.49s)
+- Added regressions proving a conditionally hidden column can be selected from its original schema without structural mutation.
+
+Manual UI smoke is pending.
+
 ## Next UX-8 work
 
 UX-8.5:
