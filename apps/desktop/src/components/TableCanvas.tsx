@@ -8,7 +8,7 @@ import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.
 
 export function TableCanvas({ table, record, source, documentSource, globalFormulaValues = {}, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; globalFormulaValues?: Record<string, unknown>; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => (onSelectionChange ?? onChange)({ ...table, selectedCellId: cellId });
-  const runtime = dynamicRows(table, record, source, documentSource);
+  const runtime = dynamicRows(table, record, source, documentSource, (field) => globalFormulaValue(globalFormulaValues, field));
   const visibleColumnIndexes = visibleTableColumnIndexes(table, record, runtime, (field) => globalFormulaValue(globalFormulaValues, field));
   const renderTable = projectTableVisibleColumns(table, visibleColumnIndexes);
   const columnWidths = smartColumnWidths(renderTable, runtime.map((row) => row.value));
