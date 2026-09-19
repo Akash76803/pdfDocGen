@@ -15,7 +15,7 @@ import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode, type WatermarkSettings } from '../lib/pageModel.ts';
-import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode, type TableColumnConditionScope, projectConditionalRuntimeTable, visibleTableColumnIndexes } from '../lib/tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode, type TableColumnConditionScope, projectConditionalRuntimeTable, selectTableColumn, visibleTableColumnIndexes } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
 import { ACTIVE_TEMPLATE_ID_KEY, beginNewTemplate, consumeTemplateBuilderAction, migrateLegacyTemplateToLibrary, saveTemplateToLibrary, TEMPLATE_STORAGE_KEY, type NewTemplateRequest, type TemplateDocumentType } from '../lib/templateLibrary.ts';
 import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowDistribution, type BodyFlowWidth } from '../lib/bodyFlow.ts';
@@ -2852,7 +2852,28 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
     if (!selectedColumn) return;
     onUpdate(updateTableColumn(table, selectedColumn.id, { conditionalRendering: next }));
   };
+  const selectedColumnIndex = selectedColumn ? table.columns.findIndex((column) => column.id === selectedColumn.id) : -1;
   return <div className={`table-properties table-view-${view}`}>
+    {view === 'columns' && <section className="table-inspector-card table-column-manager">
+      <div className="table-inspector-card-head">
+        <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▥</span><span>All Columns</span></span>
+        <small className="table-inspector-badge">{table.columns.length}</small>
+      </div>
+      <p className="table-cell-help">All original columns stay available here even when a condition hides them from the canvas/output.</p>
+      <div className="table-column-manager-list">
+        {table.columns.map((column,index) => {
+          const condition = normalizeConditionalRendering(column.conditionalRendering);
+          const active = index === selectedColumnIndex;
+          return <div key={column.id} className={`table-column-manager-item${active ? ' active' : ''}`}>
+            <button type="button" className="table-column-manager-select" onClick={() => onUpdate(selectTableColumn(table,column.id))}>
+              <span><strong>{column.label || column.key || `Column ${index+1}`}</strong><small>Column {index+1}{condition.enabled ? ' · Conditional' : ''}</small></span>
+              <em>{condition.enabled ? 'Conditional' : 'Visible'}</em>
+            </button>
+            {condition.enabled && <button type="button" className="secondary compact table-column-condition-disable" title="Disable this column condition" onClick={() => onUpdate(updateTableColumn(table,column.id,{conditionalRendering:{...condition,enabled:false}}))}>Disable</button>}
+          </div>;
+        })}
+      </div>
+    </section>}
     <div className="table-summary table-scope-properties"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
     <label className="table-scope-properties">Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
     <section className="table-inspector-card table-border-card table-scope-formatting">
