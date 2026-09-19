@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectTableVisibleColumns, visibleTableColumnIndexes } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -576,5 +576,48 @@ describe('normalizeTableFormulaReferences', () => {
     expect(normalized.bodyRows[0]!.cells[2]!.formula).toBe('[Basic Value] - [Discount]');
     normalized.bodyRows[0]!.cells[2]!.formula = 'DISCOUNT([Basic Value], [Total Discount])';
     expect(normalizeTableFormulaReferences(normalized).bodyRows[0]!.cells[2]!.formula).toBe('DISCOUNT([Basic Value], [Total Discount])');
+  });
+});
+
+
+describe('UX-8.4 table conditional rendering', () => {
+  it('filters dynamic rows before pagination input', () => {
+    const table=createDynamicTable(2,'items',1);
+    table.rowConditionalRendering={
+      enabled:true,action:'show',match:'all',
+      rules:[{id:'r1',field:'Qty',operator:'greaterThan',value:'0'}],
+    };
+    const rows=dynamicRows(table,{items:[
+      {id:'1',Qty:2,Name:'A'},
+      {id:'2',Qty:0,Name:'B'},
+      {id:'3',Qty:5,Name:'C'},
+    ]} as never);
+    expect(rows.map((row)=>row.value.Name)).toEqual(['A','C']);
+  });
+
+  it('supports document, any-row and all-row whole-column visibility', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.columns[0]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'a',field:'Status',operator:'equals',value:'Approved'}]};
+    table.columns[0]!.conditionScope='document';
+    table.columns[1]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'b',field:'Discount',operator:'greaterThan',value:'0'}]};
+    table.columns[1]!.conditionScope='anyRow';
+    table.columns[2]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'c',field:'Qty',operator:'greaterThan',value:'0'}]};
+    table.columns[2]!.conditionScope='allRows';
+    const runtime=[
+      {key:'1',value:{Discount:0,Qty:1}},
+      {key:'2',value:{Discount:5,Qty:2}},
+    ] as never;
+    expect(visibleTableColumnIndexes(table,{Status:'Approved'} as never,runtime)).toEqual([0,1,2]);
+    expect(visibleTableColumnIndexes(table,{Status:'Draft'} as never,runtime)).toEqual([1,2]);
+  });
+
+  it('projects hidden columns out of header/body/summary grids without dead space', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.headerRows[0]!.cells[0]!.colSpan=2;
+    table.headerRows[0]!.cells.splice(1,1);
+    const projected=projectTableVisibleColumns(table,[0,2]);
+    expect(projected.columns).toHaveLength(2);
+    expect(projected.headerRows[0]!.cells[0]!.colSpan).toBe(1);
+    expect(projected.bodyRows[0]!.cells).toHaveLength(2);
   });
 });
