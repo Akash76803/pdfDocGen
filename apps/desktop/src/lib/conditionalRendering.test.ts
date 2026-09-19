@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   evaluateBuilderConditionalRendering,
+  filterConditionallyVisible,
   normalizeConditionalRendering,
   toVisibilityRule,
   type BuilderConditionalRendering,
@@ -89,5 +90,18 @@ describe('UX-8 universal builder conditional rendering', () => {
         { path: 'balance', operator: 'LESS_OR_EQUAL', value: '0' },
       ],
     });
+  });
+});
+
+
+describe('UX-8.2 pre-layout filtering', () => {
+  it('removes hidden flow inputs before layout/pagination while preserving visible order', () => {
+    const data: Record<string, unknown> = { showB: false, status: 'Approved' };
+    const items = [
+      { id:'a' },
+      { id:'b', conditionalRendering:{ enabled:true, action:'show' as const, match:'all' as const, rules:[{ id:'r1', field:'showB', operator:'equals' as const, value:'true' }] } },
+      { id:'c', conditionalRendering:{ enabled:true, action:'show' as const, match:'all' as const, rules:[{ id:'r2', field:'status', operator:'equals' as const, value:'Approved' }] } },
+    ];
+    expect(filterConditionallyVisible(items, (field) => data[field]).map((item) => item.id)).toEqual(['a','c']);
   });
 });
