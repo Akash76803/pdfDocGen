@@ -73,6 +73,27 @@ describe('Phase 4.12 conditional visibility rules',()=>{
     expect(table.headerGroups[0]).toMatchObject({startColumnId:'cgst',colspan:2});
   });
 
+  it('filters table rows before totals/rendering and supports ANY_ROW / ALL_ROWS column scopes',()=>{
+    const scopedGroup={...group,items:[
+      {product:'A',qty:2,discount:0,rate:100},
+      {product:'B',qty:0,discount:10,rate:200},
+      {product:'C',qty:3,discount:0,rate:300},
+    ]};
+    const model=new TemplateEngine().buildRenderModel(base([{
+      id:'tb-scope',type:'TABLE',sourcePath:'items',
+      rowFilter:{path:'qty',operator:'GREATER_THAN',value:0},
+      columns:[
+        {id:'p',label:'Product',path:'product'},
+        {id:'discount',label:'Discount',path:'discount',visibility:{path:'discount',operator:'GREATER_THAN',value:0},visibilityScope:'ANY_ROW'},
+        {id:'qty',label:'Qty',path:'qty',visibility:{path:'qty',operator:'GREATER_THAN',value:0},visibilityScope:'ALL_ROWS'},
+      ],
+    }] as any),scopedGroup as any).model!;
+    const table=model.body[0] as any;
+    expect(table.rows).toHaveLength(2);
+    expect(table.rows.map((row:any[])=>row[0])).toEqual(['A','C']);
+    expect(table.columns.map((column:any)=>column.id)).toEqual(['p','qty']);
+  });
+
   it('evaluates page watermark visibility against the same document context',()=>{
     const template=base([]);
     template.page.watermark={enabled:true,type:'TEXT',text:'PAID',visibility:{path:'status',operator:'EQUALS',value:'PAID'}};
