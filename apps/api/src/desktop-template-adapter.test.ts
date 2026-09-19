@@ -223,3 +223,22 @@ test('UX-8 keeps legacy single-condition templates compatible', () => {
   });
   expect(result.body.blocks[0]?.visibility).toEqual({path:'paymentStatus',operator:'NOT_EMPTY'});
 });
+
+
+test('UX-8.3 maps Global Watermark conditions to page visibility', () => {
+  const result=adaptDesktopTemplateEntry({
+    id:'wm-condition',name:'Conditional Watermark',version:1,
+    payload:{
+      watermark:{
+        enabled:true,type:'text',text:'DRAFT',opacity:20,rotation:-45,fontSize:56,color:'#64748B',
+        position:'center',scale:60,customXPercent:50,customYPercent:50,applyTo:'all',layer:'behind',
+        conditionalRendering:{
+          enabled:true,action:'show',match:'all',
+          rules:[{id:'r1',field:'Status',operator:'equals',value:'Draft'}],
+        },
+      },
+      pages:[{id:'p1',settings:{},elements:[]}],
+    },
+  });
+  expect(result.page.watermark?.visibility).toEqual({path:'status',operator:'EQUALS',value:'Draft'});
+});
