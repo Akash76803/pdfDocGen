@@ -151,7 +151,7 @@ function RenderRow({ row, table, runtimeValue, globalFormulaValues, formulaResul
     visualColumn += Math.max(1, cell.colSpan);
     const startColumn = visualColumn - Math.max(1, cell.colSpan);
     const endColumn = visualColumn - 1;
-    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={`${table.selectedCellId === cell.id ? 'selected-db-cell' : ''}${row.kind === 'header' ? ' db-table-header-cell' : ''}`} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} table={renderTable} runtimeValue={runtimeValue} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} summaryValue={summaryResults?.[cell.id]}/>{row.kind === 'header' && cell.colSpan === 1 && endColumn < renderTable.columns.length - 1 && onResizeColumn && <span className="db-column-resize-handle" title="Drag to resize this column" onPointerDown={(e) => onResizeColumn(e, startColumn)} aria-hidden="true"/>}</td>;
+    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={`${table.selectedCellId === cell.id ? 'selected-db-cell' : ''}${row.kind === 'header' ? ' db-table-header-cell' : ''}`} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} table={table} runtimeValue={runtimeValue} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} summaryValue={summaryResults?.[cell.id]}/>{row.kind === 'header' && cell.colSpan === 1 && endColumn < table.columns.length - 1 && onResizeColumn && <span className="db-column-resize-handle" title="Drag to resize this column" onPointerDown={(e) => onResizeColumn(e, startColumn)} aria-hidden="true"/>}</td>;
   })}</tr>;
 }
 
@@ -160,7 +160,7 @@ function CellValue({ cell, column, table, runtimeValue, globalFormulaValues, for
   const useMixedTemplate = templateHasTokens(cell.content);
   const boundRaw = cell.binding ? tableFieldValue(runtimeValue, globalFormulaValues, cell.binding) : undefined;
   const percentageFields: Record<string, { inputMode?: 'fraction' | 'whole' }> = {};
-  const designRows = renderTable.mode === 'dynamic' ? table.bodyRows : table.rows;
+  const designRows = table.mode === 'dynamic' ? table.bodyRows : table.rows;
   for (const designRow of designRows) {
     let visualColumn = 0;
     for (const designCell of designRow.cells) {
