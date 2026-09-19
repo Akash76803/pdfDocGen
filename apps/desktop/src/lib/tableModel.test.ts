@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectConditionalRuntimeTable, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -636,3 +636,54 @@ describe('UX-8.4 table conditional rendering', () => {
     expect(hidden.reduce((sum,value)=>sum+value,0)).toBeCloseTo(100,6);
     expect(hidden[2]).toBeGreaterThan(full[3]!);
   });});
+
+
+describe('UX-8.4 Fix2 conditional table auto reflow', () => {
+  it('redistributes hidden content width proportionally while keeping spacer width fixed', () => {
+    const table=createCustomTable(4,1);
+    table.columns.forEach((column,index)=>{ column.manualWidth=true; column.width=[400,100,200,300][index]!; });
+    table.rows[0]!.cells[0]!.content='Description';
+    table.rows[0]!.cells[1]!.content=''; // spacer
+    table.rows[0]!.cells[2]!.content='Optional Tax';
+    table.rows[0]!.cells[3]!.content='Net';
+    const widths=stableConditionalColumnWidths(table,[0,1,3]);
+    expect(widths[1]).toBeCloseTo(10,6);
+    expect(widths[0]).toBeCloseTo(51.428571,5);
+    expect(widths[2]).toBeCloseTo(38.571429,5);
+    expect(widths.reduce((sum,value)=>sum+value,0)).toBeCloseTo(100,6);
+  });
+
+  it('projects conditional columns before pagination so height shrinks with wider remaining columns', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.columns.forEach((column,index)=>{ column.manualWidth=true; column.width=[200,200,200][index]!; });
+    table.bodyRows[0]!.autoHeight=true;
+    table.bodyRows[0]!.cells[0]!.binding='Description';
+    table.bodyRows[0]!.cells[1]!.binding='Optional';
+    table.bodyRows[0]!.cells[2]!.binding='Amount';
+    const runtime=[
+      {key:'1',value:{Description:'A long product description that wraps across several lines in a narrow column',Optional:'x',Amount:100}},
+      {key:'2',value:{Description:'A long product description that wraps across several lines in a narrow column',Optional:'x',Amount:200}},
+    ] as never;
+    const fullLayout=projectConditionalRuntimeTable(table,[0,1,2],runtime.map((row:any)=>row.value));
+    const hiddenLayout=projectConditionalRuntimeTable(table,[0,2],runtime.map((row:any)=>row.value));
+    const full=paginateDynamicTable(fullLayout.table,runtime,1000,1000,600,fullLayout.columnWidths);
+    const hidden=paginateDynamicTable(hiddenLayout.table,runtime,1000,1000,600,hiddenLayout.columnWidths);
+    expect(hidden[0]!.usedHeightPx).toBeLessThan(full[0]!.usedHeightPx);
+  });
+
+  it('row conditions reduce the runtime table height before pagination', () => {
+    const table=createDynamicTable(2,'items',1);
+    table.rowConditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'qty',field:'Qty',operator:'greaterThan',value:'0'}]};
+    const record={items:[
+      {Id:'1',Name:'A',Qty:1},
+      {Id:'2',Name:'B',Qty:0},
+      {Id:'3',Name:'C',Qty:0},
+      {Id:'4',Name:'D',Qty:2},
+    ]} as never;
+    const rows=dynamicRows(table,record);
+    const layout=projectConditionalRuntimeTable(table,[0,1],rows.map((row)=>row.value));
+    const pages=paginateDynamicTable(layout.table,rows,1000,1000,600,layout.columnWidths);
+    expect(rows).toHaveLength(2);
+    expect(pages[0]!.usedHeightPx).toBeLessThan(200);
+  });
+});
