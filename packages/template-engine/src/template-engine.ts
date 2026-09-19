@@ -352,7 +352,17 @@ export class TemplateEngine {
         backgroundColor: '#F3F4F6',
       });
       const cellStyle = resolveTextStyle(style?.cellStyle, { ...DEFAULT_TEXT_STYLE, fontSize: 10 });
-      const visibleSourceColumns = block.columns.filter((column) => evaluateVisibilityRule(column.visibility, root));
+      const filteredTableSource = applyRowFilter(tableSource.rows, tableSource.rawRows, block.rowFilter, root);
+      const tableSourceRows = filteredTableSource.rows;
+      const tableRawRows = filteredTableSource.rawRows;
+      const columnVisible = (column: typeof block.columns[number]) => {
+        if (!column.visibility) return true;
+        const scope = column.visibilityScope ?? 'DOCUMENT';
+        if (scope === 'DOCUMENT') return evaluateVisibilityRule(column.visibility, root);
+        const matches = tableSourceRows.map((row,index) => evaluateVisibilityRule(column.visibility, rowRuleContext(root,row,tableRawRows[index],index)));
+        return scope === 'ANY_ROW' ? matches.some(Boolean) : matches.length > 0 && matches.every(Boolean);
+      };
+      const visibleSourceColumns = block.columns.filter(columnVisible);
       const columns = visibleSourceColumns.map((column) => ({
         id: column.id,
         label: column.label,
@@ -369,9 +379,6 @@ export class TemplateEngine {
         imageHeightMm: column.imageHeightMm ?? column.qr?.heightMm ?? column.imageWidthMm ?? column.qr?.widthMm ?? 18,
       }));
       const visibleIds=new Set(columns.map((column)=>column.id));
-      const filteredTableSource = applyRowFilter(tableSource.rows, tableSource.rawRows, block.rowFilter, root);
-      const tableSourceRows = filteredTableSource.rows;
-      const tableRawRows = filteredTableSource.rawRows;
       const footerRows = (block.footerRows ?? []).map((row) => {
         const rowStyle = resolveTextStyle(row.style, { ...DEFAULT_TEXT_STYLE, fontSize: 10, bold: true });
         return {
