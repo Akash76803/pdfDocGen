@@ -98,10 +98,42 @@ Verification:
 - build PASS (2.73s)
 - Tests cover Page Watermark condition evaluation and desktop-to-API watermark visibility mapping.
 
+## UX-8.4 — Table Row/Column Conditions & Native PDF Parity
+
+Implemented:
+- Dynamic Table row-level conditions use the universal Show/Hide + ALL/ANY rule model.
+- Hidden line-item rows are removed before table pagination and summary/rendering.
+- Whole-column conditional rendering is supported with three scopes:
+  - Document / header values
+  - Any visible row matches
+  - All visible rows match
+- Hidden columns are projected out of the Builder table grid; no dead column space remains.
+- Header/body/summary cells stay aligned after conditional column removal.
+- Merged cell colSpan is reduced to the remaining visible columns.
+- Renderer grouped-header colspan is recalculated from visible member columns.
+- Renderer footer cells follow the visible column set.
+- Row conditions and column conditions can use imported fields plus document Formula Fields.
+- API/headless adapter maps row rules to `TableBlock.rowFilter` and column rules to `visibility + visibilityScope`.
+- TemplateEngine evaluates row filters before row-scoped column visibility.
+- Fast / Native PDF now carries universal element visibility, table row filters, conditional columns and Global Watermark visibility through the shared `VisibilityRule` contract.
+- The old Native rule that forced all conditional elements to Exact Preview has been removed.
+- Existing table inspector/card/toggle/button styling is reused for UI consistency.
+
+Verification:
+- Node 20.20.2 / npm 10.8.2
+- npm ci PASS (198 packages)
+- typecheck PASS
+- 68/68 test files PASS
+- 372/372 tests PASS
+- build PASS (4.53s)
+- CI also caught and fixed a projected-TableCanvas scope issue before the final clean run.
+
 ## Next UX-8 work
 
-UX-8.4:
-- table row-level conditional filtering in Builder/configuration UX
-- conditional table column visibility
-- Native Fast PDF universal element-condition parity review
-- full manual visual/regression QA before merge
+UX-8.5:
+- full manual visual/regression QA
+- save/reopen persistence checks
+- Exact PDF vs Native PDF comparison
+- API single generation
+- batch separate + combined PDF regression
+- final PR #4 merge-readiness review
