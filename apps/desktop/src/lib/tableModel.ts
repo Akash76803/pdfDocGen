@@ -710,6 +710,69 @@ function compactValueText(value: unknown): string {
 }
 
 /** DB-4.2 Fix5: content-aware width distribution while always fitting 100%. */
+export function isTableGapColumn(table: TableDefinition, columnIndex: number): boolean {
+  const rows = [...table.headerRows, ...table.bodyRows, ...table.customRows, ...table.rows];
+  if (!rows.length) return false;
+  let seen = false;
+  for (const row of rows) {
+    const cell = visualCellAtColumn(row, columnIndex);
+    if (!cell) continue;
+    seen = true;
+    const hasContent = Boolean(
+      cell.content?.trim() ||
+      cell.binding?.trim() ||
+      cell.formula?.trim() ||
+      cell.summaryFormula?.trim() ||
+      cell.summaryName?.trim() ||
+      cell.aggregate?.field?.trim() ||
+      cell.imageSource?.trim() ||
+      cell.imageAssetId?.trim() ||
+      cell.type === 'image'
+    );
+    if (hasContent) return false;
+  }
+  return seen;
+}
+
+/**
+ * UX-8.4 Fix1: preserve intentional table spacing when conditional columns disappear.
+ * The full-table width plan remains the baseline. Hidden width is absorbed by nearby
+ * content columns, while structural blank/gap columns keep their designed percentage.
+ */
+export function stableConditionalColumnWidths(
+  table: TableDefinition,
+  visibleIndexes: number[],
+  runtimeValues: unknown[] = [],
+): number[] {
+  if (!visibleIndexes.length) return [];
+  const full = smartColumnWidths(table, runtimeValues);
+  if (visibleIndexes.length === table.columns.length) return full;
+  const visibleSet = new Set(visibleIndexes);
+  const result = new Map<number, number>(visibleIndexes.map((index) => [index, full[index] ?? 0]));
+  const contentVisible = visibleIndexes.filter((index) => !isTableGapColumn(table, index));
+  const recipientPool = contentVisible.length ? contentVisible : visibleIndexes;
+
+  for (let hiddenIndex = 0; hiddenIndex < table.columns.length; hiddenIndex += 1) {
+    if (visibleSet.has(hiddenIndex)) continue;
+    const freed = full[hiddenIndex] ?? 0;
+    if (freed <= 0) continue;
+    const recipient = [...recipientPool].sort((a, b) => {
+      const da = Math.abs(a - hiddenIndex);
+      const db = Math.abs(b - hiddenIndex);
+      if (da !== db) return da - db;
+      // Prefer the right-hand content column on ties so financial/total columns
+      // naturally absorb a hidden predecessor without moving a spacer.
+      return (a >= hiddenIndex ? 0 : 1) - (b >= hiddenIndex ? 0 : 1);
+    })[0];
+    if (recipient !== undefined) result.set(recipient, (result.get(recipient) ?? 0) + freed);
+  }
+
+  const widths = visibleIndexes.map((index) => result.get(index) ?? 0);
+  const sum = widths.reduce((total, value) => total + value, 0);
+  if (sum <= 0) return visibleIndexes.map(() => 100 / visibleIndexes.length);
+  return widths.map((value) => (value / sum) * 100);
+}
+
 export function smartColumnWidths(table: TableDefinition, runtimeValues: unknown[] = []): number[] {
   const columns = table.columns;
   if (columns.length === 0) return [];
