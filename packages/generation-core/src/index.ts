@@ -1,18 +1,40 @@
 import type { DocumentGroup, NormalizedRecord, NormalizedValue, TemplateDefinition } from '@document-tool/contracts';
 import { TemplateEngine } from '@document-tool/template-engine';
-import { PdfRenderer } from '@document-tool/renderer-pdf';
+import { CombinedPdfRenderer, PdfRenderer } from '@document-tool/renderer-pdf';
 import { buildHeadlessEditableDocx } from './headless-editable-docx.js';
 import { applyDesktopFormulaFields } from './desktop-formulas.js';
 import { applyDesktopResolvedDocumentParity } from './desktop-parity.js';
 
 export type DocumentOutputFormat = 'pdf' | 'docx-exact' | 'docx-editable';
 export type DocumentResponseMode = 'binary' | 'base64';
+export type DocumentBatchOutputMode = 'separate' | 'combined';
+export type DocumentBatchPageNumbering = 'per-document' | 'global';
 
 export type GenerateDocumentCommand = {
   templateId: string;
   templateVersion?: number;
   output: { format: DocumentOutputFormat; fileName?: string; renderMode?: 'native-auto' | 'exact'; responseMode?: DocumentResponseMode };
   data: Record<string, unknown>;
+};
+
+export type GenerateDocumentBatchItem = {
+  id?: string;
+  fileName?: string;
+  data: Record<string, unknown>;
+};
+
+export type GenerateDocumentBatchCommand = {
+  templateId: string;
+  templateVersion?: number;
+  output: {
+    format: DocumentOutputFormat;
+    outputMode: DocumentBatchOutputMode;
+    fileName?: string;
+    renderMode?: 'native-auto' | 'exact';
+    responseMode?: DocumentResponseMode;
+    pageNumbering?: DocumentBatchPageNumbering;
+  };
+  documents: GenerateDocumentBatchItem[];
 };
 
 export type GeneratedDocument = {
@@ -28,8 +50,34 @@ export type GeneratedDocument = {
   warnings?: string[];
 };
 
+export type GeneratedBatchDocumentResult = {
+  id: string;
+  fileName: string;
+  contentType: string;
+  pageCount?: number;
+  startPage?: number;
+  endPage?: number;
+  warnings?: string[];
+};
+
+export type GeneratedDocumentBatch = {
+  jobId: string;
+  status: 'completed';
+  templateId: string;
+  templateVersion?: number;
+  format: DocumentOutputFormat;
+  outputMode: DocumentBatchOutputMode;
+  documentCount: number;
+  totalPageCount?: number;
+  documents: GeneratedBatchDocumentResult[];
+  files?: GeneratedDocument[];
+  combined?: GeneratedDocument;
+  warnings?: string[];
+};
+
 export interface DocumentGenerationService {
   generate(command: GenerateDocumentCommand): Promise<GeneratedDocument>;
+  generateBatch?(command: GenerateDocumentBatchCommand): Promise<GeneratedDocumentBatch>;
 }
 
 export interface TemplateRepository {
@@ -127,12 +175,162 @@ function rawDataToDocumentGroup(data: Record<string, unknown>): DocumentGroup {
   };
 }
 
+function batchDocumentId(document: GenerateDocumentBatchItem, index: number): string {
+  const explicit = document.id?.trim();
+  if (explicit) return explicit;
+  const data = document.data;
+  const candidate = data.documentKey ?? data.id ?? data.invoiceNo ?? data.invoiceNumber;
+  return candidate === undefined || candidate === null || String(candidate).trim() === ''
+    ? `document-${index + 1}`
+    : String(candidate);
+}
+
+function uniqueBatchDocumentId(base: string, used: Set<string>): string {
+  if (!used.has(base)) {
+    used.add(base);
+    return base;
+  }
+  let suffix = 2;
+  while (used.has(`${base}#${suffix}`)) suffix++;
+  const value = `${base}#${suffix}`;
+  used.add(value);
+  return value;
+}
+
 export class HeadlessDocumentGenerationService implements DocumentGenerationService {
   constructor(
     private readonly templates: TemplateRepository,
     private readonly templateEngine = new TemplateEngine(),
     private readonly pdfRenderer = new PdfRenderer(),
+    private readonly combinedPdfRenderer = new CombinedPdfRenderer(),
   ) {}
+
+  async generateBatch(command: GenerateDocumentBatchCommand): Promise<GeneratedDocumentBatch> {
+    if (!command.documents.length) {
+      throw new GenerationError('EMPTY_BATCH', 'Batch generation requires at least one document.');
+    }
+
+    if (command.output.outputMode === 'separate') {
+      const files: GeneratedDocument[] = [];
+      const documents: GeneratedBatchDocumentResult[] = [];
+      for (let index = 0; index < command.documents.length; index++) {
+        const document = command.documents[index]!;
+        const id = batchDocumentId(document, index);
+        const generated = await this.generate({
+          templateId: command.templateId,
+          templateVersion: command.templateVersion,
+          output: {
+            format: command.output.format,
+            fileName: document.fileName ?? id,
+            renderMode: command.output.renderMode,
+          },
+          data: document.data,
+        });
+        files.push(generated);
+        documents.push({
+          id,
+          fileName: generated.fileName,
+          contentType: generated.contentType,
+          pageCount: generated.pageCount,
+          warnings: generated.warnings,
+        });
+      }
+      return {
+        jobId: '',
+        status: 'completed',
+        templateId: command.templateId,
+        templateVersion: files[0]?.templateVersion,
+        format: command.output.format,
+        outputMode: 'separate',
+        documentCount: files.length,
+        totalPageCount: files.reduce((sum, file) => sum + (file.pageCount ?? 0), 0) || undefined,
+        documents,
+        files,
+        warnings: files.flatMap((file) => file.warnings ?? []),
+      };
+    }
+
+    if (command.output.format !== 'pdf') {
+      throw new UnsupportedOutputFormatError(command.output.format);
+    }
+    if (command.output.renderMode === 'exact') {
+      throw new ExactRenderUnavailableError();
+    }
+
+    const template = await this.templates.getTemplate(command.templateId, command.templateVersion);
+    if (!template) throw new TemplateNotFoundError(command.templateId, command.templateVersion);
+    if (command.templateVersion !== undefined && template.version !== command.templateVersion) {
+      throw new TemplateNotFoundError(command.templateId, command.templateVersion);
+    }
+
+    const usedIds = new Set<string>();
+    const sources = command.documents.map((document, index) => {
+      const id = uniqueBatchDocumentId(batchDocumentId(document, index), usedIds);
+      return {
+        documentGroupId: id,
+        label: id,
+        resolve: async () => {
+          const normalizedGroup = rawDataToDocumentGroup(document.data);
+          const parityGroup = applyDesktopResolvedDocumentParity(template, normalizedGroup);
+          const group = applyDesktopFormulaFields(template, parityGroup);
+          const rendered = this.templateEngine.buildRenderModel(template, group);
+          if (!rendered.model || rendered.errors.length) {
+            throw new TemplateRenderFailedError('Template could not be rendered with the supplied batch document data.', {
+              documentId: id,
+              documentIndex: index,
+              errors: rendered.errors,
+              warnings: rendered.warnings,
+            });
+          }
+          return { template, model: rendered.model };
+        },
+      };
+    });
+
+    try {
+      const output = await this.combinedPdfRenderer.render(sources, {
+        fileNamePrefix: safeFileStem(command.output.fileName, command.templateId),
+        pageNumbering: command.output.pageNumbering === 'global' ? 'GLOBAL' : 'PER_DOCUMENT',
+        totalDocumentsHint: command.documents.length,
+      });
+      const combined: GeneratedDocument = {
+        jobId: '',
+        status: 'completed',
+        templateId: command.templateId,
+        templateVersion: template.version,
+        format: 'pdf',
+        fileName: output.fileName,
+        contentType: output.mimeType,
+        bytes: output.content,
+        pageCount: output.totalPages,
+        warnings: output.warnings,
+      };
+      return {
+        jobId: '',
+        status: 'completed',
+        templateId: command.templateId,
+        templateVersion: template.version,
+        format: 'pdf',
+        outputMode: 'combined',
+        documentCount: output.documentCount,
+        totalPageCount: output.totalPages,
+        documents: output.documents.map((document) => ({
+          id: document.documentGroupId,
+          fileName: combined.fileName,
+          contentType: combined.contentType,
+          pageCount: document.pageCount,
+          startPage: document.startPage,
+          endPage: document.endPage,
+          warnings: document.warnings,
+        })),
+        combined,
+        warnings: output.warnings,
+      };
+    } catch (error) {
+      if (error instanceof GenerationError) throw error;
+      throw new TemplateRenderFailedError(error instanceof Error ? error.message : 'Combined PDF renderer failed.');
+    }
+  }
 
   async generate(command: GenerateDocumentCommand): Promise<GeneratedDocument> {
     if (command.output.format === 'docx-exact') throw new ExactDocxUnavailableError();

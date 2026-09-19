@@ -63,4 +63,85 @@ describe('DB-6B document generation API',()=>{
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
   });
+
+  it('routes combined batch generation through the additive batch adapter without changing single generation',async()=>{
+    let singleCalls=0;
+    let batchCalls=0;
+    const service: DocumentGenerationService = {
+      generate: async(command)=>{
+        singleCalls++;
+        return {jobId:'single',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'single.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]};
+      },
+      generateBatch: async(command)=>{
+        batchCalls++;
+        const combined={jobId:'batch',status:'completed' as const,templateId:command.templateId,templateVersion:1,format:'pdf' as const,fileName:'combined.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70,45]),pageCount:2,warnings:[]};
+        return {jobId:'batch',status:'completed',templateId:command.templateId,templateVersion:1,format:'pdf',outputMode:'combined',documentCount:2,totalPageCount:2,documents:[
+          {id:'INV-1',fileName:'combined.pdf',contentType:'application/pdf',pageCount:1,startPage:1,endPage:1,warnings:[]},
+          {id:'INV-2',fileName:'combined.pdf',contentType:'application/pdf',pageCount:1,startPage:2,endPage:2,warnings:[]},
+        ],combined,warnings:[]};
+      },
+    };
+    const base=await start(service);
+    const batch=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'invoice-v1',output:{format:'pdf',outputMode:'combined',fileName:'combined'},
+      documents:[{id:'INV-1',data:{invoiceNo:'INV-1'}},{id:'INV-2',data:{invoiceNo:'INV-2'}}],
+    })});
+    expect(batch.status).toBe(200);
+    expect(batch.headers.get('content-type')).toBe('application/pdf');
+    expect(batch.headers.get('content-disposition')).toContain('combined.pdf');
+    expect(batch.headers.get('x-document-page-count')).toBe('2');
+    expect(batchCalls).toBe(1);
+    expect(singleCalls).toBe(0);
+
+    const single=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{invoiceNo:'INV-3'}})});
+    expect(single.status).toBe(200);
+    expect(singleCalls).toBe(1);
+    expect(batchCalls).toBe(1);
+  });
+
+  it('returns separate batch files as a base64 JSON collection',async()=>{
+    const service: DocumentGenerationService = {
+      generate: async()=>{ throw new Error('single path must not run'); },
+      generateBatch: async(command)=>({
+        jobId:'batch-separate',status:'completed',templateId:command.templateId,templateVersion:1,format:'pdf',outputMode:'separate',documentCount:2,totalPageCount:2,
+        documents:[
+          {id:'INV-1',fileName:'INV-1.pdf',contentType:'application/pdf',pageCount:1,warnings:[]},
+          {id:'INV-2',fileName:'INV-2.pdf',contentType:'application/pdf',pageCount:1,warnings:[]},
+        ],
+        files:[
+          {jobId:'',status:'completed',templateId:command.templateId,templateVersion:1,format:'pdf',fileName:'INV-1.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70,49]),pageCount:1,warnings:[]},
+          {jobId:'',status:'completed',templateId:command.templateId,templateVersion:1,format:'pdf',fileName:'INV-2.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70,50]),pageCount:1,warnings:[]},
+        ],
+        warnings:[],
+      }),
+    };
+    const base=await start(service);
+    const response=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'invoice-v1',output:{format:'pdf',outputMode:'separate'},
+      documents:[{id:'INV-1',data:{invoiceNo:'INV-1'}},{id:'INV-2',data:{invoiceNo:'INV-2'}}],
+    })});
+    expect(response.status).toBe(200);
+    const body=await response.json() as any;
+    expect(body.output).toMatchObject({format:'pdf',outputMode:'separate',documentCount:2,pageCount:2});
+    expect(body.files).toHaveLength(2);
+    expect(body.files[0]).toMatchObject({id:'INV-1',fileName:'INV-1.pdf',encoding:'base64'});
+    expect(Buffer.from(body.files[0].content,'base64').subarray(0,4).toString('ascii')).toBe('%PDF');
+    expect(Buffer.from(body.files[1].content,'base64').subarray(0,4).toString('ascii')).toBe('%PDF');
+  });
+
+  it('rejects unsafe batch delivery combinations before generation',async()=>{
+    const base=await start({generate:async()=>{throw new Error('must not run');},generateBatch:async()=>{throw new Error('must not run');}});
+    const separateBinary=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'invoice-v1',output:{format:'pdf',outputMode:'separate',responseMode:'binary'},documents:[{data:{invoiceNo:'INV-1'}}],
+    })});
+    expect(separateBinary.status).toBe(400);
+    expect(await separateBinary.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
+
+    const combinedDocx=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'invoice-v1',output:{format:'docx-editable',outputMode:'combined'},documents:[{data:{invoiceNo:'INV-1'}}],
+    })});
+    expect(combinedDocx.status).toBe(400);
+    expect(await combinedDocx.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
+  });
+
 });
