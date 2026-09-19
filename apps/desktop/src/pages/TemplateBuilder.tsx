@@ -15,7 +15,7 @@ import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode, type WatermarkSettings } from '../lib/pageModel.ts';
-import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode, type TableColumnConditionScope } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
 import { ACTIVE_TEMPLATE_ID_KEY, beginNewTemplate, consumeTemplateBuilderAction, migrateLegacyTemplateToLibrary, saveTemplateToLibrary, TEMPLATE_STORAGE_KEY, type NewTemplateRequest, type TemplateDocumentType } from '../lib/templateLibrary.ts';
 import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowDistribution, type BodyFlowWidth } from '../lib/bodyFlow.ts';
@@ -2842,6 +2842,13 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
     if (!selectedDynamicBodyCell) return;
     onUpdate(updateTableCell(table, selectedDynamicBodyCell.id, patch));
   };
+  const rowCondition = normalizeConditionalRendering(table.rowConditionalRendering);
+  const updateRowCondition = (next: BuilderConditionalRendering) => onUpdate({ ...table, rowConditionalRendering: next });
+  const columnCondition = normalizeConditionalRendering(selectedColumn?.conditionalRendering);
+  const updateColumnCondition = (next: BuilderConditionalRendering) => {
+    if (!selectedColumn) return;
+    onUpdate(updateTableColumn(table, selectedColumn.id, { conditionalRendering: next }));
+  };
   return <div className={`table-properties table-view-${view}`}>
     <div className="table-summary table-scope-properties"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
     <label className="table-scope-properties">Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
@@ -2887,7 +2894,17 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
           <div className="table-schema-note"><span>{groupedSummary ? 'Grouped Summary' : 'Grouping'}</span><code>{groupedSummary ? `${(parentKeys.filter(Boolean).join(' + ') || '?')} → document; ${table.binding?.grouping?.groupBy.join(' + ')} → grouped rows` : `${(parentKeys.filter(Boolean).join(' + ') || recommendedParentKey(selectedSource.fields) || '?')} → rows; ${(rowKeys.filter(Boolean).join(' + ') || recommendedRowKey(selectedSource.fields) || 'index')} → row identity`}</code></div>
         </div>;
       })()}
-      <section className="table-inspector-card pagination-card">
+      {!groupedSummary && <section className="table-inspector-card">
+        <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">◆</span><span>Row Conditions</span></span><small className="table-inspector-badge">{rowCondition.enabled ? 'On' : 'Off'}</small></div>
+        <TableConditionEditor
+          value={rowCondition}
+          fields={tableContentFields}
+          title="Filter repeated rows"
+          help="Conditions are evaluated per repeated line-item row. Row fields take priority; document fields are fallback. Hidden rows are removed before table pagination."
+          onChange={updateRowCondition}
+        />
+      </section>}
+            <section className="table-inspector-card pagination-card">
         <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon">↧</span><span>Pagination</span></span><small className="table-inspector-badge">DB-4.4</small></div>
         <label className="check-row"><input type="checkbox" checked={table.pagination.enabled !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, enabled: e.target.checked } })}/>Automatic overflow</label>
         <label className="check-row"><input type="checkbox" checked={table.pagination.repeatHeader} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, repeatHeader: e.target.checked } })}/>Repeat header</label>
@@ -2949,6 +2966,17 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
           <label>Data type<select value={selectedColumn.dataType ?? 'text'} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { dataType: e.target.value as TableDataType }))}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <TableDataFormatEditor dataType={selectedColumn.dataType ?? 'text'} value={selectedColumn.format ?? {}} onChange={(format) => onUpdate(updateTableColumn(table, selectedColumn.id, { format }))}/>
         </div>
+        <section className="table-data-format-card">
+          <div className="section-title"><span>Conditional Column</span><small>{columnCondition.enabled ? 'Enabled' : 'Optional'}</small></div>
+          <label>Evaluate against<select value={selectedColumn.conditionScope ?? 'document'} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { conditionScope: e.target.value as TableColumnConditionScope }))}><option value="document">Document / header values</option><option value="anyRow">Any visible row matches</option><option value="allRows">All visible rows match</option></select></label>
+          <TableConditionEditor
+            value={columnCondition}
+            fields={tableContentFields}
+            title="Show / hide whole column"
+            help="The entire column is removed together—header, body and summary alignment stay in sync. Any/All Row is useful for columns such as Discount or IGST."
+            onChange={updateColumnCondition}
+          />
+        </section>
         <div className="table-structure-actions compact-actions">
           <button type="button" className="secondary compact" title="Add column left" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'left'))}><span aria-hidden="true">＋←</span><span>Left</span></button>
           <button type="button" className="secondary compact" title="Add column right" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'right'))}><span aria-hidden="true">＋→</span><span>Right</span></button>
@@ -3053,6 +3081,25 @@ function SummaryCellEditor({ table, cell, source, formulaFields, onPatch }: { ta
       <p className="table-cell-help">Aggregates use only the currently selected Parent / Document group. Global Formula Fields and previous named summary values can be chained.</p>
     </>}
     {(mode === 'aggregate' || mode === 'formula') && <label>Summary name<input value={cell.summaryName ?? ''} placeholder="Subtotal / Tax Amount" onChange={(e) => onPatch({ summaryName: e.target.value })}/></label>}
+  </div>;
+}
+
+function TableConditionEditor({ value, fields, title, help, onChange }: { value: BuilderConditionalRendering; fields: TemplateTokenField[]; title: string; help: string; onChange: (value: BuilderConditionalRendering) => void }) {
+  const patch = (next: Partial<BuilderConditionalRendering>) => onChange({ ...value, ...next });
+  const patchRule = (id: string, next: Partial<BuilderConditionalRendering['rules'][number]>) => patch({ rules: value.rules.map((rule) => rule.id === id ? { ...rule, ...next } : rule) });
+  return <div className="table-condition-editor">
+    <label className="guide-toggle"><input type="checkbox" checked={value.enabled} onChange={(e) => patch({ enabled:e.target.checked, rules:e.target.checked && value.rules.length===0 ? [{id:crypto.randomUUID(),field:'',operator:'equals',value:''}] : value.rules })}/><span><strong>{title}</strong><small>{help}</small></span></label>
+    {value.enabled ? <>
+      <div className="property-grid"><label>Action<select value={value.action} onChange={(e)=>patch({action:e.target.value as BuilderConditionalRendering['action']})}><option value="show">Show when matched</option><option value="hide">Hide when matched</option></select></label><label>Match<select value={value.match} onChange={(e)=>patch({match:e.target.value as BuilderConditionalRendering['match']})}><option value="all">All (AND)</option><option value="any">Any (OR)</option></select></label></div>
+      {value.rules.map((rule,index)=><div className="inspector-card" key={rule.id}>
+        <div className="inspector-card-title">Condition {index+1}</div>
+        <label>Field<select value={rule.field} onChange={(e)=>patchRule(rule.id,{field:e.target.value})}><option value="">Select field…</option>{fields.map((field)=><option key={field.name} value={field.name}>{field.label||field.name}</option>)}</select></label>
+        <label>Operator<select value={rule.operator} onChange={(e)=>patchRule(rule.id,{operator:e.target.value as BuilderConditionOperator})}><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="contains">Contains</option><option value="notContains">Does not contain</option><option value="startsWith">Starts with</option><option value="endsWith">Ends with</option><option value="isEmpty">Is empty</option><option value="isNotEmpty">Is not empty</option><option value="greaterThan">Greater than</option><option value="greaterThanOrEqual">Greater than or equal</option><option value="lessThan">Less than</option><option value="lessThanOrEqual">Less than or equal</option></select></label>
+        {requiresValue(rule.operator)?<label>Value<input value={rule.value??''} onChange={(e)=>patchRule(rule.id,{value:e.target.value})}/></label>:null}
+        {value.rules.length>1?<button type="button" className="secondary compact" onClick={()=>patch({rules:value.rules.filter((entry)=>entry.id!==rule.id)})}>Remove condition</button>:null}
+      </div>)}
+      <button type="button" className="secondary compact" onClick={()=>patch({rules:[...value.rules,{id:crypto.randomUUID(),field:'',operator:'equals',value:''}]})}><Plus size={14}/>Add condition</button>
+    </> : null}
   </div>;
 }
 
