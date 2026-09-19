@@ -1349,6 +1349,7 @@ export function dynamicRows(
   record: NormalizedRecord | null,
   source?: BuilderDataSource | null,
   parentSource?: BuilderDataSource | null,
+  resolveDocumentField?: (field: string) => unknown,
 ): TablePaginationRuntimeRow[] {
   if (table.mode !== 'dynamic' || !table.binding?.repeatSource) return [];
 
@@ -1384,7 +1385,9 @@ export function dynamicRows(
   if (rowCondition.enabled) {
     filtered = filtered.filter((item) => evaluateBuilderConditionalRendering(rowCondition, (field) => {
       const rowValue = valueAtPath(item, field);
-      return rowValue !== undefined ? rowValue : valueAtPath(record, field);
+      if (rowValue !== undefined) return rowValue;
+      const resolved = resolveDocumentField?.(field);
+      return resolved !== undefined ? resolved : valueAtPath(record, field);
     }));
   }
 
