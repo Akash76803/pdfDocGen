@@ -1165,7 +1165,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     const materialized = materializeBodyFlowPages(body, settings, (item, _pageIndex, _y, availableHeightPx, continuationHeightPx) => {
       if (item.type !== 'table' || !item.table || item.table.mode !== 'dynamic' || item.table.pagination?.enabled === false) return undefined;
       const tableSource = dataState.sources.find((candidate) => candidate.id === item.table?.binding?.sourceId) ?? source;
-      const runtimeRows = dynamicRows(item.table, record, tableSource, source);
+      const runtimeRows = dynamicRows(item.table, record, tableSource, source, resolveCurrentBuilderField);
       const plan = paginateDynamicTable(
         item.table,
         runtimeRows,
