@@ -14,7 +14,7 @@ import { loadImageAsset, saveImageAsset } from '../lib/imageAssetStore.ts';
 import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
-import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode } from '../lib/pageModel.ts';
+import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode, type WatermarkSettings } from '../lib/pageModel.ts';
 import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
 import { ACTIVE_TEMPLATE_ID_KEY, beginNewTemplate, consumeTemplateBuilderAction, migrateLegacyTemplateToLibrary, saveTemplateToLibrary, TEMPLATE_STORAGE_KEY, type NewTemplateRequest, type TemplateDocumentType } from '../lib/templateLibrary.ts';
@@ -161,6 +161,7 @@ type SavedTemplate = {
   updatedAt: string;
   documentType?: TemplateDocumentType;
   status?: 'Draft' | 'Saved';
+  watermark?: WatermarkSettings;
 };
 
 const STORAGE_KEY = TEMPLATE_STORAGE_KEY;
@@ -190,7 +191,8 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const masterPage = pages[0];
   const masterHeader = masterPage?.settings.header ?? defaultPageSettings().header;
   const masterFooter = masterPage?.settings.footer ?? defaultPageSettings().footer;
-  const pageSettings = activePage ? { ...activePage.settings, header: { ...masterHeader }, footer: { ...masterFooter } } : defaultPageSettings();
+  const masterWatermark = masterPage?.settings.watermark ?? defaultPageSettings().watermark;
+  const pageSettings = activePage ? { ...activePage.settings, header: { ...masterHeader }, footer: { ...masterFooter }, watermark: { ...masterWatermark } } : defaultPageSettings();
   const formulaElements = pages.flatMap((page) => page.elements).filter((item) => item.type === 'formula' && item.formulaName?.trim());
   const masterBandElements = (masterPage?.elements ?? []).filter((item) => (item.region ?? 'body') === 'header' || (item.region ?? 'body') === 'footer');
   const rawActiveBodyElements = (activePage?.elements ?? []).filter((item) => (item.region ?? 'body') === 'body' && item.type !== 'formula');
@@ -393,10 +395,14 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           const normalizedPages = saved.pages.map((page) => ({ ...page, settings: normalizePageSettings(page.settings), elements: (page.elements ?? []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowDistribution: element.flowDistribution ?? 'packed', flowWidth: element.flowWidth ?? 'full' })) }));
           const globalHeader = normalizedPages[0].settings.header;
           const globalFooter = normalizedPages[0].settings.footer;
+          // UX-7 Fix1 migration: legacy page-level watermark data is promoted
+          // to one document-level value. Prefer an explicit saved global
+          // watermark; otherwise preserve the first page's legacy watermark.
+          const globalWatermark = { ...(saved.watermark ?? normalizedPages[0].settings.watermark ?? defaultPageSettings().watermark) };
           const masterHeaderIds = new Set(normalizedPages[0].elements.filter((element) => (element.region ?? 'body') !== 'body').map((element) => element.id));
           const migratedPages = normalizedPages.map((page, index) => ({
             ...page,
-            settings: { ...page.settings, header: { ...globalHeader }, footer: { ...globalFooter } },
+            settings: { ...page.settings, header: { ...globalHeader }, footer: { ...globalFooter }, watermark: { ...globalWatermark } },
             elements: index === 0 ? page.elements : page.elements.filter((element) => (element.region ?? 'body') === 'body' || masterHeaderIds.has(element.id)),
           }));
           setPages(migratedPages);
@@ -792,10 +798,17 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   function updatePageSettings(patch: Partial<PageSettings>) {
     if (patch.header) { updateGlobalBandSettings('header', { ...pageSettings.header, ...patch.header }); return; }
     if (patch.footer) { updateGlobalBandSettings('footer', { ...pageSettings.footer, ...patch.footer }); return; }
+    if (patch.watermark) {
+      recordHistory();
+      const watermark = { ...masterWatermark, ...patch.watermark };
+      setPages((current) => current.map((page) => ({ ...page, settings: { ...page.settings, watermark: { ...watermark } } })));
+      setStatus('Unsaved changes');
+      return;
+    }
     recordHistory();
     setPages((current) => current.map((page) => {
       if (page.id !== activePageId) return page;
-      const settings = { ...page.settings, ...patch, header: { ...masterHeader }, footer: { ...masterFooter } };
+      const settings = { ...page.settings, ...patch, header: { ...masterHeader }, footer: { ...masterFooter }, watermark: { ...masterWatermark } };
       const geometryChanged = Boolean(
         patch.marginsMm || patch.preset || patch.orientation ||
         patch.customWidthMm != null || patch.customHeightMm != null || patch.header || patch.footer
@@ -813,10 +826,10 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
 
   function addPage() {
     recordHistory();
-    const page: BuilderPage = { id: crypto.randomUUID(), name: `Page ${pages.length + 1}`, settings: { ...normalizePageSettings(pageSettings), marginsMm: { ...pageSettings.marginsMm }, bleedMm: { ...pageSettings.bleedMm }, header: { ...pageSettings.header }, footer: { ...pageSettings.footer } }, elements: [] };
+    const page: BuilderPage = { id: crypto.randomUUID(), name: `Page ${pages.length + 1}`, settings: { ...normalizePageSettings(pageSettings), marginsMm: { ...pageSettings.marginsMm }, bleedMm: { ...pageSettings.bleedMm }, header: { ...pageSettings.header }, footer: { ...pageSettings.footer }, watermark: { ...masterWatermark } }, elements: [] };
     setPages((current) => [...current, page]); setActivePageId(page.id); setSelectedId(null); setStatus('Unsaved changes');
   }
-  function duplicatePage() { if (!activePage) return; recordHistory(); const page: BuilderPage = { ...activePage, id: crypto.randomUUID(), name: `${activePage.name} Copy`, settings: { ...normalizePageSettings(activePage.settings), marginsMm: { ...activePage.settings.marginsMm }, bleedMm: { ...activePage.settings.bleedMm }, header: { ...activePage.settings.header }, footer: { ...activePage.settings.footer } }, elements: activePage.elements.filter((e) => (e.region ?? 'body') === 'body').map((e) => ({ ...e, id: crypto.randomUUID() })) }; setPages((c) => [...c, page]); setActivePageId(page.id); setSelectedId(null); setStatus('Unsaved changes'); }
+  function duplicatePage() { if (!activePage) return; recordHistory(); const page: BuilderPage = { ...activePage, id: crypto.randomUUID(), name: `${activePage.name} Copy`, settings: { ...normalizePageSettings(activePage.settings), marginsMm: { ...activePage.settings.marginsMm }, bleedMm: { ...activePage.settings.bleedMm }, header: { ...activePage.settings.header }, footer: { ...activePage.settings.footer }, watermark: { ...masterWatermark } }, elements: activePage.elements.filter((e) => (e.region ?? 'body') === 'body').map((e) => ({ ...e, id: crypto.randomUUID() })) }; setPages((c) => [...c, page]); setActivePageId(page.id); setSelectedId(null); setStatus('Unsaved changes'); }
   function deletePage() { if (pages.length <= 1) return; recordHistory(); const next = pages.filter((p) => p.id !== activePageId); setPages(next); setActivePageId(next[0].id); setSelectedId(null); setStatus('Unsaved changes'); }
   function movePage(direction: -1 | 1) { const index = pages.findIndex((p) => p.id === activePageId); const target = index + direction; if (index < 0 || target < 0 || target >= pages.length) return; recordHistory(); const next = [...pages]; [next[index], next[target]] = [next[target], next[index]]; setPages(next); setStatus('Unsaved changes'); }
   function renamePage(value: string) { recordHistory(); setPages((c) => c.map((p) => p.id === activePageId ? { ...p, name: value } : p)); setStatus('Unsaved changes'); }
@@ -856,9 +869,11 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
         ? { ...element, table: normalizeTableFormulaReferences(element.table) }
         : element),
     }));
-    const payload: SavedTemplate = { name, pages: normalizedPages, activePageId, documentType, status: 'Saved', updatedAt: savedAt.toISOString() };
+    const globalWatermark = normalizedPages[0]?.settings.watermark ?? defaultPageSettings().watermark;
+    const pagesWithGlobalWatermark = normalizedPages.map((page) => ({ ...page, settings: { ...page.settings, watermark: { ...globalWatermark } } }));
+    const payload: SavedTemplate = { name, pages: pagesWithGlobalWatermark, activePageId, documentType, status: 'Saved', watermark: { ...globalWatermark }, updatedAt: savedAt.toISOString() };
     saveTemplateToLibrary(window.localStorage, payload);
-    setPages(normalizedPages);
+    setPages(pagesWithGlobalWatermark);
     setStatus('Saved locally');
     setLastSavedAt(savedAt.toISOString());
     setSaveNotice({ message: 'Template saved successfully', timestamp: savedAt.toISOString() });
@@ -1813,7 +1828,7 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
   const updateWatermark = (patch: Partial<PageSettings['watermark']>) => onChange({ watermark: { ...settings.watermark, ...patch } });
   const importWatermarkImage = (event: ChangeEvent<HTMLInputElement>) => { const file=event.target.files?.[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>updateWatermark({ enabled:true,type:'image',imageSource:String(reader.result??'') }); reader.readAsDataURL(file); event.currentTarget.value=''; };
   return <div className="page-properties-stack professional-page-settings">
-    <div className="page-settings-intro"><div><strong>Page setup</strong><span>{activePage?.name ?? pageName} · {settings.preset} {settings.orientation}</span></div>{help('Configure physical page size, print margins, header/footer masters, bleed and appearance. Advanced sections stay collapsed until you need them.')}</div>
+    <div className="page-settings-intro"><div><strong>Page setup</strong><span>{activePage?.name ?? pageName} · {settings.preset} {settings.orientation}</span></div>{help('Configure document-wide masters plus physical page size, print margins, bleed and appearance. Global Watermark applies to the complete template.')}</div>
 
     <details className="inspector-accordion" open>
       <summary><span><span className="section-symbol">▤</span>Pages <small>{pages.length}</small></span><ChevronDown size={15}/></summary>
@@ -1872,7 +1887,7 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
     </details>
 
     <details className="inspector-accordion" open>
-      <summary><span><span className="section-symbol">W</span>Watermark {settings.watermark.enabled ? <small>On · {settings.watermark.type === 'text' ? 'Text' : 'Image'}</small> : <small>Off</small>} {help('Page-level watermark repeats automatically on generated continuation pages and API PDFs.')}</span><ChevronDown size={15}/></summary>
+      <summary><span><span className="section-symbol">W</span>Global Watermark {settings.watermark.enabled ? <small>On · {settings.watermark.type === 'text' ? 'Text' : 'Image'}</small> : <small>Off</small>} {help('Document-level watermark. One setting applies automatically to every builder page and generated continuation page.')}</span><ChevronDown size={15}/></summary>
       <div className="inspector-accordion-content">
         <div className="section-inline-control"><span>Watermark</span><button type="button" className={settings.watermark.enabled?'mini-toggle active':'mini-toggle'} onClick={() => updateWatermark({ enabled: !settings.watermark.enabled })}>{settings.watermark.enabled?'Enabled':'Disabled'}</button></div>
         <label>Type<select value={settings.watermark.type} onChange={(e) => updateWatermark({ type:e.target.value as PageSettings['watermark']['type'] })}><option value="text">Text</option><option value="image">Image / Logo</option></select></label>
@@ -1888,7 +1903,7 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
         <label>Position<select value={settings.watermark.position} onChange={(e) => updateWatermark({ position:e.target.value as PageSettings['watermark']['position'] })}><option value="center">Center</option><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option><option value="custom">Custom</option></select></label>
         {settings.watermark.position === 'custom' ? <div className="property-grid"><label>X %<input type="number" min="0" max="100" value={settings.watermark.customXPercent} onChange={(e) => updateWatermark({ customXPercent:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label><label>Y %<input type="number" min="0" max="100" value={settings.watermark.customYPercent} onChange={(e) => updateWatermark({ customYPercent:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label></div> : null}
         <div className="property-grid"><label>Pages<select value={settings.watermark.applyTo} onChange={(e) => updateWatermark({ applyTo:e.target.value as PageSettings['watermark']['applyTo'] })}><option value="all">All output pages</option><option value="first">First output page only</option></select></label><label>Layer<select value={settings.watermark.layer} onChange={(e) => updateWatermark({ layer:e.target.value as PageSettings['watermark']['layer'] })}><option value="behind">Behind content</option><option value="above">Above content</option></select></label></div>
-        <p className="table-cell-help">Watermark is stored with page settings, so dynamic-table continuation pages, Native PDF, API generation and combined PDF use the same configuration.</p>
+        <p className="table-cell-help"><strong>Global document setting:</strong> changing this watermark updates every page in the template. Dynamic-table continuation pages, Native PDF, API generation and combined PDF use the same configuration.</p>
       </div>
     </details>
 

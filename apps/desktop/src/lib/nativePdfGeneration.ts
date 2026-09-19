@@ -16,7 +16,7 @@ import { CombinedPdfRenderer, PdfRenderer } from '@document-tool/renderer-pdf';
 import type { BuilderDataSource } from './dataSourceStore.ts';
 import { displayValue, valueForField } from './dataSourceStore.ts';
 import { loadImageAsset } from './imageAssetStore.ts';
-import type { PageSettings } from './pageModel.ts';
+import { normalizePageSettings, type PageSettings, type WatermarkSettings } from './pageModel.ts';
 import { amountToIndianWords } from './numberToWords.ts';
 import {
   dynamicRows,
@@ -56,7 +56,7 @@ type BuilderElement = {
   formulaName?: string; formulaExpression?: string;
 };
 type BuilderPage = { id:string; name:string; settings:PageSettings; elements:BuilderElement[] };
-type SavedBuilderTemplate = { name?:string; pages?:BuilderPage[]; elements?:BuilderElement[]; pageSize?:string; orientation?:string; updatedAt?:string };
+type SavedBuilderTemplate = { name?:string; pages?:BuilderPage[]; elements?:BuilderElement[]; pageSize?:string; orientation?:string; updatedAt?:string; watermark?:WatermarkSettings };
 
 type FormulaSpec = { id:string; name:string; alias:string; expression:string };
 type StandaloneMediaSpec = {
@@ -292,8 +292,14 @@ async function buildNativeDocumentGroup(prepared:PreparedNativeTemplate,source:B
 
 function parseSaved(raw:string|null):SavedBuilderTemplate|null{if(!raw)return null;try{return JSON.parse(raw) as SavedBuilderTemplate;}catch{return null;}}
 function normalizedBuilderPages(saved:SavedBuilderTemplate):BuilderPage[]{
-  if(saved.pages?.length)return saved.pages;
-  return [{id:'page-1',name:'Page 1',settings:defaultLegacySettings(saved),elements:saved.elements??[]}];
+  if(saved.pages?.length){
+    const normalized=saved.pages.map((page)=>({...page,settings:normalizePageSettings(page.settings)}));
+    const globalWatermark={...(saved.watermark??normalized[0]?.settings.watermark??defaultLegacySettings(saved).watermark)};
+    return normalized.map((page)=>({...page,settings:{...page.settings,watermark:{...globalWatermark}}}));
+  }
+  const settings=defaultLegacySettings(saved);
+  if(saved.watermark) settings.watermark={...settings.watermark,...saved.watermark};
+  return [{id:'page-1',name:'Page 1',settings,elements:saved.elements??[]}];
 }
 function defaultLegacySettings(saved:SavedBuilderTemplate):PageSettings{return {preset:(saved.pageSize as any)||'A4',orientation:(saved.orientation as any)||'Portrait',unit:'mm',customWidthMm:210,customHeightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},bleedMm:{top:0,right:0,bottom:0,left:0},safeAreaMm:5,background:'#ffffff',borderColor:'#d2d8e0',borderWidth:0,borderAlignment:'inside',borderOffsetMm:0,showGuides:false,header:{enabled:false,heightMm:20,gapMm:5,repeat:'every'},footer:{enabled:false,heightMm:15,gapMm:5,repeat:'every'},watermark:{enabled:false,type:'text',text:'CONFIDENTIAL',opacity:20,rotation:-45,fontSize:56,color:'#64748B',position:'center',scale:60,customXPercent:50,customYPercent:50,applyTo:'all',layer:'behind'}};}
 function toPageDefinition(s:PageSettings):TemplateDefinition['page']{
