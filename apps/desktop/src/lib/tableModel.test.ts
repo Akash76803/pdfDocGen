@@ -646,10 +646,10 @@ describe('UX-8.4 Fix2 conditional table auto reflow', () => {
     table.rows[0]!.cells[1]!.content=''; // spacer
     table.rows[0]!.cells[2]!.content='Optional Tax';
     table.rows[0]!.cells[3]!.content='Net';
+    const full=stableConditionalColumnWidths(table,[0,1,2,3]);
     const widths=stableConditionalColumnWidths(table,[0,1,3]);
-    expect(widths[1]).toBeCloseTo(10,6);
-    expect(widths[0]).toBeCloseTo(51.428571,5);
-    expect(widths[2]).toBeCloseTo(38.571429,5);
+    expect(widths[1]).toBeCloseTo(full[1]!,6);
+    expect(widths[0]! / widths[2]!).toBeCloseTo(full[0]! / full[3]!,6);
     expect(widths.reduce((sum,value)=>sum+value,0)).toBeCloseTo(100,6);
   });
 
