@@ -340,6 +340,7 @@ async function layoutAbsoluteDesktopDocument(template:TemplateDefinition,model:R
   // physical page after runtime table pagination so deferred page tokens see the
   // final physical page count (including table continuation pages).
   pages.forEach((page,index)=>{for(const block of model.header??[])drawAbsolute(page,block,index);for(const block of model.footer??[])drawAbsolute(page,block,index);});
+  applyPageWatermarks(pages,pageDef,images);
   return {pages,images:[...images.values()],model:{...model,page:pageDef},pageDef,renderDurationMs:Date.now()-startedAt};
 }
 async function layoutPdfDocument(template:TemplateDefinition,model:RenderModel):Promise<LaidOutPdfDocument>{
@@ -367,6 +368,7 @@ async function layoutPdfDocument(template:TemplateDefinition,model:RenderModel):
     if(footerMode==='LAST_PAGE_ONLY' && ctx.footerHeight>0) ensureSpace(ctx,ctx.footerHeight);
     for(const block of model.footer ?? []) renderFlowBlock(ctx,block,left,contentWidth);
   }
+  applyPageWatermarks(ctx.pages,pageDef,images);
   return {pages:ctx.pages,images:[...images.values()],model,pageDef,renderDurationMs:Date.now()-startedAt};
 }
 
@@ -418,6 +420,55 @@ function drawPageNumber(page:PdfPage,pageDef:NonNullable<RenderModel['page']>,cu
   const x=pos==='BOTTOM_LEFT'?left:pos==='BOTTOM_RIGHT'?page.width-right-width:(page.width-width)/2;
   drawText(page,text,size,x,y,'#64748B','LEFT','F1');
 }
+function pageWatermarkBaseOpCount(pageDef:NonNullable<RenderModel['page']>):number{
+  let count=0;
+  if((pageDef.backgroundColor??'#FFFFFF').toUpperCase()!=='#FFFFFF')count++;
+  if(pageDef.border?.enabled&&pageDef.border.style!=='NONE')count++;
+  return count;
+}
+function watermarkGraphicsState(page:PdfPage,opacity:number):string{
+  const clamped=Math.max(0,Math.min(1,opacity));
+  const name=`GSWM${Math.round(clamped*1000)}`;
+  const entry=`/${name} << /Type /ExtGState /ca ${f(clamped)} /CA ${f(clamped)} >>`;
+  if(!page.extGStates?.includes(`/${name} `)) page.extGStates=page.extGStates?`${page.extGStates} ${entry}`:entry;
+  return name;
+}
+function watermarkCenter(page:PdfPage,position:string,width:number,height:number,customXPercent:number,customYPercent:number){
+  const margin=mm(12);
+  switch(position){
+    case 'TOP_LEFT': return {x:margin+width/2,y:page.height-margin-height/2};
+    case 'TOP_RIGHT': return {x:page.width-margin-width/2,y:page.height-margin-height/2};
+    case 'BOTTOM_LEFT': return {x:margin+width/2,y:margin+height/2};
+    case 'BOTTOM_RIGHT': return {x:page.width-margin-width/2,y:margin+height/2};
+    case 'CUSTOM': return {x:page.width*(Math.max(0,Math.min(100,customXPercent))/100),y:page.height*(1-Math.max(0,Math.min(100,customYPercent))/100)};
+    default: return {x:page.width/2,y:page.height/2};
+  }
+}
+function watermarkTextOp(page:PdfPage,pageDef:NonNullable<RenderModel['page']>):string|undefined{
+  const wm=pageDef.watermark;if(!wm?.enabled||wm.type==='IMAGE')return;
+  const text=normalizePdfText(wm.text||'CONFIDENTIAL');if(!text)return;
+  const size=Math.max(6,wm.fontSize??42);const width=measuredTextWidth(text,size,'F2');const height=size;
+  const center=watermarkCenter(page,wm.position??'CENTER',width,height,wm.customXPercent??50,wm.customYPercent??50);
+  const angle=((wm.rotation??-45)*Math.PI)/180,c=Math.cos(angle),s=Math.sin(angle);const [r,g,b]=rgb(wm.color??'#64748B');const gs=watermarkGraphicsState(page,wm.opacity??.2);
+  return `q /${gs} gs BT /F2 ${f(size)} Tf ${r} ${g} ${b} rg ${f(c)} ${f(s)} ${f(-s)} ${f(c)} ${f(center.x)} ${f(center.y)} Tm ${f(-width/2)} ${f(-size*.3)} Td (${escapePdf(text)}) Tj ET Q`;
+}
+function watermarkImageOp(page:PdfPage,pageDef:NonNullable<RenderModel['page']>,images:Map<string,PdfImage>):string|undefined{
+  const wm=pageDef.watermark;if(!wm?.enabled||wm.type!=='IMAGE'||!wm.imageSource)return;
+  const image=images.get(wm.imageSource);if(!image)return;
+  const scale=Math.max(.05,Math.min(1.5,wm.scale??.6));let width=page.width*scale,height=width*(image.height/image.width);const maxHeight=page.height*.8;if(height>maxHeight){height=maxHeight;width=height*(image.width/image.height);}
+  const center=watermarkCenter(page,wm.position??'CENTER',width,height,wm.customXPercent??50,wm.customYPercent??50);
+  const angle=((wm.rotation??0)*Math.PI)/180,c=Math.cos(angle),s=Math.sin(angle);const tx=center.x-c*width/2+s*height/2,ty=center.y-s*width/2-c*height/2;const gs=watermarkGraphicsState(page,wm.opacity??.15);
+  return `q /${gs} gs ${f(c*width)} ${f(s*width)} ${f(-s*height)} ${f(c*height)} ${f(tx)} ${f(ty)} cm /${image.name} Do Q`;
+}
+function applyPageWatermarks(pages:PdfPage[],pageDef:NonNullable<RenderModel['page']>,images:Map<string,PdfImage>){
+  const wm=pageDef.watermark;if(!wm?.enabled)return;
+  pages.forEach((page,index)=>{
+    if(wm.applyTo==='FIRST_PAGE'&&index>0)return;
+    const op=wm.type==='IMAGE'?watermarkImageOp(page,pageDef,images):watermarkTextOp(page,pageDef);if(!op)return;
+    if(wm.layer==='ABOVE')page.ops.push(op);else page.ops.splice(pageWatermarkBaseOpCount(pageDef),0,op);
+  });
+}
+
 function namespacePdfImages(pages:PdfPage[],images:PdfImage[],prefix:string):{pages:PdfPage[];images:PdfImage[]}{
   if(!images.length) return {pages,images};
   const rename=new Map(images.map((image)=>[image.name,`${prefix}${image.name}`]));
@@ -961,6 +1012,7 @@ async function prepareImages(model:RenderModel){
   const sources=new Set<string>();
   const walk=(blocks:RenderBlock[])=>{for(const block of blocks){if(block.type==='IMAGE'&&block.sourceType==='DATA_URL'&&block.source)sources.add(block.source);if(block.type==='ROW'){for(const c of block.columns)walk(c.children as RenderBlock[]);walk(block.children as RenderBlock[]);}if(block.type==='BOX')walk(block.children as RenderBlock[]);if(block.type==='CUSTOM_TABLE'){for(const c of block.cells)if(c.content.type==='IMAGE'&&c.content.sourceType==='DATA_URL'&&c.content.source)sources.add(c.content.source);}if(block.type==='TABLE'){block.rows.forEach(row=>row.forEach((cell,index)=>{const column=block.columns[index];if((column?.kind==='IMAGE'||column?.kind==='QR')&&typeof cell==='string'&&cell.startsWith('data:image/'))sources.add(cell);}));}}};
   walk(model.header??[]);walk(model.body??[]);walk(model.footer??[]);
+  const watermarkSource=model.page?.watermark?.enabled&&model.page.watermark.type==='IMAGE'?model.page.watermark.imageSource:undefined;if(watermarkSource)sources.add(watermarkSource);
   const map=new Map<string,PdfImage>();let index=1;
   for(const source of sources){const prepared=await prepareImage(source,index);if(prepared){map.set(source,prepared);index++;}}
   return map;
