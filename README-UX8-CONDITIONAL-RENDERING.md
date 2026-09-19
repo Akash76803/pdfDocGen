@@ -74,10 +74,34 @@ Verification:
 - 365/365 tests PASS
 - build PASS
 
+## UX-8.3 — Conditional Design Aid & Global Watermark
+
+Implemented:
+- Canvas toolbar shows a Hidden count for elements whose conditions currently evaluate false.
+- Hidden conditional elements stay outside the document-page export DOM and are exposed in a design-only strip for safe selection/editing.
+- Selecting a hidden element opens its Conditions workflow without ghost content leaking into Exact PDF capture.
+- Global Watermark supports the same universal Show/Hide, ALL/ANY and multi-rule condition model.
+- Watermark conditions can use imported fields and Formula Fields.
+- Builder preview evaluates conditional watermark visibility against the current record.
+- PageWatermarkDefinition now carries an optional VisibilityRule.
+- TemplateEngine evaluates watermark visibility against the same document context used for element conditions.
+- API/headless generation maps Global Watermark conditions into the shared renderer visibility engine.
+- Native PDF page definition carries the same Global Watermark visibility rule.
+- Existing watermark all/first-page and behind/above behavior remains unchanged after visibility evaluation.
+
+Verification:
+- Node 20.20.2 / npm 10.8.2
+- npm ci PASS (198 packages)
+- typecheck PASS
+- 68/68 test files PASS
+- 367/367 tests PASS
+- build PASS (2.73s)
+- Tests cover Page Watermark condition evaluation and desktop-to-API watermark visibility mapping.
+
 ## Next UX-8 work
 
-UX-8.3 / UX-8.4:
-- richer design-mode visibility aid for hidden conditional elements
-- conditional Global Watermark integration
-- broader table row/column conditional behavior
-- native Fast PDF parity review
+UX-8.4:
+- table row-level conditional filtering in Builder/configuration UX
+- conditional table column visibility
+- Native Fast PDF universal element-condition parity review
+- full manual visual/regression QA before merge
