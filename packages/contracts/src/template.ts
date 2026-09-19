@@ -44,7 +44,7 @@ export type PageWatermarkType = 'TEXT'|'IMAGE';
 export type PageWatermarkPosition = 'CENTER'|'TOP_LEFT'|'TOP_RIGHT'|'BOTTOM_LEFT'|'BOTTOM_RIGHT'|'CUSTOM';
 export type PageWatermarkApplyTo = 'ALL'|'FIRST_PAGE';
 export type PageWatermarkLayer = 'BEHIND'|'ABOVE';
-export interface PageWatermarkDefinition { enabled?:boolean; type?:PageWatermarkType; text?:string; imageSource?:string; opacity?:number; rotation?:number; fontSize?:number; color?:string; position?:PageWatermarkPosition; scale?:number; customXPercent?:number; customYPercent?:number; applyTo?:PageWatermarkApplyTo; layer?:PageWatermarkLayer; }
+export interface PageWatermarkDefinition { enabled?:boolean; type?:PageWatermarkType; text?:string; imageSource?:string; opacity?:number; rotation?:number; fontSize?:number; color?:string; position?:PageWatermarkPosition; scale?:number; customXPercent?:number; customYPercent?:number; applyTo?:PageWatermarkApplyTo; layer?:PageWatermarkLayer; /** UX-8.3 document-data driven watermark visibility. */ visibility?:VisibilityRule; }
 export interface PageDefinition { size:PageSize; orientation:PageOrientation; margins:PageMargins; customWidthMm?:number; customHeightMm?:number; backgroundColor?:string; border?:PageBorder; pagination?:PaginationSettings; watermark?:PageWatermarkDefinition; }
 
 export interface PageDimensions { widthMm:number; heightMm:number; }
