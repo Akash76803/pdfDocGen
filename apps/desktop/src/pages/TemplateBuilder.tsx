@@ -27,7 +27,7 @@ import { amountToIndianWords } from '../lib/numberToWords.ts';
 import { getPdfRenderProfile } from '../lib/pdfRenderProfile.ts';
 import { appendGenerationHistory, clearGenerationProgress, clearGenerationRequest, GENERATION_REQUEST_EVENT, readGenerationRequest, writeGenerationProgress, type GenerationRequest } from '../lib/generationEngine.ts';
 import { buildCurrentDocumentJsonBody, buildTemplateInputContract, type TemplateInputContractResult, type TemplateJsonBodyResult } from '../lib/templateJsonBody.ts';
-import { evaluateBuilderConditionalRendering, normalizeConditionalRendering, requiresValue, type BuilderConditionalRendering, type BuilderConditionOperator } from '../lib/conditionalRendering.ts';
+import { evaluateBuilderConditionalRendering, filterConditionallyVisible, normalizeConditionalRendering, requiresValue, type BuilderConditionalRendering, type BuilderConditionOperator } from '../lib/conditionalRendering.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'content' | 'binding' | 'rows' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -294,6 +294,16 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const formulaAggregateRows = source ? documentFormulaAggregateRows(source, record, pages.flatMap((page) => page.elements)) : [];
   const formulaTokenFields: TemplateTokenField[] = formulaElements.map((item) => ({ name: item.formulaName!.trim(), label: item.formulaName!.trim() }));
   const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
+  const resolveCurrentBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
+  const isElementVisibleForCurrentRecord = (item: BuilderElement) => {
+    const condition = normalizeConditionalRendering(item.conditionalRendering, {
+      conditionEnabled: item.conditionEnabled,
+      conditionField: item.conditionField,
+      conditionOperator: item.conditionOperator,
+      conditionValue: item.conditionValue,
+    });
+    return evaluateBuilderConditionalRendering(condition, resolveCurrentBuilderField);
+  };
   const selected = formulaElements.find((item) => item.id === selectedId) ?? masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
   useEffect(() => {
     if (!selected && (tab === 'content' || tab === 'binding' || tab === 'formatting' || tab === 'conditions' || tab === 'rows')) setTab('properties');
@@ -1142,7 +1152,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
 
 
   function buildBodyMaterialization(pageElements: BuilderElement[], settings: PageSettings) {
-    const body = pageElements.filter((item) => (item.region ?? 'body') === 'body');
+    const body = filterConditionallyVisible(pageElements.filter((item) => (item.region ?? 'body') === 'body'), resolveCurrentBuilderField);
     const tablePlans = new Map<string, ReturnType<typeof paginateDynamicTable>>();
     const materialized = materializeBodyFlowPages(body, settings, (item, _pageIndex, _y, availableHeightPx, continuationHeightPx) => {
       if (item.type !== 'table' || !item.table || item.table.mode !== 'dynamic' || item.table.pagination?.enabled === false) return undefined;
@@ -1295,7 +1305,11 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <div className="page-tree-actions"><button onClick={duplicatePage} title="Duplicate page">⧉</button><button onClick={() => movePage(-1)} title="Move page up">↑</button><button onClick={() => movePage(1)} title="Move page down">↓</button><button className="danger-lite" onClick={deletePage} disabled={pages.length <= 1} title="Delete page">×</button></div>
           <div className="section-title document-tree"><span>Elements</span></div>
           <div className="element-tree">
-            {elements.map((item, index) => <button key={item.id} className={item.id === selectedId ? 'element-row active' : 'element-row'} onClick={() => setSelectedId(item.id)}><span>{index + 1}</span><b>{item.type === 'formula' ? `Formula · ${item.formulaName || 'Unnamed'}` : labelFor(item.type)}</b>{(item.region ?? 'body') !== 'body' ? <small className={`region-badge ${(item.region ?? 'body')}`}>{(item.region ?? 'body') === 'header' ? 'H' : 'F'}</small> : null}</button>)}
+            {elements.map((item, index) => {
+              const conditional = normalizeConditionalRendering(item.conditionalRendering, { conditionEnabled:item.conditionEnabled, conditionField:item.conditionField, conditionOperator:item.conditionOperator, conditionValue:item.conditionValue });
+              const visible = item.type === 'formula' ? true : isElementVisibleForCurrentRecord(item);
+              return <button key={item.id} className={item.id === selectedId ? 'element-row active' : 'element-row'} onClick={() => setSelectedId(item.id)}><span>{index + 1}</span><b>{item.type === 'formula' ? `Formula · ${item.formulaName || 'Unnamed'}` : labelFor(item.type)}</b>{conditional.enabled ? <small title={visible?'Condition currently visible':'Condition currently hidden'}>{visible?'◆':'◇'}</small> : null}{(item.region ?? 'body') !== 'body' ? <small className={`region-badge ${(item.region ?? 'body')}`}>{(item.region ?? 'body') === 'header' ? 'H' : 'F'}</small> : null}</button>;
+            })}
           </div>
         </aside>
         {!leftOpen && <button className="panel-expand expand-left" title="Open elements panel" onClick={() => setLeftOpen(true)}><ChevronRight size={16}/></button>}
@@ -1319,6 +1333,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
                   {virtualPageIndex === 0 && elements.length === 0 && <div className="page-empty"><span>{pageSettings.preset} DOCUMENT</span><strong>Start building your template</strong><small>Click an element from the left panel. You can then move, resize and edit it.</small></div>}
                   {elements.map((item) => {
                     if (item.type === 'formula') return null;
+                    if (!isElementVisibleForCurrentRecord(item)) return null;
                     const region = item.region ?? 'body';
                     const runtimePageIndex = documentPageOffset + virtualPageIndex;
                     const isHeader = region === 'header' && pageSettings.header.enabled && repeatModeShows(pageSettings.header.repeat, runtimePageIndex);
