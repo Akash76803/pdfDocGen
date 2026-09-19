@@ -242,3 +242,33 @@ test('UX-8.3 maps Global Watermark conditions to page visibility', () => {
   });
   expect(result.page.watermark?.visibility).toEqual({path:'status',operator:'EQUALS',value:'Draft'});
 });
+
+
+test('UX-8.4 maps table row filters and whole-column visibility scopes', () => {
+  const result=adaptDesktopTemplateEntry({
+    id:'table-conditions',name:'Table Conditions',version:1,
+    payload:{pages:[{id:'p1',settings:{},elements:[{
+      id:'t1',type:'table',x:0,y:0,width:500,height:100,
+      table:{
+        id:'tbl',mode:'dynamic',
+        columns:[
+          {id:'c1',key:'Product',label:'Product',width:100,align:'left'},
+          {id:'c2',key:'Discount',label:'Discount',width:100,align:'right',conditionScope:'anyRow',
+            conditionalRendering:{enabled:true,action:'show',match:'all',rules:[{id:'cr',field:'Discount',operator:'greaterThan',value:'0'}]}},
+        ],
+        headerRows:[{cells:[{content:'Product'},{content:'Discount'}]}],
+        bodyRows:[{cells:[{binding:'Product'},{binding:'Discount'}]}],
+        customRows:[],rows:[],
+        binding:{repeatSource:'items'},
+        pagination:{repeatHeader:true,allowRowSplit:false,keepRowsTogether:true},
+        borderWidth:1,borderColor:'#000',defaultPadding:4,
+        rowConditionalRendering:{enabled:true,action:'show',match:'all',rules:[{id:'rr',field:'Qty',operator:'greaterThan',value:'0'}]},
+      },
+    }]}]},
+  });
+  const table=result.body.blocks[0];
+  expect(table?.type).toBe('TABLE'); if(table?.type!=='TABLE')throw new Error('Expected TABLE');
+  expect(table.rowFilter).toEqual({path:'qty',operator:'GREATER_THAN',value:'0'});
+  expect(table.columns[1]?.visibility).toEqual({path:'discount',operator:'GREATER_THAN',value:'0'});
+  expect(table.columns[1]?.visibilityScope).toBe('ANY_ROW');
+});
