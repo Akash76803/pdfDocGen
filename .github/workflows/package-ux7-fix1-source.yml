@@ -1,0 +1,24 @@
+name: Package UX7 Fix1 Global Watermark ZIP
+
+on:
+  push:
+    branches:
+      - feat/ux7-fix1-global-watermark
+
+permissions:
+  contents: read
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Package source
+        run: |
+          zip -r Document-Builder-UX7-Fix1-Global-Watermark.zip . -x ".git/*" ".github/workflows/package-ux7-fix1-source.yml"
+      - name: Upload source ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: Document-Builder-UX7-Fix1-Global-Watermark
+          path: Document-Builder-UX7-Fix1-Global-Watermark.zip
+          if-no-files-found: error
