@@ -747,30 +747,48 @@ export function stableConditionalColumnWidths(
   if (!visibleIndexes.length) return [];
   const full = smartColumnWidths(table, runtimeValues);
   if (visibleIndexes.length === table.columns.length) return full;
-  const visibleSet = new Set(visibleIndexes);
-  const result = new Map<number, number>(visibleIndexes.map((index) => [index, full[index] ?? 0]));
-  const contentVisible = visibleIndexes.filter((index) => !isTableGapColumn(table, index));
-  const recipientPool = contentVisible.length ? contentVisible : visibleIndexes;
 
-  for (let hiddenIndex = 0; hiddenIndex < table.columns.length; hiddenIndex += 1) {
-    if (visibleSet.has(hiddenIndex)) continue;
-    const freed = full[hiddenIndex] ?? 0;
-    if (freed <= 0) continue;
-    const recipient = [...recipientPool].sort((a, b) => {
-      const da = Math.abs(a - hiddenIndex);
-      const db = Math.abs(b - hiddenIndex);
-      if (da !== db) return da - db;
-      // Prefer the right-hand content column on ties so financial/total columns
-      // naturally absorb a hidden predecessor without moving a spacer.
-      return (a >= hiddenIndex ? 0 : 1) - (b >= hiddenIndex ? 0 : 1);
-    })[0];
-    if (recipient !== undefined) result.set(recipient, (result.get(recipient) ?? 0) + freed);
-  }
+  const spacerIndexes = visibleIndexes.filter((index) => isTableGapColumn(table, index));
+  const contentIndexes = visibleIndexes.filter((index) => !isTableGapColumn(table, index));
+  const fixedSpacerTotal = spacerIndexes.reduce((sum, index) => sum + (full[index] ?? 0), 0);
+  const contentTarget = Math.max(0, 100 - fixedSpacerTotal);
+  const visibleContentBase = contentIndexes.reduce((sum, index) => sum + (full[index] ?? 0), 0);
 
-  const widths = visibleIndexes.map((index) => result.get(index) ?? 0);
-  const sum = widths.reduce((total, value) => total + value, 0);
+  const result = visibleIndexes.map((index) => {
+    if (spacerIndexes.includes(index)) return full[index] ?? 0;
+    if (!contentIndexes.length) return 0;
+    if (visibleContentBase <= 0) return contentTarget / contentIndexes.length;
+    return ((full[index] ?? 0) / visibleContentBase) * contentTarget;
+  });
+
+  const sum = result.reduce((total, value) => total + value, 0);
   if (sum <= 0) return visibleIndexes.map(() => 100 / visibleIndexes.length);
-  return widths.map((value) => (value / sum) * 100);
+  return result.map((value) => (value / sum) * 100);
+}
+
+/**
+ * Projects the runtime table to only visible columns and applies the resolved
+ * conditional width plan to that projected table. This is the authoritative
+ * schema for pagination/height estimation after conditions have been evaluated.
+ */
+export function projectConditionalRuntimeTable(
+  table: TableDefinition,
+  visibleIndexes: number[],
+  runtimeValues: unknown[] = [],
+): { table: TableDefinition; columnWidths: number[] } {
+  const projected = projectTableVisibleColumns(table, visibleIndexes);
+  const columnWidths = stableConditionalColumnWidths(table, visibleIndexes, runtimeValues);
+  return {
+    table: {
+      ...projected,
+      columns: projected.columns.map((column, index) => ({
+        ...column,
+        width: Math.max(1, columnWidths[index] ?? (100 / Math.max(1, projected.columns.length))) * 10,
+        manualWidth: true,
+      })),
+    },
+    columnWidths,
+  };
 }
 
 export function smartColumnWidths(table: TableDefinition, runtimeValues: unknown[] = []): number[] {
@@ -1646,8 +1664,8 @@ function rowEstimatedHeight(row: TableRow): number {
  * Product Description). Pagination must therefore reserve the height of the
  * actual runtime value, not only the one-line design template.
  */
-function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableWidthPx = 760): number {
-  const widths = smartColumnWidths(table, [runtimeValue]);
+function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableWidthPx = 760, resolvedColumnWidths?: number[]): number {
+  const widths = resolvedColumnWidths?.length === table.columns.length ? resolvedColumnWidths : smartColumnWidths(table, [runtimeValue]);
   let total = 0;
   for (const row of table.bodyRows) {
     if (!row.autoHeight) { total += Math.max(18, row.height); continue; }
@@ -1688,6 +1706,7 @@ export function paginateDynamicTable(
   availableHeightPx: number,
   continuationHeightPx: number = availableHeightPx,
   tableWidthPx: number = 760,
+  resolvedColumnWidths?: number[],
 ): TablePaginationPage[] {
   const makeSinglePage = (): TablePaginationPage => {
     const available = Math.max(0, availableHeightPx);
@@ -1759,7 +1778,7 @@ export function paginateDynamicTable(
   for (let i = 0; i < runtimeRows.length; i += 1) {
     const runtimeRow = runtimeRows[i];
     const bodyHeight = table.bodyRows.some((row) => row.autoHeight)
-      ? runtimeBodyHeight(table, runtimeRow.value, tableWidthPx)
+      ? runtimeBodyHeight(table, runtimeRow.value, tableWidthPx, resolvedColumnWidths)
       : defaultBodyHeight;
     // Every complete runtime row must fit before the hard Body/Footer boundary.
     // Wrapped rows are measured from their runtime content, so a two-line Product
