@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectConditionalRuntimeTable, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, paginateDynamicTable, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectConditionalRuntimeTable, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes, type TablePaginationRuntimeRow } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -660,11 +660,11 @@ describe('UX-8.4 Fix2 conditional table auto reflow', () => {
     table.bodyRows[0]!.cells[0]!.binding='Description';
     table.bodyRows[0]!.cells[1]!.binding='Optional';
     table.bodyRows[0]!.cells[2]!.binding='Amount';
-    const runtime=[
+    const runtime:TablePaginationRuntimeRow[]=[
       {key:'1',value:{Description:'A long product description that wraps across several lines in a narrow column',Optional:'x',Amount:100}},
       {key:'2',value:{Description:'A long product description that wraps across several lines in a narrow column',Optional:'x',Amount:200}},
-    ] as never;
-    const fullLayout=projectConditionalRuntimeTable(table,[0,1,2],runtime.map((row:any)=>row.value));
+    ];
+    const fullLayout=projectConditionalRuntimeTable(table,[0,1,2],runtime.map((row)=>row.value));
     const hiddenLayout=projectConditionalRuntimeTable(table,[0,2],runtime.map((row:any)=>row.value));
     const full=paginateDynamicTable(fullLayout.table,runtime,1000,1000,600,fullLayout.columnWidths);
     const hidden=paginateDynamicTable(hiddenLayout.table,runtime,1000,1000,600,hiddenLayout.columnWidths);
