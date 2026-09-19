@@ -3,7 +3,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import type { NormalizedRecord } from '@document-tool/contracts';
 import { type BuilderDataSource } from '../lib/dataSourceStore.ts';
 import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
-import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, smartColumnWidths, paginateDynamicTable, projectTableVisibleColumns, visibleTableColumnIndexes, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
+import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, paginateDynamicTable, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
 import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.ts';
 
 export function TableCanvas({ table, record, source, documentSource, globalFormulaValues = {}, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; globalFormulaValues?: Record<string, unknown>; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
@@ -11,7 +11,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
   const runtime = dynamicRows(table, record, source, documentSource, (field) => globalFormulaValue(globalFormulaValues, field));
   const visibleColumnIndexes = visibleTableColumnIndexes(table, record, runtime, (field) => globalFormulaValue(globalFormulaValues, field));
   const renderTable = projectTableVisibleColumns(table, visibleColumnIndexes);
-  const columnWidths = smartColumnWidths(renderTable, runtime.map((row) => row.value));
+  const columnWidths = stableConditionalColumnWidths(table, visibleColumnIndexes, runtime.map((row) => row.value));
   const summaryResults = renderTable.mode === 'dynamic' ? evaluateTableSummaryRows(renderTable, runtime.map((row) => row.value), globalFormulaValues) : { byCellId: {}, byName: {} };
   const paginationPages = renderTable.mode === 'dynamic' ? paginateDynamicTable(renderTable, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
   const renderedPages = fragmentIndex === undefined ? paginationPages : paginationPages.filter((page) => page.index === fragmentIndex);
@@ -80,7 +80,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
       nextPercents[columnIndex + 1] = nextRight;
       onChange({
         ...table,
-        columns: renderTable.columns.map((column) => {
+        columns: table.columns.map((column) => {
           const visibleIndex = renderTable.columns.findIndex((candidate) => candidate.id === column.id);
           if (visibleIndex < 0) return column;
           return {
@@ -106,7 +106,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
     {renderTable.mode === 'dynamic' && paginationPages.length > 1 && !virtualPageMode ? <div className="db-pagination-status">{paginationPages.length} pages · automatic overflow</div> : null}
     {(renderTable.mode === 'dynamic' ? renderedPages : [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }]).map((page, renderedIndex) => { const pageIndex = page.index; return <div className="db-table-page-fragment" key={`fragment-${page.index}`}>
     {pageIndex === 0 && table.selectedCellId && renderTable.columns.length > 1 && <div className="db-column-ruler" aria-label="Column resize ruler">
-      {columnWidths.map((width, index) => <div key={table.columns[index]?.id ?? index} className="db-column-ruler-segment" style={{ width: `${width}%` }}>
+      {columnWidths.map((width, index) => <div key={renderTable.columns[index]?.id ?? index} className="db-column-ruler-segment" style={{ width: `${width}%` }}>
         <span>{Math.round(width)}%</span>
         {index < renderTable.columns.length - 1 && <button type="button" className="db-column-ruler-handle" title={`Resize column ${index + 1} / ${index + 2}`} onPointerDown={(e) => startColumnResize(e as unknown as ReactPointerEvent<HTMLSpanElement>, index)} aria-label={`Resize column ${index + 1}`}/>}
       </div>)}
