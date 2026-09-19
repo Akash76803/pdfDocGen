@@ -3,15 +3,17 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import type { NormalizedRecord } from '@document-tool/contracts';
 import { type BuilderDataSource } from '../lib/dataSourceStore.ts';
 import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
-import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, smartColumnWidths, paginateDynamicTable, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
+import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, smartColumnWidths, paginateDynamicTable, projectTableVisibleColumns, visibleTableColumnIndexes, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
 import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.ts';
 
 export function TableCanvas({ table, record, source, documentSource, globalFormulaValues = {}, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; globalFormulaValues?: Record<string, unknown>; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => (onSelectionChange ?? onChange)({ ...table, selectedCellId: cellId });
   const runtime = dynamicRows(table, record, source, documentSource);
-  const columnWidths = smartColumnWidths(table, runtime.map((row) => row.value));
-  const summaryResults = table.mode === 'dynamic' ? evaluateTableSummaryRows(table, runtime.map((row) => row.value), globalFormulaValues) : { byCellId: {}, byName: {} };
-  const paginationPages = table.mode === 'dynamic' ? paginateDynamicTable(table, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
+  const visibleColumnIndexes = visibleTableColumnIndexes(table, record, runtime, (field) => globalFormulaValue(globalFormulaValues, field));
+  const renderTable = projectTableVisibleColumns(table, visibleColumnIndexes);
+  const columnWidths = smartColumnWidths(renderTable, runtime.map((row) => row.value));
+  const summaryResults = renderTable.mode === 'dynamic' ? evaluateTableSummaryRows(renderTable, runtime.map((row) => row.value), globalFormulaValues) : { byCellId: {}, byName: {} };
+  const paginationPages = renderTable.mode === 'dynamic' ? paginateDynamicTable(renderTable, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
   const renderedPages = fragmentIndex === undefined ? paginationPages : paginationPages.filter((page) => page.index === fragmentIndex);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -25,7 +27,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
   const lastPublishedHeightRef = useRef<number | null>(null);
   useEffect(() => { onHeightChangeRef.current = onHeightChange; }, [onHeightChange]);
 
-  const tableStructureKey = `${table.id}:${table.mode}:${table.columns.length}:${table.headerRows.length}:${table.bodyRows.length}:${table.customRows.length}:${table.rows.length}:${runtime.length}`;
+  const tableStructureKey = `${table.id}:${table.mode}:${renderTable.columns.map((column)=>column.id).join(',')}:${renderTable.headerRows.length}:${renderTable.bodyRows.length}:${renderTable.customRows.length}:${renderTable.rows.length}:${runtime.length}`;
 
   useLayoutEffect(() => {
     const shell = shellRef.current;
@@ -56,7 +58,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
   }, [tableStructureKey]);
 
   const startColumnResize = (event: ReactPointerEvent<HTMLSpanElement>, columnIndex: number) => {
-    if (columnIndex < 0 || columnIndex >= table.columns.length - 1) return;
+    if (columnIndex < 0 || columnIndex >= renderTable.columns.length - 1) return;
     event.preventDefault();
     event.stopPropagation();
     onInteractionStart?.();
@@ -65,10 +67,10 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
     const startX = event.clientX;
     const tableWidth = Math.max(1, node.getBoundingClientRect().width);
     const startPercents = [...columnWidths];
-    const leftPct = startPercents[columnIndex] ?? (100 / table.columns.length);
-    const rightPct = startPercents[columnIndex + 1] ?? (100 / table.columns.length);
+    const leftPct = startPercents[columnIndex] ?? (100 / renderTable.columns.length);
+    const rightPct = startPercents[columnIndex + 1] ?? (100 / renderTable.columns.length);
     const pairPct = leftPct + rightPct;
-    const minPct = Math.min(pairPct / 2, Math.max(2.5, (Math.max(table.columns[columnIndex].minWidth, table.columns[columnIndex + 1].minWidth) / tableWidth) * 100));
+    const minPct = Math.min(pairPct / 2, Math.max(2.5, (Math.max(renderTable.columns[columnIndex].minWidth, renderTable.columns[columnIndex + 1].minWidth) / tableWidth) * 100));
     const onMove = (move: PointerEvent) => {
       const deltaPct = ((move.clientX - startX) / tableWidth) * 100;
       const nextLeft = Math.max(minPct, Math.min(pairPct - minPct, leftPct + deltaPct));
@@ -78,11 +80,15 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
       nextPercents[columnIndex + 1] = nextRight;
       onChange({
         ...table,
-        columns: table.columns.map((column, index) => ({
-          ...column,
-          width: Math.max(24, (nextPercents[index] ?? (100 / table.columns.length)) * 10),
-          manualWidth: true,
-        })),
+        columns: renderTable.columns.map((column) => {
+          const visibleIndex = renderTable.columns.findIndex((candidate) => candidate.id === column.id);
+          if (visibleIndex < 0) return column;
+          return {
+            ...column,
+            width: Math.max(24, (nextPercents[visibleIndex] ?? (100 / renderTable.columns.length)) * 10),
+            manualWidth: true,
+          };
+        }),
       });
     };
     const onUp = () => {
@@ -97,25 +103,25 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
   };
 
   return <div ref={shellRef} className="db-table-shell" style={{ '--table-border': table.borderColor, '--table-border-width': `${table.borderWidth}px`, '--table-border-style': table.borderStyle ?? 'solid' } as CSSProperties}>
-    {table.mode === 'dynamic' && paginationPages.length > 1 && !virtualPageMode ? <div className="db-pagination-status">{paginationPages.length} pages · automatic overflow</div> : null}
-    {(table.mode === 'dynamic' ? renderedPages : [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }]).map((page, renderedIndex) => { const pageIndex = page.index; return <div className="db-table-page-fragment" key={`fragment-${page.index}`}>
-    {pageIndex === 0 && table.selectedCellId && table.columns.length > 1 && <div className="db-column-ruler" aria-label="Column resize ruler">
+    {renderTable.mode === 'dynamic' && paginationPages.length > 1 && !virtualPageMode ? <div className="db-pagination-status">{paginationPages.length} pages · automatic overflow</div> : null}
+    {(renderTable.mode === 'dynamic' ? renderedPages : [{ index: 0, runtimeRows: [], includeHeader: true, includeSummary: true }]).map((page, renderedIndex) => { const pageIndex = page.index; return <div className="db-table-page-fragment" key={`fragment-${page.index}`}>
+    {pageIndex === 0 && table.selectedCellId && renderTable.columns.length > 1 && <div className="db-column-ruler" aria-label="Column resize ruler">
       {columnWidths.map((width, index) => <div key={table.columns[index]?.id ?? index} className="db-column-ruler-segment" style={{ width: `${width}%` }}>
         <span>{Math.round(width)}%</span>
-        {index < table.columns.length - 1 && <button type="button" className="db-column-ruler-handle" title={`Resize column ${index + 1} / ${index + 2}`} onPointerDown={(e) => startColumnResize(e as unknown as ReactPointerEvent<HTMLSpanElement>, index)} aria-label={`Resize column ${index + 1}`}/>}
+        {index < renderTable.columns.length - 1 && <button type="button" className="db-column-ruler-handle" title={`Resize column ${index + 1} / ${index + 2}`} onPointerDown={(e) => startColumnResize(e as unknown as ReactPointerEvent<HTMLSpanElement>, index)} aria-label={`Resize column ${index + 1}`}/>}
       </div>)}
     </div>}
     {!virtualPageMode && renderedIndex > 0 && <div className="db-page-break-marker"><span>Page break</span><small>Continuation {pageIndex + 1}</small></div>}
-    <table ref={pageIndex === 0 ? tableRef : undefined} className="db-table">
-      {table.columns.length > 0 && <colgroup>{table.columns.map((column, index) => <col key={column.id} style={{ width: `${columnWidths[index] ?? (100 / table.columns.length)}%` }}/>)}</colgroup>}
-      {table.headerRows.length > 0 && page.includeHeader && <thead>{table.headerRows.filter((row) => pageIndex === 0 || !table.pagination.repeatHeader || row.repeatOnEveryPage !== false).map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}</thead>}
+    {renderTable.columns.length === 0 ? <div className="db-table-empty">All columns are hidden by the current conditional rules.</div> : <table ref={pageIndex === 0 ? tableRef : undefined} className="db-table">
+      {renderTable.columns.length > 0 && <colgroup>{renderTable.columns.map((column, index) => <col key={column.id} style={{ width: `${columnWidths[index] ?? (100 / renderTable.columns.length)}%` }}/>)}</colgroup>}
+      {renderTable.headerRows.length > 0 && page.includeHeader && <thead>{renderTable.headerRows.filter((row) => pageIndex === 0 || !table.pagination.repeatHeader || row.repeatOnEveryPage !== false).map((row) => <RenderRow key={row.id} row={row} table={renderTable} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}</thead>}
       <tbody>
-        {table.mode === 'custom' && table.rows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} onSelect={selectCell}/>) }
-        {table.mode === 'dynamic' && runtime.length === 0 && <tr><td className="db-table-empty" colSpan={Math.max(1, table.columns.length)}>{table.binding?.parentKey || table.binding?.parentKeys?.length ? <>No rows match the selected document ID in <b>{table.binding?.repeatSource || 'source'}</b></> : <>No line items for <b>{table.binding?.repeatSource || 'items'}</b></>}</td></tr>}
-        {table.mode === 'dynamic' && page.runtimeRows.flatMap((runtimeRow) => { const formulaContext = mergeTableFormulaContext(runtimeRow.value, globalFormulaValues); const formulaResults = evaluateTableFormulaColumns(table, formulaContext); return table.bodyRows.map((template) => <RenderRow key={`${runtimeRow.key}:${template.id}`} row={template} table={table} runtimeValue={runtimeRow.value} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} onSelect={selectCell}/>); })}
-        {table.mode === 'dynamic' && page.includeSummary && table.customRows.map((row) => <RenderRow key={row.id} row={row} table={table} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} summaryResults={summaryResults.byCellId} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}
+        {table.mode === 'custom' && renderTable.rows.map((row) => <RenderRow key={row.id} row={row} table={renderTable} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} onSelect={selectCell}/>) }
+        {renderTable.mode === 'dynamic' && runtime.length === 0 && <tr><td className="db-table-empty" colSpan={Math.max(1, renderTable.columns.length)}>{table.binding?.parentKey || table.binding?.parentKeys?.length ? <>No rows match the selected document ID in <b>{table.binding?.repeatSource || 'source'}</b></> : <>No line items for <b>{table.binding?.repeatSource || 'items'}</b></>}</td></tr>}
+        {renderTable.mode === 'dynamic' && page.runtimeRows.flatMap((runtimeRow) => { const formulaContext = mergeTableFormulaContext(runtimeRow.value, globalFormulaValues); const formulaResults = evaluateTableFormulaColumns(renderTable, formulaContext); return renderTable.bodyRows.map((template) => <RenderRow key={`${runtimeRow.key}:${template.id}`} row={template} table={renderTable} runtimeValue={runtimeRow.value} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} onSelect={selectCell}/>); })}
+        {renderTable.mode === 'dynamic' && page.includeSummary && renderTable.customRows.map((row) => <RenderRow key={row.id} row={row} table={renderTable} runtimeValue={record ?? undefined} globalFormulaValues={globalFormulaValues} summaryResults={summaryResults.byCellId} onSelect={selectCell} onResizeColumn={startColumnResize}/>)}
       </tbody>
-    </table>
+    </table>}
     </div>})}
   </div>;
 }
@@ -145,7 +151,7 @@ function RenderRow({ row, table, runtimeValue, globalFormulaValues, formulaResul
     visualColumn += Math.max(1, cell.colSpan);
     const startColumn = visualColumn - Math.max(1, cell.colSpan);
     const endColumn = visualColumn - 1;
-    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={`${table.selectedCellId === cell.id ? 'selected-db-cell' : ''}${row.kind === 'header' ? ' db-table-header-cell' : ''}`} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} table={table} runtimeValue={runtimeValue} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} summaryValue={summaryResults?.[cell.id]}/>{row.kind === 'header' && cell.colSpan === 1 && endColumn < table.columns.length - 1 && onResizeColumn && <span className="db-column-resize-handle" title="Drag to resize this column" onPointerDown={(e) => onResizeColumn(e, startColumn)} aria-hidden="true"/>}</td>;
+    return <td key={cell.id} rowSpan={Math.max(1, cell.rowSpan)} colSpan={Math.max(1, cell.colSpan)} className={`${table.selectedCellId === cell.id ? 'selected-db-cell' : ''}${row.kind === 'header' ? ' db-table-header-cell' : ''}`} style={{ background: cell.style.background, color: cell.style.color, fontSize: cell.style.fontSize, fontWeight: cell.style.bold ? 700 : 400, textAlign: cell.style.align, verticalAlign: cell.style.verticalAlign, padding: cell.type === 'image' ? 0 : cell.style.padding }} onPointerDown={(e) => { e.stopPropagation(); onSelect(cell.id); }}><CellValue cell={cell} column={column} table={renderTable} runtimeValue={runtimeValue} globalFormulaValues={globalFormulaValues} formulaResults={formulaResults} summaryValue={summaryResults?.[cell.id]}/>{row.kind === 'header' && cell.colSpan === 1 && endColumn < renderTable.columns.length - 1 && onResizeColumn && <span className="db-column-resize-handle" title="Drag to resize this column" onPointerDown={(e) => onResizeColumn(e, startColumn)} aria-hidden="true"/>}</td>;
   })}</tr>;
 }
 
@@ -154,7 +160,7 @@ function CellValue({ cell, column, table, runtimeValue, globalFormulaValues, for
   const useMixedTemplate = templateHasTokens(cell.content);
   const boundRaw = cell.binding ? tableFieldValue(runtimeValue, globalFormulaValues, cell.binding) : undefined;
   const percentageFields: Record<string, { inputMode?: 'fraction' | 'whole' }> = {};
-  const designRows = table.mode === 'dynamic' ? table.bodyRows : table.rows;
+  const designRows = renderTable.mode === 'dynamic' ? table.bodyRows : table.rows;
   for (const designRow of designRows) {
     let visualColumn = 0;
     for (const designCell of designRow.cells) {
