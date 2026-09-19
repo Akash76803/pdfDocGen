@@ -153,6 +153,21 @@ export function toVisibilityRule(
 export const requiresValue = (operator: BuilderConditionOperator) =>
   operator !== 'isEmpty' && operator !== 'isNotEmpty';
 
+/**
+ * UX-8.2: filter render/layout inputs before Body Flow or pagination runs.
+ * Hidden elements must not reserve row height, gaps, or continuation pages.
+ */
+export function filterConditionallyVisible<T extends LegacyBuilderCondition & { conditionalRendering?: BuilderConditionalRendering }>(
+  items: T[],
+  resolveField: (field: string) => unknown,
+): T[] {
+  return items.filter((item) => {
+    const condition = normalizeConditionalRendering(item.conditionalRendering, item);
+    return evaluateBuilderConditionalRendering(condition, resolveField);
+  });
+}
+
+
 function normalizedText(value: unknown): string {
   return value == null ? '' : String(value).trim().toLocaleLowerCase();
 }
