@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectTableVisibleColumns, visibleTableColumnIndexes } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -620,4 +620,19 @@ describe('UX-8.4 table conditional rendering', () => {
     expect(projected.headerRows[0]!.cells[0]!.colSpan).toBe(1);
     expect(projected.bodyRows[0]!.cells).toHaveLength(2);
   });
-});
+
+
+  it('preserves a structural spacer width when a neighboring conditional column hides', () => {
+    const table=createCustomTable(4,1);
+    table.columns.forEach((column,index)=>{ column.manualWidth=true; column.width=[200,50,100,150][index]!; });
+    table.rows[0]!.cells[0]!.content='Amount in words';
+    table.rows[0]!.cells[1]!.content=''; // intentional gap column
+    table.rows[0]!.cells[2]!.content='Optional tax';
+    table.rows[0]!.cells[3]!.content='Net payable';
+    const full=stableConditionalColumnWidths(table,[0,1,2,3]);
+    const hidden=stableConditionalColumnWidths(table,[0,1,3]);
+    expect(full[1]).toBeCloseTo(10,6);
+    expect(hidden[1]).toBeCloseTo(10,6);
+    expect(hidden.reduce((sum,value)=>sum+value,0)).toBeCloseTo(100,6);
+    expect(hidden[2]).toBeGreaterThan(full[3]!);
+  });});
