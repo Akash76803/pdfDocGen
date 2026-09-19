@@ -1,5 +1,6 @@
 import type { FieldDefinition, NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
 import type { BuilderDataSource } from './dataSourceStore.ts';
+import { evaluateBuilderConditionalRendering, normalizeConditionalRendering, type BuilderConditionalRendering } from './conditionalRendering.ts';
 
 export type TableMode = 'dynamic' | 'custom';
 export type TableCellType = 'text' | 'image' | 'qr' | 'barcode';
@@ -93,6 +94,8 @@ export type GroupedFinalSummaryConfig = {
   columns: GroupedFinalSummaryColumn[];
 };
 
+export type TableColumnConditionScope = 'document' | 'anyRow' | 'allRows';
+
 export type TableColumn = {
   id: string;
   key: string;
@@ -105,6 +108,9 @@ export type TableColumn = {
   format?: TableDataFormat;
   /** DB-4P Fix1: user-controlled width hint. When true, smart sizing respects this column more strongly. */
   manualWidth?: boolean;
+  /** UX-8.4: whole-column visibility. */
+  conditionalRendering?: BuilderConditionalRendering;
+  conditionScope?: TableColumnConditionScope;
 };
 
 export type TableBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
@@ -143,6 +149,8 @@ export type TableDefinition = {
   borderStyle?: TableBorderStyle;
   defaultPadding: number;
   selectedCellId?: string;
+  /** UX-8.4: filter dynamic runtime rows before pagination/rendering. */
+  rowConditionalRendering?: BuilderConditionalRendering;
 };
 
 const defaultCellStyle = (): TableCellStyle => ({
@@ -1372,6 +1380,14 @@ export function dynamicRows(
     }
   }
 
+  const rowCondition = normalizeConditionalRendering(table.rowConditionalRendering);
+  if (rowCondition.enabled) {
+    filtered = filtered.filter((item) => evaluateBuilderConditionalRendering(rowCondition, (field) => {
+      const rowValue = valueAtPath(item, field);
+      return rowValue !== undefined ? rowValue : valueAtPath(record, field);
+    }));
+  }
+
   const grouping = table.binding.grouping;
   if (grouping?.groupBy?.length && grouping.columns?.length) {
     return groupedRuntimeRows(table, filtered, grouping);
@@ -1382,6 +1398,34 @@ export function dynamicRows(
     const configured = compositeKey(item, rowKeys);
     const rec = (item && typeof item === 'object' && !Array.isArray(item) ? item : { value: item }) as NormalizedRecord;
     return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: rec };
+  });
+}
+
+export function visibleTableColumnIndexes(
+  table: TableDefinition,
+  documentRecord: NormalizedRecord | null,
+  runtimeRows: TablePaginationRuntimeRow[],
+  resolveDocumentField?: (field: string) => unknown,
+): number[] {
+  const documentResolver = (field: string) => {
+    const resolved = resolveDocumentField?.(field);
+    return resolved !== undefined ? resolved : valueAtPath(documentRecord, field);
+  };
+  return table.columns.flatMap((column, index) => {
+    const condition = normalizeConditionalRendering(column.conditionalRendering);
+    if (!condition.enabled) return [index];
+    const scope = column.conditionScope ?? 'document';
+    let visible = true;
+    if (scope === 'document') visible = evaluateBuilderConditionalRendering(condition, documentResolver);
+    else if (scope === 'anyRow') visible = runtimeRows.some((runtimeRow) => evaluateBuilderConditionalRendering(condition, (field) => {
+      const rowValue = valueAtPath(runtimeRow.value, field);
+      return rowValue !== undefined ? rowValue : documentResolver(field);
+    }));
+    else visible = runtimeRows.length > 0 && runtimeRows.every((runtimeRow) => evaluateBuilderConditionalRendering(condition, (field) => {
+      const rowValue = valueAtPath(runtimeRow.value, field);
+      return rowValue !== undefined ? rowValue : documentResolver(field);
+    }));
+    return visible ? [index] : [];
   });
 }
 
