@@ -498,6 +498,33 @@ export function findTableCellLocation(table: TableDefinition, cellId: string | u
   return null;
 }
 
+export function tableColumnSelectionCellId(table: TableDefinition, columnId: string): string | undefined {
+  const columnIndex = table.columns.findIndex((column) => column.id === columnId);
+  if (columnIndex < 0) return undefined;
+  const preferredSections: Array<TableCellLocation['section']> = ['bodyRows', 'rows', 'headerRows', 'customRows'];
+  let fallback: string | undefined;
+  for (const section of preferredSections) {
+    for (const row of table[section]) {
+      let visual = 0;
+      for (const cell of row.cells) {
+        const span = Math.max(1, cell.colSpan);
+        if (columnIndex >= visual && columnIndex < visual + span) {
+          if (span === 1 && visual === columnIndex) return cell.id;
+          fallback ??= cell.id;
+          break;
+        }
+        visual += span;
+      }
+    }
+  }
+  return fallback;
+}
+
+export function selectTableColumn(table: TableDefinition, columnId: string): TableDefinition {
+  const cellId = tableColumnSelectionCellId(table, columnId);
+  return cellId ? { ...table, selectedCellId: cellId } : table;
+}
+
 function patchSection(table: TableDefinition, section: TableCellLocation['section'], rows: TableRow[]): TableDefinition {
   return { ...table, [section]: rows };
 }
