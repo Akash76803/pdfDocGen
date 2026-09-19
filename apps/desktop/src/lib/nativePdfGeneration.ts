@@ -10,8 +10,8 @@ import type {
   TableFooterRowDefinition,
   CustomTableBlock,
   DisplayFormatDefinition,
-  toApiSafePath,
 } from '@document-tool/contracts';
+import { toApiSafePath } from '@document-tool/contracts';
 import { TemplateEngine, createQrSvgDataUrl } from '@document-tool/template-engine';
 import { CombinedPdfRenderer, PdfRenderer } from '@document-tool/renderer-pdf';
 import type { BuilderDataSource } from './dataSourceStore.ts';
