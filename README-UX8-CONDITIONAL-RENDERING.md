@@ -57,11 +57,27 @@ Node 20.20.2 / npm 10.8.2:
 - 364/364 tests PASS
 - build PASS
 
+## UX-8.2 — Conditional Body Flow & Pagination
+
+Implemented:
+- condition-false Body elements are removed before Body Flow materialization
+- hidden Flow rows no longer reserve row height or before/after gaps
+- following Flow rows collapse upward automatically
+- Dynamic Table continuation planning runs only for visible elements
+- Builder output-page count recalculates from the current record
+- floating/header/footer conditional elements are skipped at the canvas render boundary
+- element tree keeps conditional items addressable and shows a small current-state marker
+
+Verification:
+- typecheck PASS
+- 68/68 test files PASS
+- 365/365 tests PASS
+- build PASS
+
 ## Next UX-8 work
 
-UX-8.2 / UX-8.3:
-- filter hidden Body Flow elements before Builder flow layout
-- collapse gaps and recalculate pagination in Builder preview
-- design-mode visibility aid for hidden conditional elements
+UX-8.3 / UX-8.4:
+- richer design-mode visibility aid for hidden conditional elements
 - conditional Global Watermark integration
-- broader table-specific conditional behavior
+- broader table row/column conditional behavior
+- native Fast PDF parity review
