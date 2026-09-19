@@ -73,6 +73,17 @@ describe('Phase 4.12 conditional visibility rules',()=>{
     expect(table.headerGroups[0]).toMatchObject({startColumnId:'cgst',colspan:2});
   });
 
+  it('evaluates page watermark visibility against the same document context',()=>{
+    const template=base([]);
+    template.page.watermark={enabled:true,type:'TEXT',text:'PAID',visibility:{path:'status',operator:'EQUALS',value:'PAID'}};
+    const visible=new TemplateEngine().buildRenderModel(template,group).model!;
+    expect(visible.page?.watermark?.enabled).toBe(true);
+
+    template.page.watermark.visibility={path:'status',operator:'EQUALS',value:'CANCELLED'};
+    const hidden=new TemplateEngine().buildRenderModel(template,group).model!;
+    expect(hidden.page?.watermark?.enabled).toBe(false);
+  });
+
   it('supports block rules in header/footer as well as body',()=>{
     const template=base([]);
     template.header.blocks=[{id:'h',type:'TEXT',text:'Header',visibility:{path:'status',operator:'EQUALS',value:'PAID'}}] as any;
