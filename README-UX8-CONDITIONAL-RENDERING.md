@@ -128,6 +128,31 @@ Verification:
 - build PASS (4.53s)
 - CI also caught and fixed a projected-TableCanvas scope issue before the final clean run.
 
+## UX-8.4 Fix2 — Conditional Table Auto Reflow
+
+Implemented:
+- Conditional columns are projected before Builder table pagination and height estimation.
+- Remaining visible content columns redistribute the available table width proportionally.
+- Intentional structural spacer columns keep their baseline width.
+- Conditional row filtering is applied before pagination, so removed rows no longer reserve table height.
+- `paginateDynamicTable` can consume the resolved conditional column-width plan for wrapped-row height estimation.
+- Body Flow materialization now uses the conditional runtime table geometry instead of the original unfiltered table schema.
+- The table's materialized fragment height therefore shrinks/grows with the visible rows and columns.
+- Following Flow rows are positioned from the recalculated table height, preserving the configured gap below the table.
+- Builder DOM height measurement is invalidated when resolved conditional column widths change.
+- Existing outer table element width remains the layout boundary; only its internal visible-column distribution and runtime height reflow.
+
+Verification:
+- Node 20.20.2 / npm 10.8.2
+- npm ci PASS (198 packages)
+- typecheck PASS
+- 68/68 test files PASS
+- 377/377 tests PASS
+- build PASS (4.52s)
+- Regression tests cover proportional width reflow, spacer preservation, conditional-column height shrink and row-condition height shrink.
+
+Manual visual smoke remains pending for the reported invoice cases.
+
 ## Next UX-8 work
 
 UX-8.5:
