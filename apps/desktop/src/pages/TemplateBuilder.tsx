@@ -15,7 +15,7 @@ import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode, type WatermarkSettings } from '../lib/pageModel.ts';
-import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode, type TableColumnConditionScope } from '../lib/tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode, type TableColumnConditionScope, projectConditionalRuntimeTable, visibleTableColumnIndexes } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
 import { ACTIVE_TEMPLATE_ID_KEY, beginNewTemplate, consumeTemplateBuilderAction, migrateLegacyTemplateToLibrary, saveTemplateToLibrary, TEMPLATE_STORAGE_KEY, type NewTemplateRequest, type TemplateDocumentType } from '../lib/templateLibrary.ts';
 import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowDistribution, type BodyFlowWidth } from '../lib/bodyFlow.ts';
@@ -1166,12 +1166,15 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       if (item.type !== 'table' || !item.table || item.table.mode !== 'dynamic' || item.table.pagination?.enabled === false) return undefined;
       const tableSource = dataState.sources.find((candidate) => candidate.id === item.table?.binding?.sourceId) ?? source;
       const runtimeRows = dynamicRows(item.table, record, tableSource, source, resolveCurrentBuilderField);
+      const visibleColumnIndexes = visibleTableColumnIndexes(item.table, record, runtimeRows, resolveCurrentBuilderField);
+      const conditionalLayout = projectConditionalRuntimeTable(item.table, visibleColumnIndexes, runtimeRows.map((row) => row.value));
       const plan = paginateDynamicTable(
-        item.table,
+        conditionalLayout.table,
         runtimeRows,
         Math.max(40, availableHeightPx),
         Math.max(40, continuationHeightPx),
         Math.max(80, item.width),
+        conditionalLayout.columnWidths,
       );
       tablePlans.set(item.id, plan);
       const finalPage = plan[plan.length - 1];
