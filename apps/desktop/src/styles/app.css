@@ -518,3 +518,18 @@
 
 /* DB-6B Fix9: explicit template-save confirmation */
 .template-save-toast{position:fixed;top:74px;right:22px;z-index:120;display:flex;align-items:center;gap:10px;min-width:260px;max-width:min(360px,calc(100vw - 32px));padding:11px 13px;border:1px solid #bbf7d0;border-radius:10px;background:#f0fdf4;color:#166534;box-shadow:0 14px 36px rgba(15,23,42,.16)}.template-save-toast>svg{flex:0 0 auto}.template-save-toast>span{display:grid;gap:2px}.template-save-toast strong{font-size:11px}.template-save-toast small{font-size:9px;color:#15803d}:root[data-theme="dark"] .template-save-toast{background:#10291c;border-color:#166534;color:#bbf7d0}:root[data-theme="dark"] .template-save-toast small{color:#86efac}
+
+
+/* UX-8.4 Fix3: Hidden conditional column recovery manager */
+.table-column-manager{margin:0 0 9px}
+.table-column-manager-list{display:grid;gap:6px}
+.table-column-manager-item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px;align-items:stretch}
+.table-column-manager-select{appearance:none;border:1px solid #e2e8f0;background:#fff;border-radius:9px;padding:8px 9px;display:flex;align-items:center;justify-content:space-between;gap:8px;text-align:left;cursor:pointer;color:#344054;min-width:0}
+.table-column-manager-select span{display:grid;gap:2px;min-width:0}.table-column-manager-select strong{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.table-column-manager-select small{font-size:9px;color:#98a2b3}
+.table-column-manager-select em{font-style:normal;font-size:9px;color:#667085;background:#f2f4f7;border-radius:999px;padding:3px 7px;white-space:nowrap}
+.table-column-manager-item.active .table-column-manager-select{border-color:#84adff;background:#eff6ff}.table-column-manager-item.active .table-column-manager-select strong{color:#155eef}
+.table-column-condition-disable{align-self:center;min-width:58px}
+:root[data-theme="dark"] .table-column-manager-select{background:#111827;border-color:#334155;color:#e5e7eb}
+:root[data-theme="dark"] .table-column-manager-item.active .table-column-manager-select{background:#172554;border-color:#3b82f6}
+:root[data-theme="dark"] .table-column-manager-select small{color:#94a3b8}
+:root[data-theme="dark"] .table-column-manager-select em{background:#1e293b;color:#cbd5e1}
