@@ -10,6 +10,7 @@ import type {
   TableFooterRowDefinition,
   CustomTableBlock,
   DisplayFormatDefinition,
+  toApiSafePath,
 } from '@document-tool/contracts';
 import { TemplateEngine, createQrSvgDataUrl } from '@document-tool/template-engine';
 import { CombinedPdfRenderer, PdfRenderer } from '@document-tool/renderer-pdf';
@@ -18,6 +19,7 @@ import { displayValue, valueForField } from './dataSourceStore.ts';
 import { loadImageAsset } from './imageAssetStore.ts';
 import { normalizePageSettings, type PageSettings, type WatermarkSettings } from './pageModel.ts';
 import { amountToIndianWords } from './numberToWords.ts';
+import { toVisibilityRule, type BuilderConditionalRendering } from './conditionalRendering.ts';
 import {
   dynamicRows,
   evaluateTableFormula,
@@ -48,7 +50,7 @@ type BuilderElement = {
   imageBackground?: string; imageOpacity?: number; imageBorderStyle?: 'none'|'solid'|'dashed'|'dotted'; imageBorderWidth?: number; imageBorderColor?: string; imageBorderRadius?: number;
   imageBrightness?: number; imageContrast?: number; imageSaturation?: number; imageGrayscale?: number; imageSepia?: number; imageBlur?: number;
   imageShadowEnabled?: boolean; imageOriginalAssetId?: string; imageOriginalSource?: string;
-  shapeKind?: string; shapeContentMode?: string; shapeMediaBinding?: string; shapeFillType?: string; shapeFillColor2?: string; shapeStrokeStyle?: string; shapeStrokeWidth?: number; shapeStrokeAlignment?: string; shapeCornerRadius?: number; shapeShadowEnabled?: boolean; shapeGlowEnabled?: boolean; shapeClipMedia?: boolean; shapeMediaOverlayOpacity?: number; conditionEnabled?: boolean;
+  shapeKind?: string; shapeContentMode?: string; shapeMediaBinding?: string; shapeFillType?: string; shapeFillColor2?: string; shapeStrokeStyle?: string; shapeStrokeWidth?: number; shapeStrokeAlignment?: string; shapeCornerRadius?: number; shapeShadowEnabled?: boolean; shapeGlowEnabled?: boolean; shapeClipMedia?: boolean; shapeMediaOverlayOpacity?: number; conditionalRendering?: BuilderConditionalRendering; conditionEnabled?: boolean; conditionField?: string; conditionOperator?: any; conditionValue?: string;
   qrForeground?: string; qrBackground?: string; qrQuietZone?: number; qrErrorCorrection?: string; qrShowValue?: boolean;
   barcodeForeground?: string; barcodeBackground?: string; barcodeShowText?: boolean; barcodeTextSize?: number; barcodeBarHeight?: number; barcodeQuietZone?: number;
   table?: TableDefinition; region?: 'body'|'header'|'footer'; layoutMode?: 'flow'|'floating'; flowRowId?: string;
@@ -246,7 +248,7 @@ async function prepareNativeTemplate(raw:string|null,source:BuilderDataSource):P
     const footerElements=master.filter((e)=>(e.region??'body')==='footer');
     const template:TemplateDefinition={
       id:`builder-native:${page.id}`,name:saved.name?.trim()||'Document',version:1,
-      page:toPageDefinition(page.settings),
+      page:toPageDefinition(page.settings,formulaMap),
       header:{blocks:page.settings.header.enabled?await convertRegion(headerElements,formulaMap,tableMedia,customMedia):[]},
       body:{blocks:await convertBody(bodyElements,formulaMap,tableMedia,customMedia)},
       footer:{blocks:page.settings.footer.enabled?await convertRegion(footerElements,formulaMap,tableMedia,customMedia):[]},
@@ -302,12 +304,12 @@ function normalizedBuilderPages(saved:SavedBuilderTemplate):BuilderPage[]{
   return [{id:'page-1',name:'Page 1',settings,elements:saved.elements??[]}];
 }
 function defaultLegacySettings(saved:SavedBuilderTemplate):PageSettings{return {preset:(saved.pageSize as any)||'A4',orientation:(saved.orientation as any)||'Portrait',unit:'mm',customWidthMm:210,customHeightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},bleedMm:{top:0,right:0,bottom:0,left:0},safeAreaMm:5,background:'#ffffff',borderColor:'#d2d8e0',borderWidth:0,borderAlignment:'inside',borderOffsetMm:0,showGuides:false,header:{enabled:false,heightMm:20,gapMm:5,repeat:'every'},footer:{enabled:false,heightMm:15,gapMm:5,repeat:'every'},watermark:{enabled:false,type:'text',text:'CONFIDENTIAL',opacity:20,rotation:-45,fontSize:56,color:'#64748B',position:'center',scale:60,customXPercent:50,customYPercent:50,applyTo:'all',layer:'behind'}};}
-function toPageDefinition(s:PageSettings):TemplateDefinition['page']{
+function toPageDefinition(s:PageSettings,formulaMap:Map<string,string>=new Map()):TemplateDefinition['page']{
   const preset=String(s.preset).toUpperCase();const size=(preset==='LETTER'||preset==='LEGAL'||preset==='TABLOID'||preset==='LEDGER'||preset==='EXECUTIVE'||/^[AB][0-9]+$/.test(preset))?preset:'CUSTOM';
   const headerMode=s.header.repeat==='first'?'FIRST_PAGE_ONLY':s.header.repeat==='exceptFirst'?'EXCEPT_FIRST':'EVERY_PAGE';
   const footerMode=s.footer.enabled?(s.footer.repeat==='first'?'FIRST_PAGE_ONLY':s.footer.repeat==='exceptFirst'?'EXCEPT_FIRST':'REPEAT_PAGE'):'FLOW';
   const watermarkPosition=s.watermark.position.replace(/-/g,'_').toUpperCase();
-  return {size:size as any,orientation:s.orientation==='Landscape'?'LANDSCAPE':'PORTRAIT',margins:{...s.marginsMm},customWidthMm:s.customWidthMm,customHeightMm:s.customHeightMm,backgroundColor:s.background,border:{enabled:s.borderWidth>0,style:'SOLID',width:s.borderWidth,color:s.borderColor,offset:s.borderOffsetMm},pagination:{repeatHeader:s.header.enabled&&s.header.repeat==='every',headerMode:s.header.enabled?headerMode:'FIRST_PAGE_ONLY',footerMode,showPageNumbers:false,keepSummaryTogether:true,keepCustomGridTogether:true},watermark:{enabled:s.watermark.enabled,type:s.watermark.type==='image'?'IMAGE':'TEXT',text:s.watermark.text,imageSource:s.watermark.imageSource,opacity:Math.max(0,Math.min(1,s.watermark.opacity/100)),rotation:s.watermark.rotation,fontSize:Math.max(6,s.watermark.fontSize*72/96),color:s.watermark.color,position:(['CENTER','TOP_LEFT','TOP_RIGHT','BOTTOM_LEFT','BOTTOM_RIGHT','CUSTOM'].includes(watermarkPosition)?watermarkPosition:'CENTER') as NonNullable<TemplateDefinition['page']['watermark']>['position'],scale:Math.max(.05,Math.min(2,s.watermark.scale/100)),customXPercent:Math.max(0,Math.min(100,s.watermark.customXPercent)),customYPercent:Math.max(0,Math.min(100,s.watermark.customYPercent)),applyTo:s.watermark.applyTo==='first'?'FIRST_PAGE':'ALL',layer:s.watermark.layer==='above'?'ABOVE':'BEHIND'}};
+  return {size:size as any,orientation:s.orientation==='Landscape'?'LANDSCAPE':'PORTRAIT',margins:{...s.marginsMm},customWidthMm:s.customWidthMm,customHeightMm:s.customHeightMm,backgroundColor:s.background,border:{enabled:s.borderWidth>0,style:'SOLID',width:s.borderWidth,color:s.borderColor,offset:s.borderOffsetMm},pagination:{repeatHeader:s.header.enabled&&s.header.repeat==='every',headerMode:s.header.enabled?headerMode:'FIRST_PAGE_ONLY',footerMode,showPageNumbers:false,keepSummaryTogether:true,keepCustomGridTogether:true},watermark:{enabled:s.watermark.enabled,type:s.watermark.type==='image'?'IMAGE':'TEXT',text:s.watermark.text,imageSource:s.watermark.imageSource,opacity:Math.max(0,Math.min(1,s.watermark.opacity/100)),rotation:s.watermark.rotation,fontSize:Math.max(6,s.watermark.fontSize*72/96),color:s.watermark.color,position:(['CENTER','TOP_LEFT','TOP_RIGHT','BOTTOM_LEFT','BOTTOM_RIGHT','CUSTOM'].includes(watermarkPosition)?watermarkPosition:'CENTER') as NonNullable<TemplateDefinition['page']['watermark']>['position'],scale:Math.max(.05,Math.min(2,s.watermark.scale/100)),customXPercent:Math.max(0,Math.min(100,s.watermark.customXPercent)),customYPercent:Math.max(0,Math.min(100,s.watermark.customYPercent)),applyTo:s.watermark.applyTo==='first'?'FIRST_PAGE':'ALL',layer:s.watermark.layer==='above'?'ABOVE':'BEHIND',...(toVisibilityRule(s.watermark.conditionalRendering,(field)=>{const rewritten=rewriteFormulaPath(field,formulaMap)??field;return rewritten!==field?rewritten:toApiSafePath(field);})?{visibility:toVisibilityRule(s.watermark.conditionalRendering,(field)=>{const rewritten=rewriteFormulaPath(field,formulaMap)??field;return rewritten!==field?rewritten:toApiSafePath(field);})}:{})}};
 }
 function findParentKeys(elements:BuilderElement[],sourceId:string){for(const e of elements){if(e.type==='table'&&e.table?.mode==='dynamic'&&(!e.table.binding?.sourceId||e.table.binding.sourceId===sourceId)){const keys=e.table.binding?.parentKeys?.filter(Boolean)??(e.table.binding?.parentKey?[e.table.binding.parentKey]:[]);if(keys.length)return keys;}}return [] as string[];}
 
