@@ -3,17 +3,18 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import type { NormalizedRecord } from '@document-tool/contracts';
 import { type BuilderDataSource } from '../lib/dataSourceStore.ts';
 import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
-import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, paginateDynamicTable, projectTableVisibleColumns, stableConditionalColumnWidths, visibleTableColumnIndexes, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
+import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, paginateDynamicTable, projectConditionalRuntimeTable, visibleTableColumnIndexes, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
 import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.ts';
 
 export function TableCanvas({ table, record, source, documentSource, globalFormulaValues = {}, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; globalFormulaValues?: Record<string, unknown>; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => (onSelectionChange ?? onChange)({ ...table, selectedCellId: cellId });
   const runtime = dynamicRows(table, record, source, documentSource, (field) => globalFormulaValue(globalFormulaValues, field));
   const visibleColumnIndexes = visibleTableColumnIndexes(table, record, runtime, (field) => globalFormulaValue(globalFormulaValues, field));
-  const renderTable = projectTableVisibleColumns(table, visibleColumnIndexes);
-  const columnWidths = stableConditionalColumnWidths(table, visibleColumnIndexes, runtime.map((row) => row.value));
+  const conditionalLayout = projectConditionalRuntimeTable(table, visibleColumnIndexes, runtime.map((row) => row.value));
+  const renderTable = conditionalLayout.table;
+  const columnWidths = conditionalLayout.columnWidths;
   const summaryResults = renderTable.mode === 'dynamic' ? evaluateTableSummaryRows(renderTable, runtime.map((row) => row.value), globalFormulaValues) : { byCellId: {}, byName: {} };
-  const paginationPages = renderTable.mode === 'dynamic' ? paginateDynamicTable(renderTable, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760)) : [];
+  const paginationPages = renderTable.mode === 'dynamic' ? paginateDynamicTable(renderTable, runtime, Math.max(80, availableHeight ?? 999999), Math.max(80, continuationAvailableHeight ?? availableHeight ?? 999999), Math.max(80, availableWidth ?? 760), columnWidths) : [];
   const renderedPages = fragmentIndex === undefined ? paginationPages : paginationPages.filter((page) => page.index === fragmentIndex);
   const shellRef = useRef<HTMLDivElement | null>(null);
   const tableRef = useRef<HTMLTableElement | null>(null);
@@ -27,7 +28,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
   const lastPublishedHeightRef = useRef<number | null>(null);
   useEffect(() => { onHeightChangeRef.current = onHeightChange; }, [onHeightChange]);
 
-  const tableStructureKey = `${table.id}:${table.mode}:${renderTable.columns.map((column)=>column.id).join(',')}:${renderTable.headerRows.length}:${renderTable.bodyRows.length}:${renderTable.customRows.length}:${renderTable.rows.length}:${runtime.length}`;
+  const tableStructureKey = `${table.id}:${table.mode}:${renderTable.columns.map((column)=>column.id).join(',')}:${columnWidths.map((width)=>width.toFixed(3)).join(',')}:${renderTable.headerRows.length}:${renderTable.bodyRows.length}:${renderTable.customRows.length}:${renderTable.rows.length}:${runtime.length}`;
 
   useLayoutEffect(() => {
     const shell = shellRef.current;
