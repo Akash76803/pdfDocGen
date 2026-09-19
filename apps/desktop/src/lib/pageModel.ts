@@ -1,3 +1,4 @@
+import type { BuilderConditionalRendering } from './conditionalRendering.ts';
 export type PagePreset = 'A3' | 'A4' | 'A5' | 'Letter' | 'Legal' | 'Tabloid' | 'Executive' | 'Custom';
 export type PageOrientation = 'Portrait' | 'Landscape';
 export type PageUnit = 'mm' | 'cm' | 'in';
@@ -21,6 +22,7 @@ export type WatermarkSettings = {
   customYPercent: number;
   applyTo: WatermarkApplyTo;
   layer: WatermarkLayer;
+  conditionalRendering?: BuilderConditionalRendering;
 };
 export type ContentBorderAlignment = 'inside' | 'center' | 'outside';
 

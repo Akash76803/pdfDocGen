@@ -48,3 +48,15 @@ describe('DB-5G native renderer coverage', () => {
     expect((pdf.match(/ re f/g)||[]).length).toBeGreaterThan(10);
   });
 });
+
+
+describe('UX-8.4 Native conditional parity', () => {
+  it('keeps universal conditional elements eligible for Native mode', () => {
+    const saved={name:'ConditionalNative',pages:[{id:'p1',name:'One',settings:pageSettings,elements:[
+      element('conditional','text',{text:'Approved',conditionalRendering:{enabled:true,action:'show',match:'all',rules:[{id:'r',field:'Status',operator:'equals',value:'Approved'}]}}),
+    ]}]};
+    const result=analyzeNativePdfCompatibility(JSON.stringify(saved),source);
+    expect(result.reasons).not.toContain('Conditional element visibility currently requires Exact Preview for visual fidelity.');
+    expect(result.supported).toBe(true);
+  });
+});

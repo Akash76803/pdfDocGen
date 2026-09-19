@@ -15,7 +15,7 @@ import { TableCreateModal } from '../components/TableCreateModal.tsx';
 import { NewTemplateModal } from '../components/NewTemplateModal.tsx';
 import { TableCanvas } from '../components/TableCanvas.tsx';
 import { defaultPageSettings, normalizePageSettings, contentBoundsPx, headerBoundsPx, footerBoundsPx, repeatModeShows, mmToPx, mmToUnit, unitLabel, pagePixelSize, pageSizeMm, unitToMm, type PageSettings, type PagePreset, type PageOrientation, type PageUnit, type PageRepeatMode, type WatermarkSettings } from '../lib/pageModel.ts';
-import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode } from '../lib/tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, deleteTableColumn, deleteTableRow, duplicateTableRow, findTableCell, findTableCellLocation, moveTableColumn, moveTableRow, recommendedParentKey, recommendedRowKey, tableHasMergedColumns, updateTableCell, equalizeTableColumnWidths, resetTableColumnAutoWidth, setTableColumnManualWidth, updateTableColumn, updateTableRow, formulaColumnReferences, summaryFieldOptions, summaryValueReferences, dynamicRows, paginateDynamicTable, evaluateTableFormula, normalizeTableFormulaReferences, type TableAggregateOperation, type TableDataFormat, type TableDataType, type TableDefinition, type TableCellType, type TableValueMode, type TableColumnConditionScope, projectConditionalRuntimeTable, selectTableColumn, visibleTableColumnIndexes } from '../lib/tableModel.ts';
 import { matchTemplateTokenField, resolveTemplateTokens, templateHasTokens, tokenForField, type TemplateTokenField } from '../lib/templateTokens.ts';
 import { ACTIVE_TEMPLATE_ID_KEY, beginNewTemplate, consumeTemplateBuilderAction, migrateLegacyTemplateToLibrary, saveTemplateToLibrary, TEMPLATE_STORAGE_KEY, type NewTemplateRequest, type TemplateDocumentType } from '../lib/templateLibrary.ts';
 import { insertFlowElementByVisualY, layoutBodyFlow, materializeBodyFlowPages, moveFlowRow, newFlowRowId, shouldCommitMeasuredFlowHeight, synchronizeFlowRowHeights, flowRowKey, type BodyLayoutMode, type BodyFlowAlign, type BodyFlowDistribution, type BodyFlowWidth } from '../lib/bodyFlow.ts';
@@ -27,6 +27,7 @@ import { amountToIndianWords } from '../lib/numberToWords.ts';
 import { getPdfRenderProfile } from '../lib/pdfRenderProfile.ts';
 import { appendGenerationHistory, clearGenerationProgress, clearGenerationRequest, GENERATION_REQUEST_EVENT, readGenerationRequest, writeGenerationProgress, type GenerationRequest } from '../lib/generationEngine.ts';
 import { buildCurrentDocumentJsonBody, buildTemplateInputContract, type TemplateInputContractResult, type TemplateJsonBodyResult } from '../lib/templateJsonBody.ts';
+import { evaluateBuilderConditionalRendering, filterConditionallyVisible, normalizeConditionalRendering, requiresValue, type BuilderConditionalRendering, type BuilderConditionOperator } from '../lib/conditionalRendering.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'content' | 'binding' | 'rows' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -113,9 +114,11 @@ type BuilderElement = {
   shapeGlowBlur?: number;
   shapeGlowColor?: string;
   shapeGlowOpacity?: number;
+  /** UX-8 universal condition model. Legacy single-condition fields remain readable for migration. */
+  conditionalRendering?: BuilderConditionalRendering;
   conditionEnabled?: boolean;
   conditionField?: string;
-  conditionOperator?: 'equals'|'notEquals'|'contains'|'notContains'|'isEmpty'|'isNotEmpty'|'greaterThan'|'lessThan';
+  conditionOperator?: BuilderConditionOperator;
   conditionValue?: string;
   qrForeground?: string;
   qrBackground?: string;
@@ -208,6 +211,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   }));
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [activePreviewPageIndex, setActivePreviewPageIndex] = useState(0);
+  const [showHiddenConditional, setShowHiddenConditional] = useState(false);
   const [status, setStatus] = useState('Draft');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState<{ message: string; timestamp: string } | null>(null);
@@ -291,6 +295,23 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const formulaAggregateRows = source ? documentFormulaAggregateRows(source, record, pages.flatMap((page) => page.elements)) : [];
   const formulaTokenFields: TemplateTokenField[] = formulaElements.map((item) => ({ name: item.formulaName!.trim(), label: item.formulaName!.trim() }));
   const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
+  const resolveCurrentBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
+  const isElementVisibleForCurrentRecord = (item: BuilderElement) => {
+    const condition = normalizeConditionalRendering(item.conditionalRendering, {
+      conditionEnabled: item.conditionEnabled,
+      conditionField: item.conditionField,
+      conditionOperator: item.conditionOperator,
+      conditionValue: item.conditionValue,
+    });
+    return evaluateBuilderConditionalRendering(condition, resolveCurrentBuilderField);
+  };
+  const watermarkVisibleForCurrentRecord = evaluateBuilderConditionalRendering(pageSettings.watermark.conditionalRendering, resolveCurrentBuilderField);
+  const hiddenConditionalElements = elements.filter((item) => item.type !== 'formula' && normalizeConditionalRendering(item.conditionalRendering, {
+    conditionEnabled:item.conditionEnabled,
+    conditionField:item.conditionField,
+    conditionOperator:item.conditionOperator,
+    conditionValue:item.conditionValue,
+  }).enabled && !isElementVisibleForCurrentRecord(item));
   const selected = formulaElements.find((item) => item.id === selectedId) ?? masterBandElements.find((item) => item.id === selectedId) ?? elements.find((item) => item.id === selectedId) ?? null;
   useEffect(() => {
     if (!selected && (tab === 'content' || tab === 'binding' || tab === 'formatting' || tab === 'conditions' || tab === 'rows')) setTab('properties');
@@ -1139,18 +1160,21 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
 
 
   function buildBodyMaterialization(pageElements: BuilderElement[], settings: PageSettings) {
-    const body = pageElements.filter((item) => (item.region ?? 'body') === 'body');
+    const body = filterConditionallyVisible(pageElements.filter((item) => (item.region ?? 'body') === 'body'), resolveCurrentBuilderField);
     const tablePlans = new Map<string, ReturnType<typeof paginateDynamicTable>>();
     const materialized = materializeBodyFlowPages(body, settings, (item, _pageIndex, _y, availableHeightPx, continuationHeightPx) => {
       if (item.type !== 'table' || !item.table || item.table.mode !== 'dynamic' || item.table.pagination?.enabled === false) return undefined;
       const tableSource = dataState.sources.find((candidate) => candidate.id === item.table?.binding?.sourceId) ?? source;
-      const runtimeRows = dynamicRows(item.table, record, tableSource, source);
+      const runtimeRows = dynamicRows(item.table, record, tableSource, source, resolveCurrentBuilderField);
+      const visibleColumnIndexes = visibleTableColumnIndexes(item.table, record, runtimeRows, resolveCurrentBuilderField);
+      const conditionalLayout = projectConditionalRuntimeTable(item.table, visibleColumnIndexes, runtimeRows.map((row) => row.value));
       const plan = paginateDynamicTable(
-        item.table,
+        conditionalLayout.table,
         runtimeRows,
         Math.max(40, availableHeightPx),
         Math.max(40, continuationHeightPx),
         Math.max(80, item.width),
+        conditionalLayout.columnWidths,
       );
       tablePlans.set(item.id, plan);
       const finalPage = plan[plan.length - 1];
@@ -1292,7 +1316,11 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <div className="page-tree-actions"><button onClick={duplicatePage} title="Duplicate page">⧉</button><button onClick={() => movePage(-1)} title="Move page up">↑</button><button onClick={() => movePage(1)} title="Move page down">↓</button><button className="danger-lite" onClick={deletePage} disabled={pages.length <= 1} title="Delete page">×</button></div>
           <div className="section-title document-tree"><span>Elements</span></div>
           <div className="element-tree">
-            {elements.map((item, index) => <button key={item.id} className={item.id === selectedId ? 'element-row active' : 'element-row'} onClick={() => setSelectedId(item.id)}><span>{index + 1}</span><b>{item.type === 'formula' ? `Formula · ${item.formulaName || 'Unnamed'}` : labelFor(item.type)}</b>{(item.region ?? 'body') !== 'body' ? <small className={`region-badge ${(item.region ?? 'body')}`}>{(item.region ?? 'body') === 'header' ? 'H' : 'F'}</small> : null}</button>)}
+            {elements.map((item, index) => {
+              const conditional = normalizeConditionalRendering(item.conditionalRendering, { conditionEnabled:item.conditionEnabled, conditionField:item.conditionField, conditionOperator:item.conditionOperator, conditionValue:item.conditionValue });
+              const visible = item.type === 'formula' ? true : isElementVisibleForCurrentRecord(item);
+              return <button key={item.id} className={item.id === selectedId ? 'element-row active' : 'element-row'} onClick={() => setSelectedId(item.id)}><span>{index + 1}</span><b>{item.type === 'formula' ? `Formula · ${item.formulaName || 'Unnamed'}` : labelFor(item.type)}</b>{conditional.enabled ? <small title={visible?'Condition currently visible':'Condition currently hidden'}>{visible?'◆':'◇'}</small> : null}{(item.region ?? 'body') !== 'body' ? <small className={`region-badge ${(item.region ?? 'body')}`}>{(item.region ?? 'body') === 'header' ? 'H' : 'F'}</small> : null}</button>;
+            })}
           </div>
         </aside>
         {!leftOpen && <button className="panel-expand expand-left" title="Open elements panel" onClick={() => setLeftOpen(true)}><ChevronRight size={16}/></button>}
@@ -1304,18 +1332,25 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
             <strong>{zoom}%</strong>
             <button title="Zoom in" onClick={() => setZoom(Math.min(160, zoom + 10))}><ZoomIn size={16}/></button>
             <button onClick={() => setZoom(92)}>Fit</button>
+            <span className="separator"/>
+            <button type="button" className={showHiddenConditional?'active':''} title="Show elements currently hidden by conditions" onClick={() => setShowHiddenConditional((value) => !value)}><Eye size={15}/>Hidden {hiddenConditionalElements.length}</button>
           </div>
-          <div className="page-wrap virtual-page-stack">
+          {showHiddenConditional && hiddenConditionalElements.length > 0 ? <div className="condition-design-strip" data-design-only="true">
+            <strong>Hidden by current record</strong>
+            {hiddenConditionalElements.map((item) => <button type="button" className="secondary compact" key={item.id} onClick={() => { setSelectedId(item.id); setTab('conditions'); }}>{labelFor(item.type)} · {item.id.slice(0,8)}</button>)}
+          </div> : null}
+                    <div className="page-wrap virtual-page-stack">
             {Array.from({ length: virtualPageCount }, (_, virtualPageIndex) => (
               <div className={`virtual-page-frame${activePreviewPageIndex === virtualPageIndex ? ' active-preview-page' : ''}`} data-virtual-page-index={virtualPageIndex} key={`virtual-page-${virtualPageIndex}`} style={{ width: previewPagePixels.width * previewScale, height: previewPagePixels.height * previewScale }} onPointerDown={() => setActivePreviewPageIndex(virtualPageIndex)}>
                 <div className="virtual-page-label">{activePage?.name || 'Page'}{virtualPageIndex > 0 ? ` · Continuation ${virtualPageIndex + 1}` : ''}<span>{virtualPageIndex + 1} / {virtualPageCount}</span></div>
                 <div className="document-page" data-export-page="true" data-builder-page-id={activePage?.id} data-continuation-index={virtualPageIndex} data-document-page-index={documentPageOffset + virtualPageIndex} style={{ ...pageCanvasStyle(pageSettings), transform: `scale(${zoom / 100})` }} onPointerDown={(event) => { if (event.target === event.currentTarget) setSelectedId(null); }}>
                   <PageContentBorder settings={pageSettings}/>
-                  <PageWatermarkPreview settings={pageSettings} runtimePageIndex={documentPageOffset + virtualPageIndex} layer="behind"/>
+                  <PageWatermarkPreview settings={pageSettings} runtimePageIndex={documentPageOffset + virtualPageIndex} layer="behind" conditionVisible={watermarkVisibleForCurrentRecord}/>
                   {pageSettings.showGuides && <PageGuides settings={pageSettings}/>} 
                   {virtualPageIndex === 0 && elements.length === 0 && <div className="page-empty"><span>{pageSettings.preset} DOCUMENT</span><strong>Start building your template</strong><small>Click an element from the left panel. You can then move, resize and edit it.</small></div>}
                   {elements.map((item) => {
                     if (item.type === 'formula') return null;
+                    if (!isElementVisibleForCurrentRecord(item)) return null;
                     const region = item.region ?? 'body';
                     const runtimePageIndex = documentPageOffset + virtualPageIndex;
                     const isHeader = region === 'header' && pageSettings.header.enabled && repeatModeShows(pageSettings.header.repeat, runtimePageIndex);
@@ -1359,7 +1394,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
 
                     return <CanvasElement key={`${item.id}:vp:${virtualPageIndex}`} item={renderItem} selected={item.id === selectedId} zoom={zoom} pageSettings={pageSettings} record={record} source={source} sources={dataState.sources} formulaElements={formulaElements} formulaAggregateRows={formulaAggregateRows} virtualPageIndex={isPaginatedTable ? tableFragmentIndex : virtualPageIndex} virtualPageCount={virtualPageCount} runtimePageIndex={runtimePageIndex} runtimePageCount={documentOutputPageCount} virtualPageMode={isPaginatedTable} repeatedBandElement={(activePageId !== masterPage?.id || virtualPageIndex > 0) && (isHeader || isFooter)} onSelect={() => setSelectedId(item.id)} onHistoryStart={beginHistoryGesture} onHistoryEnd={endHistoryGesture} onSelectionChange={(table) => { setElementsRaw((current) => current.map((entry) => entry.id === item.id ? { ...entry, table } : entry)); }} onLayoutChange={(patch) => { if (shouldCommitMeasuredFlowHeight(virtualPageIndex, isPaginatedTable)) setElementsRaw((current) => synchronizeFlowRowHeights(current.map((entry) => entry.id === item.id ? { ...entry, ...patch } : entry))); }} onChange={(patch) => updateCanvasElement(item, patch)}/>;
                   })}
-                  <PageWatermarkPreview settings={pageSettings} runtimePageIndex={documentPageOffset + virtualPageIndex} layer="above"/>
+                  <PageWatermarkPreview settings={pageSettings} runtimePageIndex={documentPageOffset + virtualPageIndex} layer="above" conditionVisible={watermarkVisibleForCurrentRecord}/>
                 </div>
               </div>
             ))}
@@ -1461,7 +1496,13 @@ function CanvasElement({ item, selected, zoom, pageSettings, record, source, sou
 
 function ElementContent({ item, pageSettings, record, source, sources, formulaElements, formulaAggregateRows, virtualPageIndex = 0, virtualPageCount = 1, runtimePageIndex = virtualPageIndex, runtimePageCount = virtualPageCount, virtualPageMode = false, onElementSelect, onTableChange, onTableSelectionChange, onTableHistoryStart, onTableHistoryEnd, onTableHeightChange }: { item: BuilderElement; pageSettings: PageSettings; record: ReturnType<typeof activeRecord>; source: ReturnType<typeof activeSource>; sources: BuilderDataState['sources']; formulaElements: BuilderElement[]; formulaAggregateRows: NormalizedRecord[]; virtualPageIndex?: number; virtualPageCount?: number; runtimePageIndex?: number; runtimePageCount?: number; virtualPageMode?: boolean; repeatedBandElement?: boolean; onElementSelect: () => void; onTableChange: (table: TableDefinition) => void; onTableSelectionChange: (table: TableDefinition) => void; onTableHistoryStart: () => void; onTableHistoryEnd: () => void; onTableHeightChange?: (height: number) => void }) {
   const resolveBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
-  if (item.conditionEnabled && item.conditionField && !evaluateElementCondition(item, resolveBuilderField(item.conditionField))) return null;
+  const effectiveCondition = normalizeConditionalRendering(item.conditionalRendering, {
+    conditionEnabled: item.conditionEnabled,
+    conditionField: item.conditionField,
+    conditionOperator: item.conditionOperator,
+    conditionValue: item.conditionValue,
+  });
+  if (!evaluateBuilderConditionalRendering(effectiveCondition, resolveBuilderField)) return null;
   const bound = item.binding ? resolveBuilderField(item.binding) : undefined;
   const hasMixedTokens = templateHasTokens(item.text);
   const rawRendered = !hasMixedTokens && item.binding && bound !== undefined ? displayValue(bound) : item.text;
@@ -1799,9 +1840,9 @@ function PageGuides({ settings }: { settings: PageSettings }) {
   </>;
 }
 
-function PageWatermarkPreview({ settings, runtimePageIndex, layer }: { settings: PageSettings; runtimePageIndex: number; layer: 'behind'|'above' }) {
+function PageWatermarkPreview({ settings, runtimePageIndex, layer, conditionVisible=true }: { settings: PageSettings; runtimePageIndex: number; layer: 'behind'|'above'; conditionVisible?: boolean }) {
   const watermark=settings.watermark;
-  if(!watermark.enabled||watermark.layer!==layer||(watermark.applyTo==='first'&&runtimePageIndex>0))return null;
+  if(!watermark.enabled||!conditionVisible||watermark.layer!==layer||(watermark.applyTo==='first'&&runtimePageIndex>0))return null;
   const positions:Record<string,{left:string;top:string}>={center:{left:'50%',top:'50%'},'top-left':{left:'15%',top:'15%'},'top-right':{left:'85%',top:'15%'},'bottom-left':{left:'15%',top:'85%'},'bottom-right':{left:'85%',top:'85%'},custom:{left:`${Math.max(0,Math.min(100,watermark.customXPercent))}%`,top:`${Math.max(0,Math.min(100,watermark.customYPercent))}%`}};
   const point=positions[watermark.position]??positions.center!;
   const common:CSSProperties={position:'absolute',left:point.left,top:point.top,transform:`translate(-50%, -50%) rotate(${watermark.rotation}deg)`,opacity:Math.max(0,Math.min(100,watermark.opacity))/100,pointerEvents:'none',userSelect:'none',zIndex:layer==='above'?50:0};
@@ -1810,7 +1851,7 @@ function PageWatermarkPreview({ settings, runtimePageIndex, layer }: { settings:
   return null;
 }
 
-function PageProperties({ settings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onChange, onName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onEditHeader, onEditFooter }: { settings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; onFocusPreviewPage: (index: number) => void; onChange: (patch: Partial<PageSettings>) => void; onName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void; onEditHeader: () => void; onEditFooter: () => void }) {
+function PageProperties({ settings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, fields, resolveField, onFocusPreviewPage, onChange, onName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onEditHeader, onEditFooter }: { settings: PageSettings; pageName: string; pages: BuilderPage[]; activePageId: string; virtualPageCount: number; activePreviewPageIndex: number; fields: TemplateTokenField[]; resolveField: (field:string)=>unknown; onFocusPreviewPage: (index: number) => void; onChange: (patch: Partial<PageSettings>) => void; onName: (value: string) => void; onAddPage: () => void; onDuplicatePage: () => void; onDeletePage: () => void; onMovePage: (direction: -1 | 1) => void; onSelectPage: (pageId: string) => void; onEditHeader: () => void; onEditFooter: () => void }) {
   const [linkMargins, setLinkMargins] = useState(false);
   const [linkBleed, setLinkBleed] = useState(true);
   const size = pageSizeMm(settings);
@@ -1826,6 +1867,10 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
   const marginLinkedValue = Number(mmToUnit(settings.marginsMm.top,unit).toFixed(2));
   const bleedLinkedValue = Number(mmToUnit(settings.bleedMm.top,unit).toFixed(2));
   const updateWatermark = (patch: Partial<PageSettings['watermark']>) => onChange({ watermark: { ...settings.watermark, ...patch } });
+  const watermarkCondition=normalizeConditionalRendering(settings.watermark.conditionalRendering);
+  const updateWatermarkCondition=(patch:Partial<BuilderConditionalRendering>)=>updateWatermark({conditionalRendering:{...watermarkCondition,...patch}});
+  const updateWatermarkRule=(id:string,patch:Partial<BuilderConditionalRendering['rules'][number]>)=>updateWatermarkCondition({rules:watermarkCondition.rules.map((rule)=>rule.id===id?{...rule,...patch}:rule)});
+  const watermarkConditionVisible=evaluateBuilderConditionalRendering(watermarkCondition,resolveField);
   const importWatermarkImage = (event: ChangeEvent<HTMLInputElement>) => { const file=event.target.files?.[0]; if(!file)return; const reader=new FileReader(); reader.onload=()=>updateWatermark({ enabled:true,type:'image',imageSource:String(reader.result??'') }); reader.readAsDataURL(file); event.currentTarget.value=''; };
   return <div className="page-properties-stack professional-page-settings">
     <div className="page-settings-intro"><div><strong>Page setup</strong><span>{activePage?.name ?? pageName} · {settings.preset} {settings.orientation}</span></div>{help('Configure document-wide masters plus physical page size, print margins, bleed and appearance. Global Watermark applies to the complete template.')}</div>
@@ -1903,6 +1948,18 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
         <label>Position<select value={settings.watermark.position} onChange={(e) => updateWatermark({ position:e.target.value as PageSettings['watermark']['position'] })}><option value="center">Center</option><option value="top-left">Top left</option><option value="top-right">Top right</option><option value="bottom-left">Bottom left</option><option value="bottom-right">Bottom right</option><option value="custom">Custom</option></select></label>
         {settings.watermark.position === 'custom' ? <div className="property-grid"><label>X %<input type="number" min="0" max="100" value={settings.watermark.customXPercent} onChange={(e) => updateWatermark({ customXPercent:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label><label>Y %<input type="number" min="0" max="100" value={settings.watermark.customYPercent} onChange={(e) => updateWatermark({ customYPercent:Math.max(0,Math.min(100,Number(e.target.value)||0)) })}/></label></div> : null}
         <div className="property-grid"><label>Pages<select value={settings.watermark.applyTo} onChange={(e) => updateWatermark({ applyTo:e.target.value as PageSettings['watermark']['applyTo'] })}><option value="all">All output pages</option><option value="first">First output page only</option></select></label><label>Layer<select value={settings.watermark.layer} onChange={(e) => updateWatermark({ layer:e.target.value as PageSettings['watermark']['layer'] })}><option value="behind">Behind content</option><option value="above">Above content</option></select></label></div>
+        <details className="inspector-accordion text-accordion">
+          <summary><span>Conditional Watermark <small>{watermarkCondition.enabled ? (watermarkConditionVisible ? 'Visible' : 'Hidden') : 'Always'}</small></span><ChevronDown size={15}/></summary>
+          <div className="inspector-accordion-content">
+            <label className="guide-toggle"><input type="checkbox" checked={watermarkCondition.enabled} onChange={(e)=>updateWatermarkCondition({enabled:e.target.checked,rules:e.target.checked&&watermarkCondition.rules.length===0?[{id:crypto.randomUUID(),field:'',operator:'equals',value:''}]:watermarkCondition.rules})}/><span><strong>Use conditional watermark</strong><small>Evaluate once per generated document record</small></span></label>
+            {watermarkCondition.enabled ? <>
+              <div className="property-grid"><label>Action<select value={watermarkCondition.action} onChange={(e)=>updateWatermarkCondition({action:e.target.value as BuilderConditionalRendering['action']})}><option value="show">Show when matched</option><option value="hide">Hide when matched</option></select></label><label>Match<select value={watermarkCondition.match} onChange={(e)=>updateWatermarkCondition({match:e.target.value as BuilderConditionalRendering['match']})}><option value="all">All (AND)</option><option value="any">Any (OR)</option></select></label></div>
+              {watermarkCondition.rules.map((rule,index)=><section className="inspector-card" key={rule.id}><div className="inspector-card-title">Condition {index+1}</div><label>Field<select value={rule.field} onChange={(e)=>updateWatermarkRule(rule.id,{field:e.target.value})}><option value="">Select field…</option>{fields.map((field)=><option key={field.name} value={field.name}>{field.label||field.name}</option>)}</select></label><label>Operator<select value={rule.operator} onChange={(e)=>updateWatermarkRule(rule.id,{operator:e.target.value as BuilderConditionOperator})}><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="contains">Contains</option><option value="notContains">Does not contain</option><option value="startsWith">Starts with</option><option value="endsWith">Ends with</option><option value="isEmpty">Is empty</option><option value="isNotEmpty">Is not empty</option><option value="greaterThan">Greater than</option><option value="greaterThanOrEqual">Greater than or equal</option><option value="lessThan">Less than</option><option value="lessThanOrEqual">Less than or equal</option></select></label>{requiresValue(rule.operator)?<label>Value<input value={rule.value??''} onChange={(e)=>updateWatermarkRule(rule.id,{value:e.target.value})}/></label>:null}{watermarkCondition.rules.length>1?<button type="button" className="secondary compact" onClick={()=>updateWatermarkCondition({rules:watermarkCondition.rules.filter((entry)=>entry.id!==rule.id)})}>Remove condition</button>:null}</section>)}
+              <button type="button" className="secondary compact" onClick={()=>updateWatermarkCondition({rules:[...watermarkCondition.rules,{id:crypto.randomUUID(),field:'',operator:'equals',value:''}]})}><Plus size={14}/>Add condition</button>
+              <div className="table-cell-help"><strong>Current record:</strong> {watermarkConditionVisible?'Watermark visible':'Watermark hidden'}</div>
+            </> : null}
+          </div>
+        </details>
         <p className="table-cell-help"><strong>Global document setting:</strong> changing this watermark updates every page in the template. Dynamic-table continuation pages, Native PDF, API generation and combined PDF use the same configuration.</p>
       </div>
     </details>
@@ -2002,8 +2059,8 @@ function Inspector({ tab, onInspectorTab, selected, source, record, formulaEleme
   if (tab === 'properties' && selected?.type === 'text') return <TextPropertiesPanel selected={selected} selectedBand={selectedBand} contentPreview={selectedContentPreview} dynamicTokenFields={dynamicTokenFields} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
   if (tab === 'properties' && (selected?.type === 'image' || selected?.type === 'signature')) return <ImagePropertiesPanel selected={selected} selectedBand={selectedBand} bindingPreview={selectedBindingPreview} dynamicTokenFields={dynamicTokenFields} pageSettings={pageSettings} relativeElements={relativeElements} onUpdate={onUpdate} onPageSettings={onPageSettings} assignRegion={assignRegion} onMoveFlow={onMoveFlow} onFlowRowAction={onFlowRowAction} onArrange={onArrange} onDuplicate={onDuplicate} onDelete={onDelete}/>;
   if (tab === 'properties' && selected?.type === 'formula') return <div className="inspector-body"><h3>Formula Field</h3><FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/><div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></div>;
-  if (tab === 'conditions') return <ConditionsPanel selected={selected} fields={dynamicTokenFields} onUpdate={onUpdate}/>;
-  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} elements={relativeElements} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId ?? undefined} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => { if (selected) onEditTableConfiguration(selected.id); }}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage} onEditHeader={() => onInspectorTab('header')} onEditFooter={() => onInspectorTab('footer')}/>}</div>;
+  if (tab === 'conditions') return <ConditionsPanel selected={selected} fields={dynamicTokenFields} resolveField={(field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows)} onUpdate={onUpdate}/>;
+  return <div className="inspector-body"><h3>Properties</h3>{selected ? <><section className="inspector-card element-zone-card"><div className="inspector-card-title">Page Zone</div><label>Region<select value={selected.region ?? 'body'} disabled={selected.type === 'table'} onChange={(e) => assignRegion(e.target.value as PageRegion)}><option value="body">Body / Content</option><option value="header">Header</option><option value="footer">Footer</option></select></label>{selected.type === 'table' ? <div className="table-cell-help">Tables belong to the Body zone and paginate between Header/Footer-aware content bounds.</div> : <>{selectedBand ? <label>{selectedBand === 'header' ? 'Header' : 'Footer'} repeat<select value={pageSettings[selectedBand].repeat} onChange={(e) => onPageSettings({ [selectedBand]: { ...pageSettings[selectedBand], enabled: true, repeat: e.target.value as PageRepeatMode } } as Partial<PageSettings>)}><option value="every">Every page</option><option value="first">First page only</option><option value="exceptFirst">Except first page</option></select></label> : null}<div className="table-cell-help">Header/Footer are global document masters. All assigned Text/Image/Shape/QR/Barcode/Signature/Divider elements repeat across builder pages and overflow continuations using the master repeat rule. Dragging/resizing any projected copy edits the one global master, so all pages stay synchronized.</div></>}</section><div className="property-grid"><label>X<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.x)} onChange={(e) => onUpdate({ x: Number(e.target.value) || 0 })}/></label><label>Y<input type="number" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow'} value={Math.round(selected.y)} onChange={(e) => onUpdate({ y: Number(e.target.value) || 0 })}/></label><label>Width<input type="number" min="20" disabled={!selectedBand && (selected.layoutMode ?? 'floating') === 'flow' && (selected.flowWidth ?? (selected.type === 'table' ? 'full' : 'custom')) === 'full'} value={Math.round(selected.width)} onChange={(e) => onUpdate({ width: Math.max(20, Number(e.target.value) || 20) })}/></label><label>Height<input type={selected.type === 'table' ? 'text' : 'number'} min={selected.type === 'table' ? undefined : '4'} disabled={selected.type === 'table'} value={selected.type === 'table' ? `Auto · ${Math.round(selected.height)}px` : Math.round(selected.height)} onChange={(e) => { if (selected.type !== 'table') onUpdate({ height: Math.max(4, Number(e.target.value) || 4) }); }}/></label></div>{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <><BodyFlowControls selected={selected} elements={relativeElements} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>{(selected.layoutMode ?? 'floating') === 'floating' ? <><BodyPositionControls selected={selected} settings={pageSettings} onUpdate={onUpdate}/><RelativePlacementControls selected={selected} elements={relativeElements} settings={pageSettings} onUpdate={onUpdate}/></> : null}</>}{selected.type === 'table' && selected.table ? <TableProperties table={selected.table} sources={dataState.sources} activeSourceId={dataState.activeSourceId ?? undefined} formulaFields={formulaTokenFieldsForElements(formulaElements)} onUpdate={(table) => onUpdate({ table })} onEditConfiguration={() => { if (selected) onEditTableConfiguration(selected.id); }}/> : selected.type === 'formula' ? <FormulaFieldProperties selected={selected} source={source} formulaElements={formulaElements} preview={selectedFormulaPreview} onUpdate={onUpdate}/> : (selected.type === 'image' || selected.type === 'signature') ? <ImageProperties selected={selected} onUpdate={onUpdate}/> : selected.type !== 'divider' ? <MixedContentEditor label="Content" value={selected.text} fields={dynamicTokenFields} previewValue={selectedContentPreview} onChange={(text) => onUpdate({ text })}/> : null}{((selected.region ?? 'body') !== 'body' || (selected.layoutMode ?? 'floating') === 'floating') ? <section className="inspector-card arrange-card"><div className="inspector-card-title">Layer / Overlap</div><div className="arrange-actions"><button type="button" className="secondary compact" onClick={() => onArrange('front')}>Bring Front</button><button type="button" className="secondary compact" onClick={() => onArrange('forward')}>Forward</button><button type="button" className="secondary compact" onClick={() => onArrange('backward')}>Backward</button><button type="button" className="secondary compact" onClick={() => onArrange('back')}>Send Back</button></div><p className="table-cell-help">Smart Insert only avoids accidental overlap when an element is first created. Manual drag may overlap any existing block. Use these layer controls when the moved element needs to stay above or below a table, image, or shape.</p></section> : null}<div className="inspector-actions"><button className="secondary" onClick={onDuplicate}><Copy size={15}/>Duplicate</button><button className="danger" onClick={onDelete}><Trash2 size={15}/>Delete</button></div></> : <PageProperties settings={pageSettings} pageName={pageName} pages={pages} activePageId={activePageId} virtualPageCount={virtualPageCount} activePreviewPageIndex={activePreviewPageIndex} fields={dynamicTokenFields} resolveField={(field) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows)} onFocusPreviewPage={onFocusPreviewPage} onChange={onPageSettings} onName={onPageName} onAddPage={onAddPage} onDuplicatePage={onDuplicatePage} onDeletePage={onDeletePage} onMovePage={onMovePage} onSelectPage={onSelectPage} onEditHeader={() => onInspectorTab('header')} onEditFooter={() => onInspectorTab('footer')}/>}</div>;
 }
 
 
@@ -2187,30 +2244,62 @@ function TextFormattingPanel({ selected, onUpdate }: { selected: BuilderElement;
 
 
 
-function ConditionsPanel({ selected, fields, onUpdate }: { selected: BuilderElement|null; fields: TemplateTokenField[]; onUpdate: (patch: Partial<BuilderElement>) => void }) {
+function ConditionsPanel({ selected, fields, resolveField, onUpdate }: { selected: BuilderElement|null; fields: TemplateTokenField[]; resolveField: (field: string) => unknown; onUpdate: (patch: Partial<BuilderElement>) => void }) {
   if(!selected)return <div className="inspector-body"><h3>Conditions</h3><p>Select an element to configure visibility.</p></div>;
-  const op=selected.conditionOperator??'equals';
-  const needsValue=!['isEmpty','isNotEmpty'].includes(op);
-  return <div className="inspector-body text-inspector-body"><div className="inspector-panel-heading"><div><h3>Conditions</h3><small>Control when this element is visible</small></div></div><div className="text-inspector-stack"><details className="inspector-accordion text-accordion" open><summary><span>Visibility <InspectorHelp text="The selected element can be shown only when a current-record field matches this rule. Formula Fields can also be used."/></span><ChevronDown size={15}/></summary><div className="inspector-accordion-content"><label className="guide-toggle"><input type="checkbox" checked={selected.conditionEnabled??false} onChange={(e)=>onUpdate({conditionEnabled:e.target.checked})}/><span><strong>Use visibility condition</strong><small>Hide this element when the rule is false</small></span></label>{selected.conditionEnabled?<><label>Field<select value={selected.conditionField??''} onChange={(e)=>onUpdate({conditionField:e.target.value||undefined})}><option value="">Select field…</option>{fields.map((field)=><option key={field.name} value={field.name}>{field.label||field.name}</option>)}</select></label><label>Operator<select value={op} onChange={(e)=>onUpdate({conditionOperator:e.target.value as NonNullable<BuilderElement['conditionOperator']>})}><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="contains">Contains</option><option value="notContains">Does not contain</option><option value="isEmpty">Is empty</option><option value="isNotEmpty">Is not empty</option><option value="greaterThan">Greater than</option><option value="lessThan">Less than</option></select></label>{needsValue?<label>Value<input value={selected.conditionValue??''} onChange={(e)=>onUpdate({conditionValue:e.target.value})} placeholder="Comparison value"/></label>:null}<div className="condition-summary">Show when <strong>{selected.conditionField||'field'}</strong> {conditionOperatorLabel(op)} {needsValue?<strong>{selected.conditionValue||'value'}</strong>:null}</div></>:null}</div></details></div></div>;
+  const condition=normalizeConditionalRendering(selected.conditionalRendering,{
+    conditionEnabled:selected.conditionEnabled,
+    conditionField:selected.conditionField,
+    conditionOperator:selected.conditionOperator,
+    conditionValue:selected.conditionValue,
+  });
+  const patchCondition=(patch:Partial<BuilderConditionalRendering>)=>onUpdate({
+    conditionalRendering:{...condition,...patch},
+    // Once UX-8 is edited, the universal structure becomes authoritative.
+    conditionEnabled:undefined,conditionField:undefined,conditionOperator:undefined,conditionValue:undefined,
+  });
+  const patchRule=(id:string,patch:Partial<BuilderConditionalRendering['rules'][number]>)=>patchCondition({rules:condition.rules.map((rule)=>rule.id===id?{...rule,...patch}:rule)});
+  const addRule=()=>patchCondition({rules:[...condition.rules,{id:crypto.randomUUID(),field:'',operator:'equals',value:''}]});
+  const removeRule=(id:string)=>patchCondition({rules:condition.rules.filter((rule)=>rule.id!==id)});
+  const visible=evaluateBuilderConditionalRendering(condition,resolveField);
+  return <div className="inspector-body text-inspector-body">
+    <div className="inspector-panel-heading"><div><h3>Conditions</h3><small>Universal visibility rules</small></div></div>
+    <div className="text-inspector-stack">
+      <details className="inspector-accordion text-accordion" open>
+        <summary><span>Conditional Rendering <InspectorHelp text="Use the same visibility model for Text, Image, Shape, QR, Barcode, Signature, Divider, Table and header/footer elements. Formula Fields are available in the same field list."/></span><ChevronDown size={15}/></summary>
+        <div className="inspector-accordion-content">
+          <label className="guide-toggle"><input type="checkbox" checked={condition.enabled} onChange={(e)=>patchCondition({enabled:e.target.checked,rules:e.target.checked&&condition.rules.length===0?[{id:crypto.randomUUID(),field:'',operator:'equals',value:''}]:condition.rules})}/><span><strong>Use conditional rendering</strong><small>Evaluate against the current record before rendering</small></span></label>
+          {condition.enabled?<>
+            <div className="property-grid">
+              <label>Action<select value={condition.action} onChange={(e)=>patchCondition({action:e.target.value as BuilderConditionalRendering['action']})}><option value="show">Show when matched</option><option value="hide">Hide when matched</option></select></label>
+              <label>Match<select value={condition.match} onChange={(e)=>patchCondition({match:e.target.value as BuilderConditionalRendering['match']})}><option value="all">All conditions (AND)</option><option value="any">Any condition (OR)</option></select></label>
+            </div>
+            {condition.rules.map((rule,index)=>{
+              const needsValue=requiresValue(rule.operator);
+              return <section className="inspector-card" key={rule.id}>
+                <div className="inspector-card-title">Condition {index+1}</div>
+                <label>Field<select value={rule.field} onChange={(e)=>patchRule(rule.id,{field:e.target.value})}><option value="">Select field…</option>{fields.map((field)=><option key={field.name} value={field.name}>{field.label||field.name}</option>)}</select></label>
+                <label>Operator<select value={rule.operator} onChange={(e)=>patchRule(rule.id,{operator:e.target.value as BuilderConditionOperator})}>
+                  <option value="equals">Equals</option><option value="notEquals">Does not equal</option>
+                  <option value="contains">Contains</option><option value="notContains">Does not contain</option>
+                  <option value="startsWith">Starts with</option><option value="endsWith">Ends with</option>
+                  <option value="isEmpty">Is empty</option><option value="isNotEmpty">Is not empty</option>
+                  <option value="greaterThan">Greater than</option><option value="greaterThanOrEqual">Greater than or equal</option>
+                  <option value="lessThan">Less than</option><option value="lessThanOrEqual">Less than or equal</option>
+                </select></label>
+                {needsValue?<label>Value<input value={rule.value??''} onChange={(e)=>patchRule(rule.id,{value:e.target.value})} placeholder="Comparison value"/></label>:null}
+                {condition.rules.length>1?<button type="button" className="secondary compact" onClick={()=>removeRule(rule.id)}>Remove condition</button>:null}
+              </section>;
+            })}
+            <button type="button" className="secondary compact" onClick={addRule}><Plus size={14}/>Add condition</button>
+            <div className="condition-summary">{condition.action==='show'?'Show':'Hide'} when <strong>{condition.match==='all'?'all':'any'}</strong> configured conditions match.</div>
+            <div className="table-cell-help"><strong>Current record:</strong> {visible?'Visible':'Hidden'} · Conditions use the same imported and Formula Fields already available throughout the Builder.</div>
+          </>:null}
+        </div>
+      </details>
+    </div>
+  </div>;
 }
 
-function conditionOperatorLabel(op: NonNullable<BuilderElement['conditionOperator']>) {
-  return ({equals:'equals',notEquals:'does not equal',contains:'contains',notContains:'does not contain',isEmpty:'is empty',isNotEmpty:'is not empty',greaterThan:'is greater than',lessThan:'is less than'} as const)[op];
-}
-
-function evaluateElementCondition(item: BuilderElement, rawValue: unknown) {
-  const op=item.conditionOperator??'equals';
-  const expected=item.conditionValue??'';
-  const actual=displayValue(rawValue as NormalizedValue | undefined).trim();
-  if(op==='isEmpty')return !actual;
-  if(op==='isNotEmpty')return Boolean(actual);
-  if(op==='contains')return actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
-  if(op==='notContains')return !actual.toLocaleLowerCase().includes(expected.toLocaleLowerCase());
-  if(op==='notEquals')return actual!==expected;
-  if(op==='greaterThan'){const a=Number(actual),b=Number(expected);return Number.isFinite(a)&&Number.isFinite(b)&&a>b;}
-  if(op==='lessThan'){const a=Number(actual),b=Number(expected);return Number.isFinite(a)&&Number.isFinite(b)&&a<b;}
-  return actual===expected;
-}
 
 const SHAPE_LIBRARY: Array<{ value: NonNullable<BuilderElement['shapeKind']>; label: string; category: string }> = [
   { value:'rectangle', label:'Rectangle', category:'Basic' }, { value:'rounded', label:'Rounded Rectangle', category:'Basic' }, { value:'circle', label:'Circle', category:'Basic' }, { value:'ellipse', label:'Ellipse', category:'Basic' }, { value:'triangle', label:'Triangle', category:'Basic' }, { value:'diamond', label:'Diamond', category:'Basic' }, { value:'pentagon', label:'Pentagon', category:'Basic' }, { value:'hexagon', label:'Hexagon', category:'Basic' },
@@ -2756,7 +2845,35 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
     if (!selectedDynamicBodyCell) return;
     onUpdate(updateTableCell(table, selectedDynamicBodyCell.id, patch));
   };
+  const rowCondition = normalizeConditionalRendering(table.rowConditionalRendering);
+  const updateRowCondition = (next: BuilderConditionalRendering) => onUpdate({ ...table, rowConditionalRendering: next });
+  const columnCondition = normalizeConditionalRendering(selectedColumn?.conditionalRendering);
+  const updateColumnCondition = (next: BuilderConditionalRendering) => {
+    if (!selectedColumn) return;
+    onUpdate(updateTableColumn(table, selectedColumn.id, { conditionalRendering: next }));
+  };
+  const selectedColumnIndex = selectedColumn ? table.columns.findIndex((column) => column.id === selectedColumn.id) : -1;
   return <div className={`table-properties table-view-${view}`}>
+    {view === 'columns' && <section className="table-inspector-card table-column-manager">
+      <div className="table-inspector-card-head">
+        <span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">▥</span><span>All Columns</span></span>
+        <small className="table-inspector-badge">{table.columns.length}</small>
+      </div>
+      <p className="table-cell-help">All original columns stay available here even when a condition hides them from the canvas/output.</p>
+      <div className="table-column-manager-list">
+        {table.columns.map((column,index) => {
+          const condition = normalizeConditionalRendering(column.conditionalRendering);
+          const active = index === selectedColumnIndex;
+          return <div key={column.id} className={`table-column-manager-item${active ? ' active' : ''}`}>
+            <button type="button" className="table-column-manager-select" onClick={() => onUpdate(selectTableColumn(table,column.id))}>
+              <span><strong>{column.label || column.key || `Column ${index+1}`}</strong><small>Column {index+1}{condition.enabled ? ' · Conditional' : ''}</small></span>
+              <em>{condition.enabled ? 'Conditional' : 'Visible'}</em>
+            </button>
+            {condition.enabled && <button type="button" className="secondary compact table-column-condition-disable" title="Disable this column condition" onClick={() => onUpdate(updateTableColumn(table,column.id,{conditionalRendering:{...condition,enabled:false}}))}>Disable</button>}
+          </div>;
+        })}
+      </div>
+    </section>}
     <div className="table-summary table-scope-properties"><strong>{table.name}</strong><small>{table.mode === 'dynamic' ? `${table.binding?.grouping ? `Grouped Summary • ${table.binding.grouping.groupBy.join(' + ')}` : 'Dynamic'} • ${table.binding?.repeatSource || 'items'}` : `Custom • ${table.rows.length} rows × ${table.columns.length} cols`}</small></div>
     <label className="table-scope-properties">Table name<input value={table.name} onChange={(e) => onUpdate({ ...table, name: e.target.value })}/></label>
     <section className="table-inspector-card table-border-card table-scope-formatting">
@@ -2801,7 +2918,17 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
           <div className="table-schema-note"><span>{groupedSummary ? 'Grouped Summary' : 'Grouping'}</span><code>{groupedSummary ? `${(parentKeys.filter(Boolean).join(' + ') || '?')} → document; ${table.binding?.grouping?.groupBy.join(' + ')} → grouped rows` : `${(parentKeys.filter(Boolean).join(' + ') || recommendedParentKey(selectedSource.fields) || '?')} → rows; ${(rowKeys.filter(Boolean).join(' + ') || recommendedRowKey(selectedSource.fields) || 'index')} → row identity`}</code></div>
         </div>;
       })()}
-      <section className="table-inspector-card pagination-card">
+      {!groupedSummary && <section className="table-inspector-card">
+        <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon" aria-hidden="true">◆</span><span>Row Conditions</span></span><small className="table-inspector-badge">{rowCondition.enabled ? 'On' : 'Off'}</small></div>
+        <TableConditionEditor
+          value={rowCondition}
+          fields={tableContentFields}
+          title="Filter repeated rows"
+          help="Conditions are evaluated per repeated line-item row. Row fields take priority; document fields are fallback. Hidden rows are removed before table pagination."
+          onChange={updateRowCondition}
+        />
+      </section>}
+            <section className="table-inspector-card pagination-card">
         <div className="table-inspector-card-head"><span className="table-inspector-heading"><span className="table-inspector-icon">↧</span><span>Pagination</span></span><small className="table-inspector-badge">DB-4.4</small></div>
         <label className="check-row"><input type="checkbox" checked={table.pagination.enabled !== false} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, enabled: e.target.checked } })}/>Automatic overflow</label>
         <label className="check-row"><input type="checkbox" checked={table.pagination.repeatHeader} onChange={(e) => onUpdate({ ...table, pagination: { ...table.pagination, repeatHeader: e.target.checked } })}/>Repeat header</label>
@@ -2863,6 +2990,17 @@ function TableProperties({ table, view = 'properties', sources, activeSourceId, 
           <label>Data type<select value={selectedColumn.dataType ?? 'text'} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { dataType: e.target.value as TableDataType }))}>{TABLE_DATA_TYPE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
           <TableDataFormatEditor dataType={selectedColumn.dataType ?? 'text'} value={selectedColumn.format ?? {}} onChange={(format) => onUpdate(updateTableColumn(table, selectedColumn.id, { format }))}/>
         </div>
+        <section className="table-data-format-card">
+          <div className="section-title"><span>Conditional Column</span><small>{columnCondition.enabled ? 'Enabled' : 'Optional'}</small></div>
+          <label>Evaluate against<select value={selectedColumn.conditionScope ?? 'document'} onChange={(e) => onUpdate(updateTableColumn(table, selectedColumn.id, { conditionScope: e.target.value as TableColumnConditionScope }))}><option value="document">Document / header values</option><option value="anyRow">Any visible row matches</option><option value="allRows">All visible rows match</option></select></label>
+          <TableConditionEditor
+            value={columnCondition}
+            fields={tableContentFields}
+            title="Show / hide whole column"
+            help="The entire column is removed together—header, body and summary alignment stay in sync. Any/All Row is useful for columns such as Discount or IGST."
+            onChange={updateColumnCondition}
+          />
+        </section>
         <div className="table-structure-actions compact-actions">
           <button type="button" className="secondary compact" title="Add column left" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'left'))}><span aria-hidden="true">＋←</span><span>Left</span></button>
           <button type="button" className="secondary compact" title="Add column right" onClick={() => onUpdate(addTableColumn(table, cellLocation.cell.id, 'right'))}><span aria-hidden="true">＋→</span><span>Right</span></button>
@@ -2967,6 +3105,25 @@ function SummaryCellEditor({ table, cell, source, formulaFields, onPatch }: { ta
       <p className="table-cell-help">Aggregates use only the currently selected Parent / Document group. Global Formula Fields and previous named summary values can be chained.</p>
     </>}
     {(mode === 'aggregate' || mode === 'formula') && <label>Summary name<input value={cell.summaryName ?? ''} placeholder="Subtotal / Tax Amount" onChange={(e) => onPatch({ summaryName: e.target.value })}/></label>}
+  </div>;
+}
+
+function TableConditionEditor({ value, fields, title, help, onChange }: { value: BuilderConditionalRendering; fields: TemplateTokenField[]; title: string; help: string; onChange: (value: BuilderConditionalRendering) => void }) {
+  const patch = (next: Partial<BuilderConditionalRendering>) => onChange({ ...value, ...next });
+  const patchRule = (id: string, next: Partial<BuilderConditionalRendering['rules'][number]>) => patch({ rules: value.rules.map((rule) => rule.id === id ? { ...rule, ...next } : rule) });
+  return <div className="table-condition-editor">
+    <label className="guide-toggle"><input type="checkbox" checked={value.enabled} onChange={(e) => patch({ enabled:e.target.checked, rules:e.target.checked && value.rules.length===0 ? [{id:crypto.randomUUID(),field:'',operator:'equals',value:''}] : value.rules })}/><span><strong>{title}</strong><small>{help}</small></span></label>
+    {value.enabled ? <>
+      <div className="property-grid"><label>Action<select value={value.action} onChange={(e)=>patch({action:e.target.value as BuilderConditionalRendering['action']})}><option value="show">Show when matched</option><option value="hide">Hide when matched</option></select></label><label>Match<select value={value.match} onChange={(e)=>patch({match:e.target.value as BuilderConditionalRendering['match']})}><option value="all">All (AND)</option><option value="any">Any (OR)</option></select></label></div>
+      {value.rules.map((rule,index)=><div className="inspector-card" key={rule.id}>
+        <div className="inspector-card-title">Condition {index+1}</div>
+        <label>Field<select value={rule.field} onChange={(e)=>patchRule(rule.id,{field:e.target.value})}><option value="">Select field…</option>{fields.map((field)=><option key={field.name} value={field.name}>{field.label||field.name}</option>)}</select></label>
+        <label>Operator<select value={rule.operator} onChange={(e)=>patchRule(rule.id,{operator:e.target.value as BuilderConditionOperator})}><option value="equals">Equals</option><option value="notEquals">Does not equal</option><option value="contains">Contains</option><option value="notContains">Does not contain</option><option value="startsWith">Starts with</option><option value="endsWith">Ends with</option><option value="isEmpty">Is empty</option><option value="isNotEmpty">Is not empty</option><option value="greaterThan">Greater than</option><option value="greaterThanOrEqual">Greater than or equal</option><option value="lessThan">Less than</option><option value="lessThanOrEqual">Less than or equal</option></select></label>
+        {requiresValue(rule.operator)?<label>Value<input value={rule.value??''} onChange={(e)=>patchRule(rule.id,{value:e.target.value})}/></label>:null}
+        {value.rules.length>1?<button type="button" className="secondary compact" onClick={()=>patch({rules:value.rules.filter((entry)=>entry.id!==rule.id)})}>Remove condition</button>:null}
+      </div>)}
+      <button type="button" className="secondary compact" onClick={()=>patch({rules:[...value.rules,{id:crypto.randomUUID(),field:'',operator:'equals',value:''}]})}><Plus size={14}/>Add condition</button>
+    </> : null}
   </div>;
 }
 

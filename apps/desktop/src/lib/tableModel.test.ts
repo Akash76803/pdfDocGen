@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences } from './tableModel.ts';
+import { addCustomSummaryRow, addTableColumn, addTableRow, applyGroupedFinalSummary, createCustomTable, createDynamicTable, createGroupedSummaryTable, deleteTableColumn, deleteTableRow, reconfigureGroupedSummaryTable, dynamicRows, evaluateTableFormula, evaluateTableSummaryRows, moveTableColumn, paginateDynamicTable, recommendedRowKey, updateTableCell, normalizeTableFormulaReferences, projectConditionalRuntimeTable, projectTableVisibleColumns, selectTableColumn, stableConditionalColumnWidths, tableColumnSelectionCellId, visibleTableColumnIndexes, type TablePaginationRuntimeRow } from './tableModel.ts';
 
 describe('DB-4 table model', () => {
   it('creates a custom table with stable row/column/cell identities', () => {
@@ -576,5 +576,135 @@ describe('normalizeTableFormulaReferences', () => {
     expect(normalized.bodyRows[0]!.cells[2]!.formula).toBe('[Basic Value] - [Discount]');
     normalized.bodyRows[0]!.cells[2]!.formula = 'DISCOUNT([Basic Value], [Total Discount])';
     expect(normalizeTableFormulaReferences(normalized).bodyRows[0]!.cells[2]!.formula).toBe('DISCOUNT([Basic Value], [Total Discount])');
+  });
+});
+
+
+describe('UX-8.4 table conditional rendering', () => {
+  it('filters dynamic rows before pagination input', () => {
+    const table=createDynamicTable(2,'items',1);
+    table.rowConditionalRendering={
+      enabled:true,action:'show',match:'all',
+      rules:[{id:'r1',field:'Qty',operator:'greaterThan',value:'0'}],
+    };
+    const rows=dynamicRows(table,{items:[
+      {id:'1',Qty:2,Name:'A'},
+      {id:'2',Qty:0,Name:'B'},
+      {id:'3',Qty:5,Name:'C'},
+    ]} as never);
+    expect(rows.map((row)=>row.value.Name)).toEqual(['A','C']);
+  });
+
+  it('supports document, any-row and all-row whole-column visibility', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.columns[0]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'a',field:'Status',operator:'equals',value:'Approved'}]};
+    table.columns[0]!.conditionScope='document';
+    table.columns[1]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'b',field:'Discount',operator:'greaterThan',value:'0'}]};
+    table.columns[1]!.conditionScope='anyRow';
+    table.columns[2]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'c',field:'Qty',operator:'greaterThan',value:'0'}]};
+    table.columns[2]!.conditionScope='allRows';
+    const runtime=[
+      {key:'1',value:{Discount:0,Qty:1}},
+      {key:'2',value:{Discount:5,Qty:2}},
+    ] as never;
+    expect(visibleTableColumnIndexes(table,{Status:'Approved'} as never,runtime)).toEqual([0,1,2]);
+    expect(visibleTableColumnIndexes(table,{Status:'Draft'} as never,runtime)).toEqual([1,2]);
+  });
+
+  it('projects hidden columns out of header/body/summary grids without dead space', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.headerRows[0]!.cells[0]!.colSpan=2;
+    table.headerRows[0]!.cells.splice(1,1);
+    const projected=projectTableVisibleColumns(table,[0,2]);
+    expect(projected.columns).toHaveLength(2);
+    expect(projected.headerRows[0]!.cells[0]!.colSpan).toBe(1);
+    expect(projected.bodyRows[0]!.cells).toHaveLength(2);
+  });
+
+
+  it('preserves a structural spacer width when a neighboring conditional column hides', () => {
+    const table=createCustomTable(4,1);
+    table.columns.forEach((column,index)=>{ column.manualWidth=true; column.width=[200,50,100,150][index]!; });
+    table.rows[0]!.cells[0]!.content='Amount in words';
+    table.rows[0]!.cells[1]!.content=''; // intentional gap column
+    table.rows[0]!.cells[2]!.content='Optional tax';
+    table.rows[0]!.cells[3]!.content='Net payable';
+    const full=stableConditionalColumnWidths(table,[0,1,2,3]);
+    const hidden=stableConditionalColumnWidths(table,[0,1,3]);
+    expect(full[1]).toBeCloseTo(10,6);
+    expect(hidden[1]).toBeCloseTo(10,6);
+    expect(hidden.reduce((sum,value)=>sum+value,0)).toBeCloseTo(100,6);
+    expect(hidden[2]).toBeGreaterThan(full[3]!);
+  });});
+
+
+describe('UX-8.4 Fix2 conditional table auto reflow', () => {
+  it('redistributes hidden content width proportionally while keeping spacer width fixed', () => {
+    const table=createCustomTable(4,1);
+    table.columns.forEach((column,index)=>{ column.manualWidth=true; column.width=[400,100,200,300][index]!; });
+    table.rows[0]!.cells[0]!.content='Description';
+    table.rows[0]!.cells[1]!.content=''; // spacer
+    table.rows[0]!.cells[2]!.content='Optional Tax';
+    table.rows[0]!.cells[3]!.content='Net';
+    const full=stableConditionalColumnWidths(table,[0,1,2,3]);
+    const widths=stableConditionalColumnWidths(table,[0,1,3]);
+    expect(widths[1]).toBeCloseTo(full[1]!,6);
+    expect(widths[0]! / widths[2]!).toBeCloseTo(full[0]! / full[3]!,6);
+    expect(widths.reduce((sum,value)=>sum+value,0)).toBeCloseTo(100,6);
+  });
+
+  it('projects conditional columns before pagination so height shrinks with wider remaining columns', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.columns.forEach((column,index)=>{ column.manualWidth=true; column.width=[200,200,200][index]!; });
+    table.bodyRows[0]!.autoHeight=true;
+    table.bodyRows[0]!.cells[0]!.binding='Description';
+    table.bodyRows[0]!.cells[1]!.binding='Optional';
+    table.bodyRows[0]!.cells[2]!.binding='Amount';
+    const runtime:TablePaginationRuntimeRow[]=[
+      {key:'1',value:{Description:'A long product description that wraps across several lines in a narrow column',Optional:'x',Amount:100}},
+      {key:'2',value:{Description:'A long product description that wraps across several lines in a narrow column',Optional:'x',Amount:200}},
+    ];
+    const fullLayout=projectConditionalRuntimeTable(table,[0,1,2],runtime.map((row)=>row.value));
+    const hiddenLayout=projectConditionalRuntimeTable(table,[0,2],runtime.map((row:any)=>row.value));
+    const full=paginateDynamicTable(fullLayout.table,runtime,1000,1000,600,fullLayout.columnWidths);
+    const hidden=paginateDynamicTable(hiddenLayout.table,runtime,1000,1000,600,hiddenLayout.columnWidths);
+    expect(hidden[0]!.usedHeightPx).toBeLessThan(full[0]!.usedHeightPx);
+  });
+
+  it('row conditions reduce the runtime table height before pagination', () => {
+    const table=createDynamicTable(2,'items',1);
+    table.rowConditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'qty',field:'Qty',operator:'greaterThan',value:'0'}]};
+    const record={items:[
+      {Id:'1',Name:'A',Qty:1},
+      {Id:'2',Name:'B',Qty:0},
+      {Id:'3',Name:'C',Qty:0},
+      {Id:'4',Name:'D',Qty:2},
+    ]} as never;
+    const rows=dynamicRows(table,record);
+    const layout=projectConditionalRuntimeTable(table,[0,1],rows.map((row)=>row.value));
+    const pages=paginateDynamicTable(layout.table,rows,1000,1000,600,layout.columnWidths);
+    expect(rows).toHaveLength(2);
+    expect(pages[0]!.usedHeightPx).toBeLessThan(200);
+  });
+});
+
+
+describe('UX-8.4 Fix3 hidden conditional column recovery', () => {
+  it('selects a hidden column through the original table schema', () => {
+    const table=createDynamicTable(3,'items',1);
+    table.columns[1]!.conditionalRendering={enabled:true,action:'show',match:'all',rules:[{id:'r',field:'ShowDiscount',operator:'equals',value:'Yes'}]};
+    const cellId=tableColumnSelectionCellId(table,table.columns[1]!.id);
+    expect(cellId).toBe(table.bodyRows[0]!.cells[1]!.id);
+    const selected=selectTableColumn(table,table.columns[1]!.id);
+    expect(selected.selectedCellId).toBe(cellId);
+  });
+
+  it('does not change table structure when selecting a hidden column for recovery', () => {
+    const table=createDynamicTable(4,'items',1);
+    const beforeColumns=table.columns.map((column)=>column.id);
+    const beforeBodyCells=table.bodyRows[0]!.cells.map((cell)=>cell.id);
+    const selected=selectTableColumn(table,table.columns[2]!.id);
+    expect(selected.columns.map((column)=>column.id)).toEqual(beforeColumns);
+    expect(selected.bodyRows[0]!.cells.map((cell)=>cell.id)).toEqual(beforeBodyCells);
   });
 });

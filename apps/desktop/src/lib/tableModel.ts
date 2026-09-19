@@ -1,5 +1,6 @@
 import type { FieldDefinition, NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
 import type { BuilderDataSource } from './dataSourceStore.ts';
+import { evaluateBuilderConditionalRendering, normalizeConditionalRendering, type BuilderConditionalRendering } from './conditionalRendering.ts';
 
 export type TableMode = 'dynamic' | 'custom';
 export type TableCellType = 'text' | 'image' | 'qr' | 'barcode';
@@ -93,6 +94,8 @@ export type GroupedFinalSummaryConfig = {
   columns: GroupedFinalSummaryColumn[];
 };
 
+export type TableColumnConditionScope = 'document' | 'anyRow' | 'allRows';
+
 export type TableColumn = {
   id: string;
   key: string;
@@ -105,6 +108,9 @@ export type TableColumn = {
   format?: TableDataFormat;
   /** DB-4P Fix1: user-controlled width hint. When true, smart sizing respects this column more strongly. */
   manualWidth?: boolean;
+  /** UX-8.4: whole-column visibility. */
+  conditionalRendering?: BuilderConditionalRendering;
+  conditionScope?: TableColumnConditionScope;
 };
 
 export type TableBorderStyle = 'solid' | 'dashed' | 'dotted' | 'double' | 'none';
@@ -143,6 +149,8 @@ export type TableDefinition = {
   borderStyle?: TableBorderStyle;
   defaultPadding: number;
   selectedCellId?: string;
+  /** UX-8.4: filter dynamic runtime rows before pagination/rendering. */
+  rowConditionalRendering?: BuilderConditionalRendering;
 };
 
 const defaultCellStyle = (): TableCellStyle => ({
@@ -490,6 +498,33 @@ export function findTableCellLocation(table: TableDefinition, cellId: string | u
   return null;
 }
 
+export function tableColumnSelectionCellId(table: TableDefinition, columnId: string): string | undefined {
+  const columnIndex = table.columns.findIndex((column) => column.id === columnId);
+  if (columnIndex < 0) return undefined;
+  const preferredSections: Array<TableCellLocation['section']> = ['bodyRows', 'rows', 'headerRows', 'customRows'];
+  let fallback: string | undefined;
+  for (const section of preferredSections) {
+    for (const row of table[section]) {
+      let visual = 0;
+      for (const cell of row.cells) {
+        const span = Math.max(1, cell.colSpan);
+        if (columnIndex >= visual && columnIndex < visual + span) {
+          if (span === 1 && visual === columnIndex) return cell.id;
+          fallback ??= cell.id;
+          break;
+        }
+        visual += span;
+      }
+    }
+  }
+  return fallback;
+}
+
+export function selectTableColumn(table: TableDefinition, columnId: string): TableDefinition {
+  const cellId = tableColumnSelectionCellId(table, columnId);
+  return cellId ? { ...table, selectedCellId: cellId } : table;
+}
+
 function patchSection(table: TableDefinition, section: TableCellLocation['section'], rows: TableRow[]): TableDefinition {
   return { ...table, [section]: rows };
 }
@@ -702,6 +737,87 @@ function compactValueText(value: unknown): string {
 }
 
 /** DB-4.2 Fix5: content-aware width distribution while always fitting 100%. */
+export function isTableGapColumn(table: TableDefinition, columnIndex: number): boolean {
+  const rows = [...table.headerRows, ...table.bodyRows, ...table.customRows, ...table.rows];
+  if (!rows.length) return false;
+  let seen = false;
+  for (const row of rows) {
+    const cell = visualCellAtColumn(row, columnIndex);
+    if (!cell) continue;
+    seen = true;
+    const hasContent = Boolean(
+      cell.content?.trim() ||
+      cell.binding?.trim() ||
+      cell.formula?.trim() ||
+      cell.summaryFormula?.trim() ||
+      cell.summaryName?.trim() ||
+      cell.aggregate?.field?.trim() ||
+      cell.imageSource?.trim() ||
+      cell.imageAssetId?.trim() ||
+      cell.type === 'image'
+    );
+    if (hasContent) return false;
+  }
+  return seen;
+}
+
+/**
+ * UX-8.4 Fix1: preserve intentional table spacing when conditional columns disappear.
+ * The full-table width plan remains the baseline. Hidden width is absorbed by nearby
+ * content columns, while structural blank/gap columns keep their designed percentage.
+ */
+export function stableConditionalColumnWidths(
+  table: TableDefinition,
+  visibleIndexes: number[],
+  runtimeValues: unknown[] = [],
+): number[] {
+  if (!visibleIndexes.length) return [];
+  const full = smartColumnWidths(table, runtimeValues);
+  if (visibleIndexes.length === table.columns.length) return full;
+
+  const spacerIndexes = visibleIndexes.filter((index) => isTableGapColumn(table, index));
+  const contentIndexes = visibleIndexes.filter((index) => !isTableGapColumn(table, index));
+  const fixedSpacerTotal = spacerIndexes.reduce((sum, index) => sum + (full[index] ?? 0), 0);
+  const contentTarget = Math.max(0, 100 - fixedSpacerTotal);
+  const visibleContentBase = contentIndexes.reduce((sum, index) => sum + (full[index] ?? 0), 0);
+
+  const result = visibleIndexes.map((index) => {
+    if (spacerIndexes.includes(index)) return full[index] ?? 0;
+    if (!contentIndexes.length) return 0;
+    if (visibleContentBase <= 0) return contentTarget / contentIndexes.length;
+    return ((full[index] ?? 0) / visibleContentBase) * contentTarget;
+  });
+
+  const sum = result.reduce((total, value) => total + value, 0);
+  if (sum <= 0) return visibleIndexes.map(() => 100 / visibleIndexes.length);
+  return result.map((value) => (value / sum) * 100);
+}
+
+/**
+ * Projects the runtime table to only visible columns and applies the resolved
+ * conditional width plan to that projected table. This is the authoritative
+ * schema for pagination/height estimation after conditions have been evaluated.
+ */
+export function projectConditionalRuntimeTable(
+  table: TableDefinition,
+  visibleIndexes: number[],
+  runtimeValues: unknown[] = [],
+): { table: TableDefinition; columnWidths: number[] } {
+  const projected = projectTableVisibleColumns(table, visibleIndexes);
+  const columnWidths = stableConditionalColumnWidths(table, visibleIndexes, runtimeValues);
+  return {
+    table: {
+      ...projected,
+      columns: projected.columns.map((column, index) => ({
+        ...column,
+        width: Math.max(1, columnWidths[index] ?? (100 / Math.max(1, projected.columns.length))) * 10,
+        manualWidth: true,
+      })),
+    },
+    columnWidths,
+  };
+}
+
 export function smartColumnWidths(table: TableDefinition, runtimeValues: unknown[] = []): number[] {
   const columns = table.columns;
   if (columns.length === 0) return [];
@@ -1341,6 +1457,7 @@ export function dynamicRows(
   record: NormalizedRecord | null,
   source?: BuilderDataSource | null,
   parentSource?: BuilderDataSource | null,
+  resolveDocumentField?: (field: string) => unknown,
 ): TablePaginationRuntimeRow[] {
   if (table.mode !== 'dynamic' || !table.binding?.repeatSource) return [];
 
@@ -1372,6 +1489,16 @@ export function dynamicRows(
     }
   }
 
+  const rowCondition = normalizeConditionalRendering(table.rowConditionalRendering);
+  if (rowCondition.enabled) {
+    filtered = filtered.filter((item) => evaluateBuilderConditionalRendering(rowCondition, (field) => {
+      const rowValue = valueAtPath(item, field);
+      if (rowValue !== undefined) return rowValue;
+      const resolved = resolveDocumentField?.(field);
+      return resolved !== undefined ? resolved : valueAtPath(record, field);
+    }));
+  }
+
   const grouping = table.binding.grouping;
   if (grouping?.groupBy?.length && grouping.columns?.length) {
     return groupedRuntimeRows(table, filtered, grouping);
@@ -1383,6 +1510,63 @@ export function dynamicRows(
     const rec = (item && typeof item === 'object' && !Array.isArray(item) ? item : { value: item }) as NormalizedRecord;
     return { key: configured == null ? `${table.id}::${index}` : `${table.id}::${configured}`, value: rec };
   });
+}
+
+export function visibleTableColumnIndexes(
+  table: TableDefinition,
+  documentRecord: NormalizedRecord | null,
+  runtimeRows: TablePaginationRuntimeRow[],
+  resolveDocumentField?: (field: string) => unknown,
+): number[] {
+  const documentResolver = (field: string) => {
+    const resolved = resolveDocumentField?.(field);
+    return resolved !== undefined ? resolved : valueAtPath(documentRecord, field);
+  };
+  return table.columns.flatMap((column, index) => {
+    const condition = normalizeConditionalRendering(column.conditionalRendering);
+    if (!condition.enabled) return [index];
+    const scope = column.conditionScope ?? 'document';
+    let visible = true;
+    if (scope === 'document') visible = evaluateBuilderConditionalRendering(condition, documentResolver);
+    else if (scope === 'anyRow') visible = runtimeRows.some((runtimeRow) => evaluateBuilderConditionalRendering(condition, (field) => {
+      const rowValue = valueAtPath(runtimeRow.value, field);
+      return rowValue !== undefined ? rowValue : documentResolver(field);
+    }));
+    else visible = runtimeRows.length > 0 && runtimeRows.every((runtimeRow) => evaluateBuilderConditionalRendering(condition, (field) => {
+      const rowValue = valueAtPath(runtimeRow.value, field);
+      return rowValue !== undefined ? rowValue : documentResolver(field);
+    }));
+    return visible ? [index] : [];
+  });
+}
+
+export function projectTableVisibleColumns(table: TableDefinition, visibleIndexes: number[]): TableDefinition {
+  if (visibleIndexes.length === table.columns.length) return table;
+  const visible = new Set(visibleIndexes);
+  const projectRow = (row: TableRow): TableRow => {
+    let sourceColumn = 0;
+    const cells: TableCell[] = [];
+    for (const cell of row.cells) {
+      const span = Math.max(1, cell.colSpan);
+      const covered = Array.from({ length: span }, (_, offset) => sourceColumn + offset);
+      const visibleCovered = covered.filter((index) => visible.has(index));
+      sourceColumn += span;
+      if (!visibleCovered.length) continue;
+      cells.push({ ...cell, colSpan: visibleCovered.length });
+    }
+    return { ...row, cells };
+  };
+  return {
+    ...table,
+    columns: visibleIndexes.map((index) => table.columns[index]!).filter(Boolean),
+    headerRows: table.headerRows.map(projectRow),
+    bodyRows: table.bodyRows.map(projectRow),
+    customRows: table.customRows.map(projectRow),
+    rows: table.rows.map(projectRow),
+    selectedCellId: table.selectedCellId && [...table.headerRows,...table.bodyRows,...table.customRows,...table.rows]
+      .flatMap((row) => row.cells)
+      .some((cell) => cell.id === table.selectedCellId) ? table.selectedCellId : undefined,
+  };
 }
 
 function groupedRuntimeRows(table: TableDefinition, rows: unknown[], grouping: GroupedTableConfig): Array<{ key: string; value: NormalizedRecord }> {
@@ -1507,8 +1691,8 @@ function rowEstimatedHeight(row: TableRow): number {
  * Product Description). Pagination must therefore reserve the height of the
  * actual runtime value, not only the one-line design template.
  */
-function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableWidthPx = 760): number {
-  const widths = smartColumnWidths(table, [runtimeValue]);
+function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableWidthPx = 760, resolvedColumnWidths?: number[]): number {
+  const widths = resolvedColumnWidths?.length === table.columns.length ? resolvedColumnWidths : smartColumnWidths(table, [runtimeValue]);
   let total = 0;
   for (const row of table.bodyRows) {
     if (!row.autoHeight) { total += Math.max(18, row.height); continue; }
@@ -1549,6 +1733,7 @@ export function paginateDynamicTable(
   availableHeightPx: number,
   continuationHeightPx: number = availableHeightPx,
   tableWidthPx: number = 760,
+  resolvedColumnWidths?: number[],
 ): TablePaginationPage[] {
   const makeSinglePage = (): TablePaginationPage => {
     const available = Math.max(0, availableHeightPx);
@@ -1620,7 +1805,7 @@ export function paginateDynamicTable(
   for (let i = 0; i < runtimeRows.length; i += 1) {
     const runtimeRow = runtimeRows[i];
     const bodyHeight = table.bodyRows.some((row) => row.autoHeight)
-      ? runtimeBodyHeight(table, runtimeRow.value, tableWidthPx)
+      ? runtimeBodyHeight(table, runtimeRow.value, tableWidthPx, resolvedColumnWidths)
       : defaultBodyHeight;
     // Every complete runtime row must fit before the hard Body/Footer boundary.
     // Wrapped rows are measured from their runtime content, so a two-line Product

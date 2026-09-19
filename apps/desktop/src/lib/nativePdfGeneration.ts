@@ -11,6 +11,7 @@ import type {
   CustomTableBlock,
   DisplayFormatDefinition,
 } from '@document-tool/contracts';
+import { toApiSafePath } from '@document-tool/contracts';
 import { TemplateEngine, createQrSvgDataUrl } from '@document-tool/template-engine';
 import { CombinedPdfRenderer, PdfRenderer } from '@document-tool/renderer-pdf';
 import type { BuilderDataSource } from './dataSourceStore.ts';
@@ -18,9 +19,11 @@ import { displayValue, valueForField } from './dataSourceStore.ts';
 import { loadImageAsset } from './imageAssetStore.ts';
 import { normalizePageSettings, type PageSettings, type WatermarkSettings } from './pageModel.ts';
 import { amountToIndianWords } from './numberToWords.ts';
+import { toVisibilityRule, type BuilderConditionalRendering } from './conditionalRendering.ts';
 import {
   dynamicRows,
   evaluateTableFormula,
+  isTableGapColumn,
   type TableDataFormat,
   type TableDataType,
   type TableDefinition,
@@ -48,7 +51,7 @@ type BuilderElement = {
   imageBackground?: string; imageOpacity?: number; imageBorderStyle?: 'none'|'solid'|'dashed'|'dotted'; imageBorderWidth?: number; imageBorderColor?: string; imageBorderRadius?: number;
   imageBrightness?: number; imageContrast?: number; imageSaturation?: number; imageGrayscale?: number; imageSepia?: number; imageBlur?: number;
   imageShadowEnabled?: boolean; imageOriginalAssetId?: string; imageOriginalSource?: string;
-  shapeKind?: string; shapeContentMode?: string; shapeMediaBinding?: string; shapeFillType?: string; shapeFillColor2?: string; shapeStrokeStyle?: string; shapeStrokeWidth?: number; shapeStrokeAlignment?: string; shapeCornerRadius?: number; shapeShadowEnabled?: boolean; shapeGlowEnabled?: boolean; shapeClipMedia?: boolean; shapeMediaOverlayOpacity?: number; conditionEnabled?: boolean;
+  shapeKind?: string; shapeContentMode?: string; shapeMediaBinding?: string; shapeFillType?: string; shapeFillColor2?: string; shapeStrokeStyle?: string; shapeStrokeWidth?: number; shapeStrokeAlignment?: string; shapeCornerRadius?: number; shapeShadowEnabled?: boolean; shapeGlowEnabled?: boolean; shapeClipMedia?: boolean; shapeMediaOverlayOpacity?: number; conditionalRendering?: BuilderConditionalRendering; conditionEnabled?: boolean; conditionField?: string; conditionOperator?: any; conditionValue?: string;
   qrForeground?: string; qrBackground?: string; qrQuietZone?: number; qrErrorCorrection?: string; qrShowValue?: boolean;
   barcodeForeground?: string; barcodeBackground?: string; barcodeShowText?: boolean; barcodeTextSize?: number; barcodeBarHeight?: number; barcodeQuietZone?: number;
   table?: TableDefinition; region?: 'body'|'header'|'footer'; layoutMode?: 'flow'|'floating'; flowRowId?: string;
@@ -132,7 +135,6 @@ export function analyzeNativePdfCompatibility(raw: string | null, source?: Build
   if(elements.some((e)=>e.type==='shape' && ((e.shapeKind??'rectangle')!=='rectangle' || (e.shapeContentMode??(e.text?'text':'none'))!=='text' || (e.shapeFillType??'solid')!=='solid' || (e.shapeStrokeStyle??'none')!=='none' || (e.shapeStrokeWidth??0)>0 || (e.shapeStrokeAlignment??'center')!=='center' || (e.shapeCornerRadius??0)>0 || !!e.shapeShadowEnabled || !!e.shapeGlowEnabled || !!e.shapeMediaBinding))) reasons.push('Advanced Shape geometry, media or effects require Exact Preview for visual fidelity.');
   if(elements.some((e)=>e.type==='qr' && ((e.qrForeground??'#111827').toUpperCase()!=='#111827' || (e.qrBackground??'#FFFFFF').toUpperCase()!=='#FFFFFF' || (e.qrQuietZone??8)!==8 || (e.qrErrorCorrection??'M')!=='M' || (e.qrShowValue??true)!==true))) reasons.push('Advanced QR formatting currently requires Exact Preview for visual fidelity.');
   if(elements.some((e)=>e.type==='barcode' && ((e.barcodeForeground??'#111827').toUpperCase()!=='#111827' || (e.barcodeBackground??'#FFFFFF').toUpperCase()!=='#FFFFFF' || (e.barcodeShowText??true)!==true || (e.barcodeTextSize??11)!==11 || (e.barcodeBarHeight??54)!==54 || (e.barcodeQuietZone??8)!==8))) reasons.push('Advanced Barcode formatting currently requires Exact Preview for visual fidelity.');
-  if(elements.some((e)=>!!e.conditionEnabled)) reasons.push('Conditional element visibility currently requires Exact Preview for visual fidelity.');
   const unsupportedFonts=[...new Set(elements.map((e)=>e.fontFamily).filter((font):font is string=>!!font&&!isNativeFont(font)))];
   if(unsupportedFonts.length) warnings.push(`Native PDF substitutes unsupported fonts with a core PDF font: ${unsupportedFonts.join(', ')}.`);
   return {supported:reasons.length===0,reasons:[...new Set(reasons)],warnings:[...new Set(warnings)]};
@@ -246,7 +248,7 @@ async function prepareNativeTemplate(raw:string|null,source:BuilderDataSource):P
     const footerElements=master.filter((e)=>(e.region??'body')==='footer');
     const template:TemplateDefinition={
       id:`builder-native:${page.id}`,name:saved.name?.trim()||'Document',version:1,
-      page:toPageDefinition(page.settings),
+      page:toPageDefinition(page.settings,formulaMap),
       header:{blocks:page.settings.header.enabled?await convertRegion(headerElements,formulaMap,tableMedia,customMedia):[]},
       body:{blocks:await convertBody(bodyElements,formulaMap,tableMedia,customMedia)},
       footer:{blocks:page.settings.footer.enabled?await convertRegion(footerElements,formulaMap,tableMedia,customMedia):[]},
@@ -302,12 +304,12 @@ function normalizedBuilderPages(saved:SavedBuilderTemplate):BuilderPage[]{
   return [{id:'page-1',name:'Page 1',settings,elements:saved.elements??[]}];
 }
 function defaultLegacySettings(saved:SavedBuilderTemplate):PageSettings{return {preset:(saved.pageSize as any)||'A4',orientation:(saved.orientation as any)||'Portrait',unit:'mm',customWidthMm:210,customHeightMm:297,marginsMm:{top:15,right:15,bottom:15,left:15},bleedMm:{top:0,right:0,bottom:0,left:0},safeAreaMm:5,background:'#ffffff',borderColor:'#d2d8e0',borderWidth:0,borderAlignment:'inside',borderOffsetMm:0,showGuides:false,header:{enabled:false,heightMm:20,gapMm:5,repeat:'every'},footer:{enabled:false,heightMm:15,gapMm:5,repeat:'every'},watermark:{enabled:false,type:'text',text:'CONFIDENTIAL',opacity:20,rotation:-45,fontSize:56,color:'#64748B',position:'center',scale:60,customXPercent:50,customYPercent:50,applyTo:'all',layer:'behind'}};}
-function toPageDefinition(s:PageSettings):TemplateDefinition['page']{
+function toPageDefinition(s:PageSettings,formulaMap:Map<string,string>=new Map()):TemplateDefinition['page']{
   const preset=String(s.preset).toUpperCase();const size=(preset==='LETTER'||preset==='LEGAL'||preset==='TABLOID'||preset==='LEDGER'||preset==='EXECUTIVE'||/^[AB][0-9]+$/.test(preset))?preset:'CUSTOM';
   const headerMode=s.header.repeat==='first'?'FIRST_PAGE_ONLY':s.header.repeat==='exceptFirst'?'EXCEPT_FIRST':'EVERY_PAGE';
   const footerMode=s.footer.enabled?(s.footer.repeat==='first'?'FIRST_PAGE_ONLY':s.footer.repeat==='exceptFirst'?'EXCEPT_FIRST':'REPEAT_PAGE'):'FLOW';
   const watermarkPosition=s.watermark.position.replace(/-/g,'_').toUpperCase();
-  return {size:size as any,orientation:s.orientation==='Landscape'?'LANDSCAPE':'PORTRAIT',margins:{...s.marginsMm},customWidthMm:s.customWidthMm,customHeightMm:s.customHeightMm,backgroundColor:s.background,border:{enabled:s.borderWidth>0,style:'SOLID',width:s.borderWidth,color:s.borderColor,offset:s.borderOffsetMm},pagination:{repeatHeader:s.header.enabled&&s.header.repeat==='every',headerMode:s.header.enabled?headerMode:'FIRST_PAGE_ONLY',footerMode,showPageNumbers:false,keepSummaryTogether:true,keepCustomGridTogether:true},watermark:{enabled:s.watermark.enabled,type:s.watermark.type==='image'?'IMAGE':'TEXT',text:s.watermark.text,imageSource:s.watermark.imageSource,opacity:Math.max(0,Math.min(1,s.watermark.opacity/100)),rotation:s.watermark.rotation,fontSize:Math.max(6,s.watermark.fontSize*72/96),color:s.watermark.color,position:(['CENTER','TOP_LEFT','TOP_RIGHT','BOTTOM_LEFT','BOTTOM_RIGHT','CUSTOM'].includes(watermarkPosition)?watermarkPosition:'CENTER') as NonNullable<TemplateDefinition['page']['watermark']>['position'],scale:Math.max(.05,Math.min(2,s.watermark.scale/100)),customXPercent:Math.max(0,Math.min(100,s.watermark.customXPercent)),customYPercent:Math.max(0,Math.min(100,s.watermark.customYPercent)),applyTo:s.watermark.applyTo==='first'?'FIRST_PAGE':'ALL',layer:s.watermark.layer==='above'?'ABOVE':'BEHIND'}};
+  return {size:size as any,orientation:s.orientation==='Landscape'?'LANDSCAPE':'PORTRAIT',margins:{...s.marginsMm},customWidthMm:s.customWidthMm,customHeightMm:s.customHeightMm,backgroundColor:s.background,border:{enabled:s.borderWidth>0,style:'SOLID',width:s.borderWidth,color:s.borderColor,offset:s.borderOffsetMm},pagination:{repeatHeader:s.header.enabled&&s.header.repeat==='every',headerMode:s.header.enabled?headerMode:'FIRST_PAGE_ONLY',footerMode,showPageNumbers:false,keepSummaryTogether:true,keepCustomGridTogether:true},watermark:{enabled:s.watermark.enabled,type:s.watermark.type==='image'?'IMAGE':'TEXT',text:s.watermark.text,imageSource:s.watermark.imageSource,opacity:Math.max(0,Math.min(1,s.watermark.opacity/100)),rotation:s.watermark.rotation,fontSize:Math.max(6,s.watermark.fontSize*72/96),color:s.watermark.color,position:(['CENTER','TOP_LEFT','TOP_RIGHT','BOTTOM_LEFT','BOTTOM_RIGHT','CUSTOM'].includes(watermarkPosition)?watermarkPosition:'CENTER') as NonNullable<TemplateDefinition['page']['watermark']>['position'],scale:Math.max(.05,Math.min(2,s.watermark.scale/100)),customXPercent:Math.max(0,Math.min(100,s.watermark.customXPercent)),customYPercent:Math.max(0,Math.min(100,s.watermark.customYPercent)),applyTo:s.watermark.applyTo==='first'?'FIRST_PAGE':'ALL',layer:s.watermark.layer==='above'?'ABOVE':'BEHIND',...(nativeVisibility(s.watermark.conditionalRendering,formulaMap)?{visibility:nativeVisibility(s.watermark.conditionalRendering,formulaMap)}:{})}};
 }
 function findParentKeys(elements:BuilderElement[],sourceId:string){for(const e of elements){if(e.type==='table'&&e.table?.mode==='dynamic'&&(!e.table.binding?.sourceId||e.table.binding.sourceId===sourceId)){const keys=e.table.binding?.parentKeys?.filter(Boolean)??(e.table.binding?.parentKey?[e.table.binding.parentKey]:[]);if(keys.length)return keys;}}return [] as string[];}
 
@@ -327,30 +329,34 @@ async function convertRegion(elements:BuilderElement[],formulaMap:Map<string,str
   for(const element of sorted){const block=await convertElement(element,formulaMap,false,tableMedia,customMedia);if(!block)continue;const gap=previousBottom==null?0:Math.max(0,pxToMm(element.y-previousBottom));block.layout={...(block.layout??{}),marginTop:gap};out.push(block);previousBottom=Math.max(element.y+element.height,previousBottom??0);}return out;
 }
 async function convertElement(element:BuilderElement,formulaMap:Map<string,string>,inRow:boolean,tableMedia:TableMediaSpec[],customMedia:CustomMediaSpec[]):Promise<TemplateBlock|null>{
+  const visibility=nativeVisibility(element.conditionalRendering ?? (element.conditionEnabled||element.conditionField ? {
+    enabled:Boolean(element.conditionEnabled),action:'show',match:'all',rules:[{id:'legacy',field:element.conditionField??'',operator:element.conditionOperator??'equals',value:element.conditionValue??''}]
+  } : undefined),formulaMap);
+  const visibilityPart=visibility?{visibility}:{};
   const layout={widthPercent:inRow?100:Math.max(1,Math.min(100,element.flowWidthPercent??100)),alignment:alignment(element.textAlign),marginTop:element.flowGapBeforeMm??0,marginBottom:element.flowGapAfterMm??0,keepTogether:element.type!=='table'} as any;
   const style:TextStyle={fontFamily:nativeFontFamily(element.fontFamily),fontSize:Math.max(6,element.fontSize||11),bold:(element.fontWeight??400)>=600,italic:!!element.italic,underline:!!element.underline,textColor:element.color||'#111827',backgroundColor:element.fill&&element.fill!=='transparent'?element.fill:undefined,alignment:alignment(element.textAlign),lineHeight:element.lineHeight};
   if(element.type==='text'){
-    const binding=rewriteFormulaPath(element.binding,formulaMap);if(binding)return {id:element.id,type:'FIELD',path:binding,valueStyle:style,textAlignment:alignment(element.textAlign),layout};
-    return {id:element.id,type:'TEXT',text:rewriteFormulaTokens(element.text??'',formulaMap),style,layout};
+    const binding=rewriteFormulaPath(element.binding,formulaMap);if(binding)return {id:element.id,type:'FIELD',...visibilityPart,path:binding,valueStyle:style,textAlignment:alignment(element.textAlign),layout};
+    return {id:element.id,type:'TEXT',...visibilityPart,text:rewriteFormulaTokens(element.text??'',formulaMap),style,layout};
   }
-  if(element.type==='divider')return {id:element.id,type:'DIVIDER',thickness:Math.max(.2,pxToMm(Math.max(1,element.height))),color:element.color||'#94A3B8',style:'SOLID',layout};
+  if(element.type==='divider')return {id:element.id,type:'DIVIDER',...visibilityPart,thickness:Math.max(.2,pxToMm(Math.max(1,element.height))),color:element.color||'#94A3B8',style:'SOLID',layout};
   if(element.type==='shape'){
     const child=element.binding?{id:`${element.id}:value`,type:'FIELD' as const,path:rewriteFormulaPath(element.binding,formulaMap)!,valueStyle:style,textAlignment:alignment(element.textAlign)}:{id:`${element.id}:text`,type:'TEXT' as const,text:rewriteFormulaTokens(element.text??'',formulaMap),style};
-    return {id:element.id,type:'BOX',style:{widthMode:'PERCENT',widthPercent:layout.widthPercent,heightMode:'FIXED',heightMm:pxToMm(element.height),backgroundColor:element.fill||'#ffffff',border:{width:0,color:element.color||'#000000',style:'NONE'},padding:{top:1,right:1,bottom:1,left:1},horizontalAlignment:alignment(element.textAlign),verticalAlignment:'CENTER'},children:[child] as any,layout};
+    return {id:element.id,type:'BOX',...visibilityPart,style:{widthMode:'PERCENT',widthPercent:layout.widthPercent,heightMode:'FIXED',heightMm:pxToMm(element.height),backgroundColor:element.fill||'#ffffff',border:{width:0,color:element.color||'#000000',style:'NONE'},padding:{top:1,right:1,bottom:1,left:1},horizontalAlignment:alignment(element.textAlign),verticalAlignment:'CENTER'},children:[child] as any,layout};
   }
   if(element.type==='image'||element.type==='signature'){
     let source=element.imageSource||'';if(!source&&element.imageAssetId){const blob=await loadImageAsset(element.imageAssetId);if(blob)source=await blobToDataUrl(blob);}if(source)source=await normalizeNativeImageSource(source);if(!source&&element.binding)source=EMPTY_JPEG_DATA_URL;if(!source)return null;
-    return {id:element.id,type:'IMAGE',sourceType:'DATA_URL',source,altText:element.type==='signature'?'Signature':'Image',width:pxToMm(element.width),height:pxToMm(element.height),maintainAspectRatio:element.imageFit!=='fill',alignment:alignment(element.textAlign),layout};
+    return {id:element.id,type:'IMAGE',...visibilityPart,sourceType:'DATA_URL',source,altText:element.type==='signature'?'Signature':'Image',width:pxToMm(element.width),height:pxToMm(element.height),maintainAspectRatio:element.imageFit!=='fill',alignment:alignment(element.textAlign),layout};
   }
   if(element.type==='qr'||element.type==='barcode'){
     const value=element.text?.trim()||' ';const source=element.type==='qr'?createQrSvgDataUrl(value):createCode39SvgDataUrl(value);
-    return {id:element.id,type:'IMAGE',sourceType:'DATA_URL',source,altText:element.type==='qr'?'QR Code':'Barcode',width:pxToMm(element.width),height:pxToMm(element.height),maintainAspectRatio:false,alignment:alignment(element.textAlign),layout};
+    return {id:element.id,type:'IMAGE',...visibilityPart,sourceType:'DATA_URL',source,altText:element.type==='qr'?'QR Code':'Barcode',width:pxToMm(element.width),height:pxToMm(element.height),maintainAspectRatio:false,alignment:alignment(element.textAlign),layout};
   }
-  if(element.type==='table'&&element.table)return convertTable(element,layout,tableMedia,customMedia,formulaMap);
+  if(element.type==='table'&&element.table)return convertTable(element,layout,tableMedia,customMedia,formulaMap,visibility);
   return null;
 }
 
-function convertTable(element:BuilderElement,layout:any,tableMedia:TableMediaSpec[],customMedia:CustomMediaSpec[],formulaMap:Map<string,string>):TableBlock|CustomTableBlock{
+function convertTable(element:BuilderElement,layout:any,tableMedia:TableMediaSpec[],customMedia:CustomMediaSpec[],formulaMap:Map<string,string>,elementVisibility?:import('@document-tool/contracts').VisibilityRule):TableBlock|CustomTableBlock{
   const t=element.table!;
   if(t.mode==='custom'){
     const rows=t.rows.length?t.rows:t.customRows;const cells:any[]=[];
@@ -364,20 +370,20 @@ function convertTable(element:BuilderElement,layout:any,tableMedia:TableMediaSpe
       else content={type:'TEXT',text:cell.content||'',style:cellTextStyle(cell.style)};
       cells.push({id:cell.id,row:rowIndex,column:columnIndex,rowSpan:cell.rowSpan||1,colSpan:cell.colSpan||1,content,style:{backgroundColor:cell.style.background,border:{width:t.borderWidth,color:t.borderColor,style:borderStyle(t.borderStyle)},padding:{top:pxToMm(cell.style.padding),right:pxToMm(cell.style.padding),bottom:pxToMm(cell.style.padding),left:pxToMm(cell.style.padding)},verticalAlignment:cell.style.verticalAlign==='bottom'?'BOTTOM':cell.style.verticalAlign==='middle'?'CENTER':'TOP'}});
     }));
-    return {id:element.id,type:'CUSTOM_TABLE',rowCount:rows.length,columnCount:t.columns.length,cells,tableStyle:{showBorder:t.borderStyle!=='none'&&t.borderWidth>0,widthPercent:layout.widthPercent,border:{width:t.borderWidth,color:t.borderColor,style:borderStyle(t.borderStyle)},cellPadding:{top:pxToMm(t.defaultPadding),right:pxToMm(t.defaultPadding),bottom:pxToMm(t.defaultPadding),left:pxToMm(t.defaultPadding)}},layout};
+    return {id:element.id,type:'CUSTOM_TABLE',...(elementVisibility?{visibility:elementVisibility}:{}),rowCount:rows.length,columnCount:t.columns.length,cells,tableStyle:{showBorder:t.borderStyle!=='none'&&t.borderWidth>0,widthPercent:layout.widthPercent,border:{width:t.borderWidth,color:t.borderColor,style:borderStyle(t.borderStyle)},cellPadding:{top:pxToMm(t.defaultPadding),right:pxToMm(t.defaultPadding),bottom:pxToMm(t.defaultPadding),left:pxToMm(t.defaultPadding)}},layout};
   }
   const body=t.bodyRows[0];const header=t.headerRows[0];const grouping=t.binding?.grouping;const totalWidth=Math.max(1,t.columns.reduce((sum,c)=>sum+Math.max(1,c.width),0));
   const sourcePath=grouping?groupedSourcePath(t.id):'items';
   const columns=t.columns.map((c,index)=>{
     const cell=body?.cells[index];const h=header?.cells[index];const media=cell?tableMedia.find((item)=>item.cellId===cell.id):undefined;const groupedColumn=grouping?.columns[index];
     const defaultPath=grouping?(groupedColumn?.outputKey||c.key):(cell?.binding||c.key);
-    const base:any={id:c.id,label:h?.content||groupedColumn?.label||c.label||c.key,path:media?.syntheticPath||defaultPath,sourceField:defaultPath,targetPath:defaultPath,widthPercent:(Math.max(1,c.width)/totalWidth)*100,alignment:alignment(c.align),headerAlignment:alignment(h?.style.align||c.align),headerStyle:h?cellTextStyle(h.style):undefined,cellStyle:cell?cellTextStyle(cell.style):undefined,format:toDisplayFormat(c.dataType,c.format)};
+    const columnVisibility=nativeVisibility(c.conditionalRendering,formulaMap);const visibilityScope=c.conditionScope==='anyRow'?'ANY_ROW':c.conditionScope==='allRows'?'ALL_ROWS':'DOCUMENT';const base:any={id:c.id,label:h?.content||groupedColumn?.label||c.label||c.key,path:media?.syntheticPath||defaultPath,layoutRole:isTableGapColumn(t,index)?'SPACER':'CONTENT',sourceField:defaultPath,targetPath:defaultPath,widthPercent:(Math.max(1,c.width)/totalWidth)*100,alignment:alignment(c.align),headerAlignment:alignment(h?.style.align||c.align),headerStyle:h?cellTextStyle(h.style):undefined,cellStyle:cell?cellTextStyle(cell.style):undefined,format:toDisplayFormat(c.dataType,c.format),...(columnVisibility?{visibility:columnVisibility,visibilityScope}:{})};
     if(media){base.kind=media.kind==='qr'?'QR':'IMAGE';base.imageWidthMm=Math.max(10,pxToMm(c.width*.72));base.imageHeightMm=Math.max(10,pxToMm(body?.height??30)*.9);}
     else if(!grouping&&cell?.valueMode==='formula'&&cell.formula){const converted=convertFormulaExpression(cell.formula,t,sourcePath);base.kind='FORMULA';base.formulaExpression=converted.expression;base.formulaBindings=converted.bindings;}
     return base;
   });
   const footerRows:TableFooterRowDefinition[]=t.customRows.map((row)=>({id:row.id,cells:row.cells.map((cell,index)=>({id:cell.id,columnId:t.columns[index]?.id,colspan:cell.colSpan||1,value:footerValue(cell,t,sourcePath),alignment:alignment(cell.style.align),style:cellTextStyle(cell.style)})),backgroundColor:row.cells[0]?.style.background}));
-  return {id:element.id,type:'TABLE',sourcePath,columns,footerRows,tableStyle:{showHeader:t.headerRows.length>0,showBorder:t.borderStyle!=='none'&&t.borderWidth>0,widthPercent:layout.widthPercent,border:{width:t.borderWidth,color:t.borderColor,style:borderStyle(t.borderStyle)},headerStyle:header?.cells[0]?cellTextStyle(header.cells[0].style):undefined,cellStyle:body?.cells[0]?cellTextStyle(body.cells[0].style):undefined,cellPadding:{top:pxToMm(t.defaultPadding),right:pxToMm(t.defaultPadding),bottom:pxToMm(t.defaultPadding),left:pxToMm(t.defaultPadding)}},layout:{...layout,keepTogether:false}};
+  const rowFilter=nativeVisibility(t.rowConditionalRendering,formulaMap);return {id:element.id,type:'TABLE',...(elementVisibility?{visibility:elementVisibility}:{}),...(rowFilter?{rowFilter}:{}),sourcePath,columns,footerRows,tableStyle:{showHeader:t.headerRows.length>0,showBorder:t.borderStyle!=='none'&&t.borderWidth>0,widthPercent:layout.widthPercent,border:{width:t.borderWidth,color:t.borderColor,style:borderStyle(t.borderStyle)},headerStyle:header?.cells[0]?cellTextStyle(header.cells[0].style):undefined,cellStyle:body?.cells[0]?cellTextStyle(body.cells[0].style):undefined,cellPadding:{top:pxToMm(t.defaultPadding),right:pxToMm(t.defaultPadding),bottom:pxToMm(t.defaultPadding),left:pxToMm(t.defaultPadding)}},layout:{...layout,keepTogether:false}};
 }
 
 function footerValue(cell:TableCell,table:TableDefinition,sourcePath:string):AggregateValueDefinition{
@@ -404,6 +410,10 @@ function borderStyle(s?:string):'NONE'|'SOLID'|'DASHED'{return s==='none'?'NONE'
 function toDisplayFormat(type?:TableDataType,format?:TableDataFormat):DisplayFormatDefinition|undefined{if(!type||type==='text')return undefined;if(type==='number'||type==='decimal')return {type:'NUMBER',decimals:type==='number'?0:(format?.decimals??2),useGrouping:format?.thousandsSeparator!==false};if(type==='currency')return {type:'CURRENCY',decimals:format?.decimals??2,useGrouping:format?.thousandsSeparator!==false,currencyCode:format?.currencyCode,currencySymbol:format?.currencySymbol};if(type==='percentage')return {type:'PERCENT',decimals:format?.decimals??2,percentInputMode:format?.percentInputMode==='whole'?'WHOLE':'FRACTION'};if(type==='date')return {type:'DATE',dateStyle:'SHORT'};if(type==='datetime')return {type:'DATETIME',dateStyle:'SHORT'};if(type==='checkbox')return {type:'BOOLEAN',trueLabel:format?.trueValue,falseLabel:format?.falseValue};return undefined;}
 function rewriteFormulaTokens(text:string,map:Map<string,string>){return text.replace(/\{\{\s*([^{}]+?)\s*\}\}/g,(full,name:string)=>{const alias=map.get(name.trim().toLocaleLowerCase());return alias?`{{calc.${alias}}}`:full;});}
 function rewriteFormulaPath(path:string|undefined,map:Map<string,string>){if(!path)return path;const alias=map.get(path.trim().toLocaleLowerCase());return alias?`calc.${alias}`:path;}
+function nativeVisibility(condition:BuilderConditionalRendering|undefined,map:Map<string,string>){
+  return toVisibilityRule(condition,(field)=>{const rewritten=rewriteFormulaPath(field,map)??field;return rewritten!==field?rewritten:toApiSafePath(field);});
+}
+
 
 function evaluateDocumentFormulas(formulas:FormulaSpec[],record:NormalizedRecord,aggregateRows:NormalizedRecord[]){
   const context:NormalizedRecord={...record};const resolved:NormalizedRecord={};const unresolved=new Set(formulas.map((item)=>item.id));
