@@ -1429,6 +1429,35 @@ export function visibleTableColumnIndexes(
   });
 }
 
+export function projectTableVisibleColumns(table: TableDefinition, visibleIndexes: number[]): TableDefinition {
+  if (visibleIndexes.length === table.columns.length) return table;
+  const visible = new Set(visibleIndexes);
+  const projectRow = (row: TableRow): TableRow => {
+    let sourceColumn = 0;
+    const cells: TableCell[] = [];
+    for (const cell of row.cells) {
+      const span = Math.max(1, cell.colSpan);
+      const covered = Array.from({ length: span }, (_, offset) => sourceColumn + offset);
+      const visibleCovered = covered.filter((index) => visible.has(index));
+      sourceColumn += span;
+      if (!visibleCovered.length) continue;
+      cells.push({ ...cell, colSpan: visibleCovered.length });
+    }
+    return { ...row, cells };
+  };
+  return {
+    ...table,
+    columns: visibleIndexes.map((index) => table.columns[index]!).filter(Boolean),
+    headerRows: table.headerRows.map(projectRow),
+    bodyRows: table.bodyRows.map(projectRow),
+    customRows: table.customRows.map(projectRow),
+    rows: table.rows.map(projectRow),
+    selectedCellId: table.selectedCellId && [...table.headerRows,...table.bodyRows,...table.customRows,...table.rows]
+      .flatMap((row) => row.cells)
+      .some((cell) => cell.id === table.selectedCellId) ? table.selectedCellId : undefined,
+  };
+}
+
 function groupedRuntimeRows(table: TableDefinition, rows: unknown[], grouping: GroupedTableConfig): Array<{ key: string; value: NormalizedRecord }> {
   const buckets = new Map<string, unknown[]>();
   const order: string[] = [];
