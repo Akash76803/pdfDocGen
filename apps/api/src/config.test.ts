@@ -2,7 +2,11 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_API_ABSOLUTE_MAX_BODY_MB,
   DEFAULT_API_MAX_BODY_MB,
+  DEFAULT_API_PORT,
+  DEFAULT_CLOUD_API_HOST,
+  DEFAULT_LOCAL_API_HOST,
   resolveApiBodyLimitConfig,
+  resolveApiServerConfig,
 } from './config.js';
 
 describe('DB-6B API body limit configuration', () => {
@@ -35,6 +39,39 @@ describe('DB-6B API body limit configuration', () => {
       requestedLimitMb: DEFAULT_API_MAX_BODY_MB,
       absoluteMaxMb: DEFAULT_API_ABSOLUTE_MAX_BODY_MB,
       effectiveLimitMb: DEFAULT_API_MAX_BODY_MB,
+    });
+  });
+});
+
+describe('CLOUD-1 API server configuration', () => {
+  it('keeps the local API loopback-only by default', () => {
+    expect(resolveApiServerConfig({})).toEqual({
+      host: DEFAULT_LOCAL_API_HOST,
+      port: DEFAULT_API_PORT,
+      cloudRuntime: false,
+    });
+  });
+
+  it('binds to all interfaces when running in Cloud Run', () => {
+    expect(resolveApiServerConfig({ K_SERVICE: 'document-builder-api', PORT: '8080' })).toEqual({
+      host: DEFAULT_CLOUD_API_HOST,
+      port: 8080,
+      cloudRuntime: true,
+    });
+  });
+
+  it('allows an explicit host override in cloud and local runtimes', () => {
+    expect(resolveApiServerConfig({ K_SERVICE: 'document-builder-api', HOST: '127.0.0.1', PORT: '9090' })).toEqual({
+      host: '127.0.0.1',
+      port: 9090,
+      cloudRuntime: true,
+    });
+  });
+
+  it('falls back safely for an invalid port', () => {
+    expect(resolveApiServerConfig({ PORT: '99999' })).toMatchObject({
+      host: DEFAULT_LOCAL_API_HOST,
+      port: DEFAULT_API_PORT,
     });
   });
 });
