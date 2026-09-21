@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ID="${PROJECT_ID:-pdf-gen-509308}"
+REGION="${REGION:-us-central1}"
+SERVICE="${SERVICE:-pdf-doc-gen-api-staging}"
+AUTH_SECRET="${AUTH_SECRET:-pdf-doc-gen-api-auth-token}"
+
+OLD_SECRET_VERSION="$(gcloud run services describe "$SERVICE"   --project="$PROJECT_ID"   --region="$REGION"   --format='value(spec.template.spec.containers[0].env[?name="API_AUTH_STATIC_BEARER_TOKEN"].valueFrom.secretKeyRef.key)')"
+
+[[ "$OLD_SECRET_VERSION" =~ ^[0-9]+$ ]] || {
+  echo "ERROR: could not resolve currently pinned numeric secret version." >&2
+  exit 1
+}
+
+NEW_TOKEN="$(openssl rand -base64 48 | tr -d '\n')"
+printf '%s' "$NEW_TOKEN" | gcloud secrets versions add "$AUTH_SECRET"   --project="$PROJECT_ID"   --data-file=- >/dev/null
+unset NEW_TOKEN
+
+NEW_SECRET_VERSION="$(gcloud secrets versions list "$AUTH_SECRET"   --project="$PROJECT_ID"   --filter='state=ENABLED'   --sort-by='~createTime'   --limit=1   --format='value(name)')"
+
+[[ "$NEW_SECRET_VERSION" =~ ^[0-9]+$ ]] || {
+  echo "ERROR: could not resolve new numeric secret version." >&2
+  exit 1
+}
+
+[[ "$NEW_SECRET_VERSION" != "$OLD_SECRET_VERSION" ]] || {
+  echo "ERROR: rotation did not create a new secret version." >&2
+  exit 1
+}
+
+echo "Rotating auth secret: $OLD_SECRET_VERSION -> $NEW_SECRET_VERSION"
+
+gcloud run services update "$SERVICE"   --project="$PROJECT_ID"   --region="$REGION"   --set-secrets="API_AUTH_STATIC_BEARER_TOKEN=$AUTH_SECRET:$NEW_SECRET_VERSION"   --revision-suffix="cloud5-rotate-$NEW_SECRET_VERSION"
+
+echo
+echo "Verifying new revision before disabling old secret version..."
+bash scripts/cloud5-security-audit.sh
+bash scripts/cloud5-hosted-auth-smoke.sh
+
+echo
+echo "Disabling old secret version: $OLD_SECRET_VERSION"
+gcloud secrets versions disable "$OLD_SECRET_VERSION"   --secret="$AUTH_SECRET"   --project="$PROJECT_ID" >/dev/null
+
+echo
+echo "Final audit after rotation..."
+bash scripts/cloud5-security-audit.sh
+
+echo
+echo "CLOUD-5.5 secret rotation verification PASS"
+echo "Active secret version: $NEW_SECRET_VERSION"
+echo "Disabled old version: $OLD_SECRET_VERSION"
