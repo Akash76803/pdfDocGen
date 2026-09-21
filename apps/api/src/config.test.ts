@@ -2,10 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_API_ABSOLUTE_MAX_BODY_MB,
   DEFAULT_API_MAX_BODY_MB,
+  DEFAULT_API_GENERATION_TIMEOUT_MS,
+  DEFAULT_API_MAX_BATCH_DOCUMENTS,
   DEFAULT_API_PORT,
   DEFAULT_CLOUD_API_HOST,
   DEFAULT_LOCAL_API_HOST,
   resolveApiBodyLimitConfig,
+  resolveApiGenerationLimitConfig,
   resolveApiRepositoryConfig,
   resolveApiServerConfig,
 } from './config.js';
@@ -40,6 +43,36 @@ describe('DB-6B API body limit configuration', () => {
       requestedLimitMb: DEFAULT_API_MAX_BODY_MB,
       absoluteMaxMb: DEFAULT_API_ABSOLUTE_MAX_BODY_MB,
       effectiveLimitMb: DEFAULT_API_MAX_BODY_MB,
+    });
+  });
+});
+
+describe('CLOUD-4 hosted generation limits',()=>{
+  it('uses bounded production-safe defaults',()=>{
+    expect(resolveApiGenerationLimitConfig({})).toMatchObject({
+      effectiveTimeoutMs:DEFAULT_API_GENERATION_TIMEOUT_MS,
+      effectiveMaxBatchDocuments:DEFAULT_API_MAX_BATCH_DOCUMENTS,
+    });
+  });
+
+  it('accepts runtime overrides and clamps them to absolute ceilings',()=>{
+    expect(resolveApiGenerationLimitConfig({
+      API_GENERATION_TIMEOUT_MS:'400000',
+      API_ABSOLUTE_GENERATION_TIMEOUT_MS:'295000',
+      API_MAX_BATCH_DOCUMENTS:'900',
+      API_ABSOLUTE_MAX_BATCH_DOCUMENTS:'500',
+    })).toMatchObject({
+      requestedTimeoutMs:400000,
+      effectiveTimeoutMs:295000,
+      requestedMaxBatchDocuments:900,
+      effectiveMaxBatchDocuments:500,
+    });
+  });
+
+  it('falls back safely for non-positive and non-integer values',()=>{
+    expect(resolveApiGenerationLimitConfig({API_GENERATION_TIMEOUT_MS:'0',API_MAX_BATCH_DOCUMENTS:'1.5'})).toMatchObject({
+      effectiveTimeoutMs:DEFAULT_API_GENERATION_TIMEOUT_MS,
+      effectiveMaxBatchDocuments:DEFAULT_API_MAX_BATCH_DOCUMENTS,
     });
   });
 });

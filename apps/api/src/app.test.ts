@@ -3,13 +3,13 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { DocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler, type LocalTemplateFileStore } from './app.js';
-import type { ApiBodyLimitConfig } from './config.js';
+import type { ApiBodyLimitConfig, ApiGenerationLimitConfig } from './config.js';
 
 const servers: Server[] = [];
 afterEach(async()=>{ await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve())))); });
 
-async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore) {
-  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, templateStore})(req,res); });
+async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore, generationLimitConfig?: ApiGenerationLimitConfig) {
+  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, generationLimitConfig, templateStore})(req,res); });
   servers.push(server);
   await new Promise<void>((resolve)=>server.listen(0,'127.0.0.1',()=>resolve()));
   const {port}=server.address() as AddressInfo;
@@ -21,7 +21,7 @@ describe('DB-6B document generation API',()=>{
     const base=await start({ generate: async()=>{ throw new Error('unused'); } });
     const response=await fetch(`${base}/health`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({status:'ok',phase:'DB-6B',limits:{requestBodyMb:20,absoluteMaxMb:50}});
+    expect(await response.json()).toMatchObject({status:'ok',phase:'CLOUD-4',limits:{requestBodyMb:20,absoluteMaxMb:50,generationTimeoutMs:240000,maxBatchDocuments:100}});
   });
   it('returns binary by default with file delivery headers',async()=>{
     const base=await start({ generate: async(command)=>({ jobId:'job-1',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'invoice.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[] }) });
@@ -62,6 +62,39 @@ describe('DB-6B document generation API',()=>{
     const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'',output:{format:'pdf'},data:{}})});
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
+  });
+
+  it('rejects invalid explicit template versions before generation',async()=>{
+    let called=false;
+    const base=await start({generate:async()=>{called=true;throw new Error('must not run');}});
+    const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'invoice-v1',templateVersion:0,output:{format:'pdf'},data:{}})});
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
+    expect(called).toBe(false);
+  });
+
+  it('rejects batches above the configured document ceiling before generation',async()=>{
+    let called=false;
+    const base=await start({generate:async()=>{throw new Error('must not run');},generateBatch:async()=>{called=true;throw new Error('must not run');}},undefined,undefined,{
+      requestedTimeoutMs:1000,absoluteTimeoutMs:1000,effectiveTimeoutMs:1000,
+      requestedMaxBatchDocuments:1,absoluteMaxBatchDocuments:1,effectiveMaxBatchDocuments:1,
+    });
+    const response=await fetch(`${base}/api/v1/documents/generate/batch`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({
+      templateId:'invoice-v1',output:{format:'pdf',outputMode:'combined'},documents:[{data:{}},{data:{}}],
+    })});
+    expect(response.status).toBe(413);
+    expect(await response.json()).toMatchObject({error:{code:'BATCH_LIMIT_EXCEEDED',details:{documentCount:2,maxDocuments:1}}});
+    expect(called).toBe(false);
+  });
+
+  it('returns a typed 504 when hosted generation exceeds its deadline',async()=>{
+    const base=await start({generate:async()=>await new Promise(()=>{})},undefined,undefined,{
+      requestedTimeoutMs:10,absoluteTimeoutMs:10,effectiveTimeoutMs:10,
+      requestedMaxBatchDocuments:100,absoluteMaxBatchDocuments:500,effectiveMaxBatchDocuments:100,
+    });
+    const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}})});
+    expect(response.status).toBe(504);
+    expect(await response.json()).toMatchObject({error:{code:'GENERATION_TIMEOUT',details:{effectiveTimeoutMs:10}}});
   });
 
   it('publishes a validated template and returns the repository result',async()=>{
