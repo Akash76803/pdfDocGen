@@ -7,6 +7,7 @@ import {
   DEFAULT_API_PORT,
   DEFAULT_CLOUD_API_HOST,
   DEFAULT_LOCAL_API_HOST,
+  resolveApiAuthConfig,
   resolveApiBodyLimitConfig,
   resolveApiGenerationLimitConfig,
   resolveApiRepositoryConfig,
@@ -126,6 +127,32 @@ describe('CLOUD-1 template repository configuration', () => {
   it('fails fast for an invalid repository mode', () => {
     expect(() => resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: 'memory' })).toThrow(
       'API_TEMPLATE_REPOSITORY_MODE must be "filesystem" or "cloud".',
+    );
+  });
+});
+
+
+describe('CLOUD-5 authentication configuration',()=> {
+  it('defaults to disabled for local backward compatibility',()=> {
+    expect(resolveApiAuthConfig({})).toEqual({mode:'disabled'});
+  });
+
+  it('requires a token when static bearer mode is enabled',()=> {
+    expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'static-bearer'})).toThrow(
+      'API_AUTH_STATIC_BEARER_TOKEN is required when API_AUTH_MODE is "static-bearer".',
+    );
+  });
+
+  it('loads static bearer authentication without exposing the token through other config',()=> {
+    expect(resolveApiAuthConfig({API_AUTH_MODE:'static-bearer',API_AUTH_STATIC_BEARER_TOKEN:'secret-value'})).toEqual({
+      mode:'static-bearer',
+      staticBearerToken:'secret-value',
+    });
+  });
+
+  it('rejects unsupported auth modes',()=> {
+    expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'basic'})).toThrow(
+      'API_AUTH_MODE must be "disabled" or "static-bearer".',
     );
   });
 });
