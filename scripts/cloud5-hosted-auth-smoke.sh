@@ -51,7 +51,19 @@ curl --fail --silent "$BASE_URL/health" >"$TMP_DIR/health.json" || {
 }
 echo "PASS: health"
 
-NO_TOKEN_STATUS="$(curl --silent --show-error   -o "$TMP_DIR/no-token.json"   -w '%{http_code}'   -X POST   -H 'Content-Type: application/json'   "$BASE_URL/api/v1/documents/generate"   --data "{"templateId":"$TEMPLATE_ID","templateVersion":$TEMPLATE_VERSION,"output":{"format":"pdf"},"data":{"invoiceNo":"CLOUD5-NO-TOKEN"}}")"
+python3 - "$TMP_DIR/no-token-request.json" "$TEMPLATE_ID" "$TEMPLATE_VERSION" <<'PY'
+import json,sys
+path, template_id, template_version = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump({
+        "templateId": template_id,
+        "templateVersion": template_version,
+        "output": {"format": "pdf"},
+        "data": {"invoiceNo": "CLOUD5-NO-TOKEN"},
+    }, f, separators=(',', ':'))
+PY
+
+NO_TOKEN_STATUS="$(curl --silent --show-error   -o "$TMP_DIR/no-token.json"   -w '%{http_code}'   -X POST   -H 'Content-Type: application/json'   "$BASE_URL/api/v1/documents/generate"   --data-binary @"$TMP_DIR/no-token-request.json")"
 
 [[ "$NO_TOKEN_STATUS" == "401" ]] || {
   echo "ERROR: expected no-token HTTP 401, got $NO_TOKEN_STATUS" >&2
@@ -70,7 +82,19 @@ echo "PASS: no-token request rejected with 401 UNAUTHORIZED"
 
 AUTH_TOKEN="$(gcloud secrets versions access "$SECRET_VERSION"   --secret="$AUTH_SECRET"   --project="$PROJECT_ID")"
 
-curl --fail-with-body --silent --show-error   -D "$TMP_DIR/auth.headers"   -o "$TMP_DIR/auth.pdf"   -X POST   -H "Authorization: Bearer $AUTH_TOKEN"   -H 'Content-Type: application/json'   "$BASE_URL/api/v1/documents/generate"   --data "{"templateId":"$TEMPLATE_ID","templateVersion":$TEMPLATE_VERSION,"output":{"format":"pdf","fileName":"cloud5-auth-smoke"},"data":{"invoiceNo":"CLOUD5-AUTH"}}"
+python3 - "$TMP_DIR/auth-request.json" "$TEMPLATE_ID" "$TEMPLATE_VERSION" <<'PY'
+import json,sys
+path, template_id, template_version = sys.argv[1], sys.argv[2], int(sys.argv[3])
+with open(path, 'w', encoding='utf-8') as f:
+    json.dump({
+        "templateId": template_id,
+        "templateVersion": template_version,
+        "output": {"format": "pdf", "fileName": "cloud5-auth-smoke"},
+        "data": {"invoiceNo": "CLOUD5-AUTH"},
+    }, f, separators=(',', ':'))
+PY
+
+curl --fail-with-body --silent --show-error   -D "$TMP_DIR/auth.headers"   -o "$TMP_DIR/auth.pdf"   -X POST   -H "Authorization: Bearer $AUTH_TOKEN"   -H 'Content-Type: application/json'   "$BASE_URL/api/v1/documents/generate"   --data-binary @"$TMP_DIR/auth-request.json"
 unset AUTH_TOKEN
 
 MAGIC="$(od -An -t x1 -N5 "$TMP_DIR/auth.pdf" | tr -d ' \n')"
