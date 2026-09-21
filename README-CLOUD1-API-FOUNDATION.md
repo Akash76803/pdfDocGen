@@ -66,13 +66,17 @@ The current headless Document Builder API already provides:
 - [x] Preserve `127.0.0.1` local default.
 - [x] Use `0.0.0.0` automatically under Cloud Run.
 - [x] Honor Cloud Run `PORT`.
-- [ ] Add container/Cloud Run deployment definition.
-- [ ] Smoke-test `/health` inside a Linux container.
+- [x] Add container/Cloud Run deployment definition.
+- [x] Smoke-test `/health` inside a Linux container.
 
 ### Gate B — Repository boundary
-- [ ] Keep `TemplateRepository` as generation-core boundary.
-- [ ] Define cloud repository contract implementation plan.
-- [ ] Ensure server composition can select local or cloud repository by environment without renderer changes.
+
+Repository selection is now explicit through `API_TEMPLATE_REPOSITORY_MODE=filesystem|cloud`.
+Filesystem mode preserves the desktop/offline implementation. Cloud mode requires an injected persistent cloud driver and fails fast if none is available, preventing accidental use of Cloud Run's ephemeral filesystem as durable storage.
+
+- [x] Keep `TemplateRepository` as generation-core boundary.
+- [x] Define cloud repository contract implementation plan.
+- [x] Ensure server composition can select local or cloud repository by environment without renderer changes.
 
 ### Gate C — Production configuration
 - [ ] Define environment variables and validation.
@@ -81,12 +85,12 @@ The current headless Document Builder API already provides:
 
 ### Gate D — Verification
 - [ ] `npm ci`
-- [ ] `npm run typecheck`
-- [ ] `npm test`
-- [ ] `npm run build`
-- [ ] Linux/container health smoke
-- [ ] Single PDF HTTP smoke
-- [ ] Batch combined PDF HTTP smoke
+- [x] `npm run typecheck`
+- [x] `npm test`
+- [x] `npm run build`
+- [x] Linux/container health smoke
+- [x] Single PDF HTTP smoke
+- [x] Batch combined PDF HTTP smoke
 
 ## Deferred to later roadmap phases
 
