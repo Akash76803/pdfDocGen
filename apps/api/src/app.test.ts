@@ -56,6 +56,53 @@ describe('DB-6B document generation API',()=>{
     expect(response.headers.get('content-type')).toBe('application/pdf');
   });
 
+  it('returns 403 when an authenticated caller lacks the required capability',async()=>{
+    let called=false;
+    const authenticator=createStaticBearerAuthenticator({
+      token:'publisher-token',
+      principal:{subject:'publisher-only',roles:['publisher'],authType:'api-key'},
+    });
+    const base=await start({generate:async()=>{called=true;throw new Error('must not run');}},undefined,undefined,undefined,authenticator);
+    const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer publisher-token'},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}})});
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({error:{code:'FORBIDDEN',message:'The authenticated caller is not allowed to perform this operation.'}});
+    expect(called).toBe(false);
+  });
+
+  it('allows a generator role to generate but denies template publishing',async()=>{
+    const authenticator=createStaticBearerAuthenticator({
+      token:'generator-token',
+      principal:{subject:'generator-only',roles:['generator'],authType:'api-key'},
+    });
+    const templateStore: LocalTemplateFileStore={
+      async saveDesktopTemplateEntry(){return 'unused';},
+      async deleteTemplateFile(){},
+      async publishTemplate(){throw new Error('must not run');},
+    };
+    const base=await start({generate:async(command)=>({jobId:'g',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'g.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]})},undefined,templateStore,undefined,authenticator);
+    const generated=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer generator-token'},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}})});
+    expect(generated.status).toBe(200);
+    const denied=await fetch(`${base}/api/v1/templates/invoice/publish`,{method:'PUT',headers:{'content-type':'application/json',authorization:'Bearer generator-token'},body:'{}'});
+    expect(denied.status).toBe(403);
+    expect(await denied.json()).toMatchObject({error:{code:'FORBIDDEN'}});
+  });
+
+  it('allows admin role to delete a template',async()=>{
+    let deleted='';
+    const authenticator=createStaticBearerAuthenticator({
+      token:'admin-token',
+      principal:{subject:'admin',roles:['admin'],authType:'api-key'},
+    });
+    const templateStore: LocalTemplateFileStore={
+      async saveDesktopTemplateEntry(){return 'unused';},
+      async deleteTemplateFile(templateId){deleted=templateId;},
+    };
+    const base=await start({generate:async()=>{throw new Error('unused');}},undefined,templateStore,undefined,authenticator);
+    const response=await fetch(`${base}/api/v1/templates/invoice`,{method:'DELETE',headers:{authorization:'Bearer admin-token'}});
+    expect(response.status).toBe(200);
+    expect(deleted).toBe('invoice');
+  });
+
   it('returns binary by default with file delivery headers',async()=>{
     const base=await start({ generate: async(command)=>({ jobId:'job-1',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'invoice.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[] }) });
     const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{invoiceNo:'INV-1'}})});
