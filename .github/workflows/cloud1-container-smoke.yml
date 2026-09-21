@@ -1,0 +1,59 @@
+name: CLOUD-1 Container Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "Dockerfile"
+      - ".dockerignore"
+      - "deploy/**"
+      - "scripts/cloud1-container-smoke.sh"
+      - "apps/api/**"
+      - "packages/generation-core/**"
+      - "packages/template-engine/**"
+      - "packages/renderer-pdf/**"
+      - "packages/renderer-sdk/**"
+      - "packages/contracts/**"
+      - ".github/workflows/cloud1-container-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  docker-smoke:
+    name: Build image and smoke API
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Document Builder API image
+        run: docker build -t document-builder-api:cloud1 .
+
+      - name: Start Cloud Run-like container
+        run: |
+          docker run -d --rm             --name document-builder-api-cloud1             -e K_SERVICE=document-builder-api             -e PORT=8080             -p 8080:8080             document-builder-api:cloud1
+
+      - name: Wait for health
+        run: |
+          for attempt in {1..30}; do
+            if curl --fail --silent http://127.0.0.1:8080/health >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          docker logs document-builder-api-cloud1
+          exit 1
+
+      - name: Health + single + combined batch smoke
+        run: bash scripts/cloud1-container-smoke.sh
+
+      - name: Container logs
+        if: always()
+        run: docker logs document-builder-api-cloud1 || true
+
+      - name: Stop container
+        if: always()
+        run: docker stop document-builder-api-cloud1 || true
