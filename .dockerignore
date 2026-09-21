@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+**/node_modules
+**/dist
+**/target
+coverage
+*.log
+*.zip
+*.exe
+*.msi
+*.dmg
+*.AppImage
+.DS_Store
