@@ -7,6 +7,7 @@ import {
   DEFAULT_API_PORT,
   DEFAULT_CLOUD_API_HOST,
   DEFAULT_LOCAL_API_HOST,
+  assertSecureCloudAuthConfig,
   resolveApiAuthConfig,
   resolveApiBodyLimitConfig,
   resolveApiGenerationLimitConfig,
@@ -154,5 +155,29 @@ describe('CLOUD-5 authentication configuration',()=> {
     expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'basic'})).toThrow(
       'API_AUTH_MODE must be "disabled" or "static-bearer".',
     );
+  });
+});
+
+
+describe('CLOUD-5 hosted auth hardening',()=> {
+  it('allows disabled auth for local development',()=> {
+    expect(()=>assertSecureCloudAuthConfig(
+      {host:'127.0.0.1',port:8787,cloudRuntime:false},
+      {mode:'disabled'},
+    )).not.toThrow();
+  });
+
+  it('fails closed when Cloud Run starts with auth disabled',()=> {
+    expect(()=>assertSecureCloudAuthConfig(
+      {host:'0.0.0.0',port:8080,cloudRuntime:true},
+      {mode:'disabled'},
+    )).toThrow('Hosted Cloud Run runtime requires API authentication to be enabled.');
+  });
+
+  it('allows an authenticated Cloud Run configuration',()=> {
+    expect(()=>assertSecureCloudAuthConfig(
+      {host:'0.0.0.0',port:8080,cloudRuntime:true},
+      {mode:'static-bearer',staticBearerToken:'secret-from-secret-manager'},
+    )).not.toThrow();
   });
 });
