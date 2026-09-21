@@ -1,0 +1,30 @@
+apiVersion: serving.knative.dev/v1
+kind: Service
+metadata:
+  name: document-builder-api
+  annotations:
+    run.googleapis.com/launch-stage: BETA
+spec:
+  template:
+    metadata:
+      annotations:
+        autoscaling.knative.dev/minScale: "0"
+        autoscaling.knative.dev/maxScale: "10"
+        run.googleapis.com/cpu-throttling: "true"
+    spec:
+      containerConcurrency: 20
+      timeoutSeconds: 300
+      containers:
+        - image: REGION-docker.pkg.dev/PROJECT_ID/REPOSITORY/document-builder-api:TAG
+          ports:
+            - name: http1
+              containerPort: 8080
+          env:
+            - name: API_MAX_BODY_MB
+              value: "20"
+            - name: API_ABSOLUTE_MAX_BODY_MB
+              value: "50"
+          resources:
+            limits:
+              cpu: "1"
+              memory: "1Gi"
