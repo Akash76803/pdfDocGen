@@ -2,7 +2,7 @@ import { createServer } from 'node:http';
 import { HeadlessDocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler } from './app.js';
 import { createStaticBearerAuthenticator } from './auth.js';
-import { resolveApiAuthConfig, resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
+import { assertSecureCloudAuthConfig, resolveApiAuthConfig, resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
 import { createTemplateRepositoryComposition } from './repository-composition.js';
 import { buildApiStartupDiagnostics, formatApiStartupDiagnostics } from './startup-diagnostics.js';
@@ -14,6 +14,7 @@ const repositoryConfig = resolveApiRepositoryConfig();
 const bodyLimitConfig = resolveApiBodyLimitConfig();
 const generationLimitConfig = resolveApiGenerationLimitConfig();
 const authConfig = resolveApiAuthConfig();
+assertSecureCloudAuthConfig(serverConfig, authConfig);
 const authenticator = authConfig.mode === 'static-bearer'
   ? createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! })
   : undefined;
@@ -36,7 +37,7 @@ const handler = createApiHandler({
 });
 
 createServer((req,res)=>{ void handler(req,res); }).listen(port,host,()=>{
-  const startup = buildApiStartupDiagnostics(serverConfig, repositoryConfig, bodyLimitConfig, generationLimitConfig);
+  const startup = buildApiStartupDiagnostics(serverConfig, repositoryConfig, bodyLimitConfig, generationLimitConfig, authConfig);
   console.log(formatApiStartupDiagnostics(startup));
   if (composition.diagnostics.sharedTemplateDirectory) {
     console.log(`Shared template directory: ${composition.diagnostics.sharedTemplateDirectory}`);
