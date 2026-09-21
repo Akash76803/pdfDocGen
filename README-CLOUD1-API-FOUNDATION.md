@@ -79,9 +79,9 @@ Filesystem mode preserves the desktop/offline implementation. Cloud mode require
 - [x] Ensure server composition can select local or cloud repository by environment without renderer changes.
 
 ### Gate C — Production configuration
-- [ ] Define environment variables and validation.
-- [ ] Add deployment-safe startup diagnostics without secrets.
-- [ ] Document dev/stage/prod configuration.
+- [x] Define environment variables and validation.
+- [x] Add deployment-safe startup diagnostics without secrets.
+- [x] Document dev/stage/prod configuration.
 
 ### Gate D — Verification
 - [ ] `npm ci`
