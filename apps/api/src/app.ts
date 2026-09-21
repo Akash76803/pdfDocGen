@@ -9,7 +9,13 @@ import {
   type GenerateDocumentCommand,
 } from '@document-tool/generation-core';
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
-import { resolveApiBodyLimitConfig, type ApiBodyLimitConfig } from './config.js';
+import {
+  DEFAULT_API_MAX_BATCH_DOCUMENTS,
+  resolveApiBodyLimitConfig,
+  resolveApiGenerationLimitConfig,
+  type ApiBodyLimitConfig,
+  type ApiGenerationLimitConfig,
+} from './config.js';
 
 export type LocalTemplateFileStore = {
   saveDesktopTemplateEntry(value: unknown): Promise<string>;
@@ -20,6 +26,7 @@ export type LocalTemplateFileStore = {
 export type ApiDependencies = {
   generationService: DocumentGenerationService;
   bodyLimitConfig?: ApiBodyLimitConfig;
+  generationLimitConfig?: ApiGenerationLimitConfig;
   templateStore?: LocalTemplateFileStore;
 };
 
@@ -31,6 +38,23 @@ function payloadTooLarge(config: ApiBodyLimitConfig): CodedError {
     code: 'PAYLOAD_TOO_LARGE',
     details: { configuredLimitMb: config.requestedLimitMb, effectiveLimitMb: config.effectiveLimitMb, absoluteMaxMb: config.absoluteMaxMb },
   });
+}
+
+function generationTimeout(config: ApiGenerationLimitConfig): CodedError {
+  return Object.assign(new Error(`Document generation exceeded the configured ${config.effectiveTimeoutMs} ms deadline.`), {
+    code: 'GENERATION_TIMEOUT',
+    details: { configuredTimeoutMs:config.requestedTimeoutMs, effectiveTimeoutMs:config.effectiveTimeoutMs, absoluteTimeoutMs:config.absoluteTimeoutMs },
+  });
+}
+
+async function withGenerationDeadline<T>(operation: Promise<T>, config: ApiGenerationLimitConfig): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve,reject)=>{
+    timer=setTimeout(()=>reject(generationTimeout(config)),config.effectiveTimeoutMs);
+    timer.unref?.();
+  });
+  try { return await Promise.race([operation,deadline]); }
+  finally { if (timer) clearTimeout(timer); }
 }
 
 const FORMATS = new Set<DocumentOutputFormat>(['pdf','docx-exact','docx-editable']);
@@ -98,6 +122,7 @@ export function parseGenerateDocumentCommand(value: unknown): GenerateDocumentCo
   const input = value as Record<string, unknown>;
   const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
   if (!templateId) throw Object.assign(new Error('templateId is required.'), { code:'INVALID_REQUEST' });
+  if (input.templateVersion !== undefined && (!Number.isInteger(input.templateVersion) || Number(input.templateVersion) < 1)) throw Object.assign(new Error('templateVersion must be a positive integer when provided.'), { code:'INVALID_REQUEST' });
   const outputRaw = input.output;
   if (!outputRaw || typeof outputRaw !== 'object' || Array.isArray(outputRaw)) throw Object.assign(new Error('output is required.'), { code:'INVALID_REQUEST' });
   const outputObj = outputRaw as Record<string, unknown>;
@@ -120,11 +145,12 @@ export function parseGenerateDocumentCommand(value: unknown): GenerateDocumentCo
   };
 }
 
-export function parseGenerateDocumentBatchCommand(value: unknown): GenerateDocumentBatchCommand {
+export function parseGenerateDocumentBatchCommand(value: unknown, maxDocuments = DEFAULT_API_MAX_BATCH_DOCUMENTS): GenerateDocumentBatchCommand {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('Request body must be a JSON object.'), { code:'INVALID_REQUEST' });
   const input = value as Record<string, unknown>;
   const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
   if (!templateId) throw Object.assign(new Error('templateId is required.'), { code:'INVALID_REQUEST' });
+  if (input.templateVersion !== undefined && (!Number.isInteger(input.templateVersion) || Number(input.templateVersion) < 1)) throw Object.assign(new Error('templateVersion must be a positive integer when provided.'), { code:'INVALID_REQUEST' });
 
   const outputRaw = input.output;
   if (!outputRaw || typeof outputRaw !== 'object' || Array.isArray(outputRaw)) throw Object.assign(new Error('output is required.'), { code:'INVALID_REQUEST' });
@@ -142,6 +168,7 @@ export function parseGenerateDocumentBatchCommand(value: unknown): GenerateDocum
 
   const documentsRaw = input.documents;
   if (!Array.isArray(documentsRaw) || documentsRaw.length === 0) throw Object.assign(new Error('documents must be a non-empty array.'), { code:'INVALID_REQUEST' });
+  if (documentsRaw.length > maxDocuments) throw Object.assign(new Error(`documents exceeds the configured maximum of ${maxDocuments}.`), { code:'BATCH_LIMIT_EXCEEDED', details:{ documentCount:documentsRaw.length, maxDocuments } });
   const documents = documentsRaw.map((item, index) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) throw Object.assign(new Error(`documents[${index}] must be a JSON object.`), { code:'INVALID_REQUEST' });
     const document = item as Record<string, unknown>;
@@ -191,6 +218,8 @@ export function parsePublishTemplateRequest(value: unknown, routeTemplateId: str
 
 function errorStatus(code: string) {
   return code === 'PAYLOAD_TOO_LARGE' ? 413
+    : code === 'BATCH_LIMIT_EXCEEDED' ? 413
+    : code === 'GENERATION_TIMEOUT' ? 504
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
     : code === 'TEMPLATE_NOT_FOUND' ? 404
     : code === 'TEMPLATE_VERSION_CONFLICT' ? 409
@@ -204,12 +233,13 @@ function errorStatus(code: string) {
 
 export function createApiHandler(deps: ApiDependencies) {
   const bodyLimitConfig = deps.bodyLimitConfig ?? resolveApiBodyLimitConfig();
+  const generationLimitConfig = deps.generationLimitConfig ?? resolveApiGenerationLimitConfig();
   return async (req: IncomingMessage, res: ServerResponse) => {
     applyCors(req, res);
     const method = req.method ?? 'GET';
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
-    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'DB-6B', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb } });
+    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-4', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
     if (publishMatch && method === 'PUT') {
@@ -251,9 +281,9 @@ export function createApiHandler(deps: ApiDependencies) {
 
     if (method === 'POST' && url.pathname === '/api/v1/documents/generate/batch') {
       try {
-        const command = parseGenerateDocumentBatchCommand(await readJson(req, bodyLimitConfig));
+        const command = parseGenerateDocumentBatchCommand(await readJson(req, bodyLimitConfig),generationLimitConfig.effectiveMaxBatchDocuments);
         if (!deps.generationService.generateBatch) throw new GenerationServiceUnavailableError('Batch document generation adapter is not configured.');
-        const result = await deps.generationService.generateBatch(command);
+        const result = await withGenerationDeadline(deps.generationService.generateBatch(command),generationLimitConfig);
 
         if (result.outputMode === 'combined') {
           if (!result.combined) throw Object.assign(new Error('Combined generation completed without a combined file.'), { code:'GENERATION_FAILED' });
@@ -316,7 +346,7 @@ export function createApiHandler(deps: ApiDependencies) {
     if (method !== 'POST' || url.pathname !== '/api/v1/documents/generate') return sendJson(res, 404, { error:{ code:'NOT_FOUND', message:'Route not found.' } } satisfies ApiError);
     try {
       const command = parseGenerateDocumentCommand(await readJson(req, bodyLimitConfig));
-      const result = await deps.generationService.generate(command);
+      const result = await withGenerationDeadline(deps.generationService.generate(command),generationLimitConfig);
       if ((command.output.responseMode ?? 'binary') === 'binary') return sendBinary(res, result);
       const response = {
         jobId: result.jobId || randomUUID(), status: result.status, templateId: result.templateId, templateVersion: result.templateVersion,

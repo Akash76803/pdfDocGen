@@ -7,6 +7,7 @@ describe('CLOUD-1 startup diagnostics', () => {
       { host:'0.0.0.0', port:8080, cloudRuntime:true },
       { mode:'filesystem' },
       { requestedLimitMb:20, absoluteMaxMb:50, effectiveLimitMb:20, effectiveLimitBytes:20 * 1024 * 1024 },
+      { requestedTimeoutMs:240000, absoluteTimeoutMs:295000, effectiveTimeoutMs:240000, requestedMaxBatchDocuments:100, absoluteMaxBatchDocuments:500, effectiveMaxBatchDocuments:100 },
     );
 
     expect(diagnostics).toEqual({
@@ -16,6 +17,8 @@ describe('CLOUD-1 startup diagnostics', () => {
       repositoryMode:'filesystem',
       requestBodyMb:20,
       absoluteMaxBodyMb:50,
+      generationTimeoutMs:240000,
+      maxBatchDocuments:100,
     });
 
     const line = formatApiStartupDiagnostics(diagnostics);

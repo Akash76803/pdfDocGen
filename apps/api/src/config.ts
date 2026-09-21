@@ -1,5 +1,9 @@
 export const DEFAULT_API_MAX_BODY_MB = 20;
 export const DEFAULT_API_ABSOLUTE_MAX_BODY_MB = 50;
+export const DEFAULT_API_GENERATION_TIMEOUT_MS = 240_000;
+export const DEFAULT_API_ABSOLUTE_GENERATION_TIMEOUT_MS = 295_000;
+export const DEFAULT_API_MAX_BATCH_DOCUMENTS = 100;
+export const DEFAULT_API_ABSOLUTE_MAX_BATCH_DOCUMENTS = 500;
 export const DEFAULT_API_PORT = 8787;
 export const DEFAULT_LOCAL_API_HOST = '127.0.0.1';
 export const DEFAULT_CLOUD_API_HOST = '0.0.0.0';
@@ -16,6 +20,15 @@ export type ApiServerConfig = {
   host: string;
   port: number;
   cloudRuntime: boolean;
+};
+
+export type ApiGenerationLimitConfig = {
+  requestedTimeoutMs: number;
+  absoluteTimeoutMs: number;
+  effectiveTimeoutMs: number;
+  requestedMaxBatchDocuments: number;
+  absoluteMaxBatchDocuments: number;
+  effectiveMaxBatchDocuments: number;
 };
 
 export type ApiTemplateRepositoryMode = 'filesystem' | 'cloud';
@@ -36,6 +49,12 @@ function parsePort(value: string | undefined, fallback: number): number {
   return Number.isInteger(parsed) && parsed > 0 && parsed <= 65535 ? parsed : fallback;
 }
 
+function parsePositiveInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === '') return fallback;
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 export function resolveApiBodyLimitConfig(env: NodeJS.ProcessEnv = process.env): ApiBodyLimitConfig {
   const requestedLimitMb = parsePositiveMb(env.API_MAX_BODY_MB, DEFAULT_API_MAX_BODY_MB);
   const absoluteMaxMb = parsePositiveMb(env.API_ABSOLUTE_MAX_BODY_MB, DEFAULT_API_ABSOLUTE_MAX_BODY_MB);
@@ -46,6 +65,21 @@ export function resolveApiBodyLimitConfig(env: NodeJS.ProcessEnv = process.env):
     absoluteMaxMb,
     effectiveLimitMb,
     effectiveLimitBytes: Math.floor(effectiveLimitMb * 1024 * 1024),
+  };
+}
+
+export function resolveApiGenerationLimitConfig(env: NodeJS.ProcessEnv = process.env): ApiGenerationLimitConfig {
+  const requestedTimeoutMs = parsePositiveInteger(env.API_GENERATION_TIMEOUT_MS, DEFAULT_API_GENERATION_TIMEOUT_MS);
+  const absoluteTimeoutMs = parsePositiveInteger(env.API_ABSOLUTE_GENERATION_TIMEOUT_MS, DEFAULT_API_ABSOLUTE_GENERATION_TIMEOUT_MS);
+  const requestedMaxBatchDocuments = parsePositiveInteger(env.API_MAX_BATCH_DOCUMENTS, DEFAULT_API_MAX_BATCH_DOCUMENTS);
+  const absoluteMaxBatchDocuments = parsePositiveInteger(env.API_ABSOLUTE_MAX_BATCH_DOCUMENTS, DEFAULT_API_ABSOLUTE_MAX_BATCH_DOCUMENTS);
+  return {
+    requestedTimeoutMs,
+    absoluteTimeoutMs,
+    effectiveTimeoutMs: Math.min(requestedTimeoutMs, absoluteTimeoutMs),
+    requestedMaxBatchDocuments,
+    absoluteMaxBatchDocuments,
+    effectiveMaxBatchDocuments: Math.min(requestedMaxBatchDocuments, absoluteMaxBatchDocuments),
   };
 }
 

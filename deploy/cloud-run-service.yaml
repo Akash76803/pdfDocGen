@@ -31,6 +31,14 @@ spec:
               value: "20"
             - name: API_ABSOLUTE_MAX_BODY_MB
               value: "50"
+            - name: API_GENERATION_TIMEOUT_MS
+              value: "240000"
+            - name: API_ABSOLUTE_GENERATION_TIMEOUT_MS
+              value: "295000"
+            - name: API_MAX_BATCH_DOCUMENTS
+              value: "100"
+            - name: API_ABSOLUTE_MAX_BATCH_DOCUMENTS
+              value: "500"
           resources:
             limits:
               cpu: "1"
