@@ -71,3 +71,33 @@ export async function authenticateRequest(
   req.apiPrincipal = principal;
   return principal;
 }
+
+
+export type ApiCapability =
+  | 'template:publish'
+  | 'template:write'
+  | 'template:delete'
+  | 'document:generate'
+  | 'document:generate-batch';
+
+const ROLE_CAPABILITIES: Record<string, ReadonlySet<ApiCapability>> = {
+  publisher: new Set<ApiCapability>(['template:publish','template:write']),
+  generator: new Set<ApiCapability>(['document:generate','document:generate-batch']),
+  admin: new Set<ApiCapability>(['template:publish','template:write','template:delete','document:generate','document:generate-batch']),
+};
+
+export class ApiAuthorizationError extends Error {
+  readonly code = 'FORBIDDEN';
+  constructor(message = 'The authenticated caller is not allowed to perform this operation.') {
+    super(message);
+  }
+}
+
+export function hasCapability(principal: ApiPrincipal, capability: ApiCapability): boolean {
+  return principal.roles.some((role)=>ROLE_CAPABILITIES[role]?.has(capability) ?? false);
+}
+
+export function requireCapability(principal: ApiPrincipal | undefined, capability: ApiCapability): void {
+  if (!principal) return;
+  if (!hasCapability(principal, capability)) throw new ApiAuthorizationError();
+}
