@@ -194,6 +194,9 @@ function errorStatus(code: string) {
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
     : code === 'TEMPLATE_NOT_FOUND' ? 404
     : code === 'TEMPLATE_VERSION_CONFLICT' ? 409
+    : code === 'CLOUD_PUBLISH_REQUIRED' ? 409
+    : code === 'CLOUD_ASSET_NOT_FOUND' ? 404
+    : code === 'CLOUD_TEMPLATE_INTEGRITY_FAILED' || code === 'CLOUD_ASSET_INTEGRITY_FAILED' ? 500
     : code === 'INVALID_TEMPLATE_VERSION' || code === 'INVALID_TEMPLATE_STATUS' ? 400
     : code === 'UNSUPPORTED_OUTPUT_FORMAT' || code === 'EXACT_RENDER_UNAVAILABLE' || code === 'EXACT_DOCX_UNAVAILABLE' || code === 'TEMPLATE_RENDER_FAILED' ? 422
     : 500;

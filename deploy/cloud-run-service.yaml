@@ -12,6 +12,7 @@ spec:
         autoscaling.knative.dev/maxScale: "10"
         run.googleapis.com/cpu-throttling: "true"
     spec:
+      serviceAccountName: document-builder-api@PROJECT_ID.iam.gserviceaccount.com
       containerConcurrency: 20
       timeoutSeconds: 300
       containers:
@@ -21,7 +22,11 @@ spec:
               containerPort: 8080
           env:
             - name: API_TEMPLATE_REPOSITORY_MODE
-              value: "filesystem"
+              value: "cloud"
+            - name: API_GCP_TEMPLATE_BUCKET
+              value: "PROJECT_ID-document-builder-assets"
+            - name: API_GCP_FIRESTORE_DATABASE
+              value: "(default)"
             - name: API_MAX_BODY_MB
               value: "20"
             - name: API_ABSOLUTE_MAX_BODY_MB

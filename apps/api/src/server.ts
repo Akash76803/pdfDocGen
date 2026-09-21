@@ -5,6 +5,8 @@ import { resolveApiBodyLimitConfig, resolveApiRepositoryConfig, resolveApiServer
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
 import { createTemplateRepositoryComposition } from './repository-composition.js';
 import { buildApiStartupDiagnostics, formatApiStartupDiagnostics } from './startup-diagnostics.js';
+import { resolveGcpStorageConfig } from './cloud-storage-config.js';
+import { createGcpCloudTemplateRepository } from './gcp-cloud-storage.js';
 
 const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
@@ -15,6 +17,7 @@ const composition = createTemplateRepositoryComposition({
   mode: repositoryConfig.mode,
   sharedTemplateDirectory: resolveSharedTemplateDirectory(),
   bundledTemplateDirectory: resolveBundledTemplateDirectory(),
+  ...(repositoryConfig.mode === 'cloud' ? { cloudDriver:createGcpCloudTemplateRepository(resolveGcpStorageConfig()) } : {}),
 });
 
 const generationService = new HeadlessDocumentGenerationService(composition.repository);
