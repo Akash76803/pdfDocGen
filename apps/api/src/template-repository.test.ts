@@ -24,4 +24,29 @@ describe('filesystem template repository',()=>{
     const {repo}=await tempRepo();
     expect(await repo.getTemplate('../secret')).toBeNull();
   });
+  it('publishes immutable versions and rejects stale updates',async()=>{
+    const {dir,repo}=await tempRepo();
+    const template={id:'invoice',name:'Invoice',status:'Saved' as const,createdAt:'2026-09-21T00:00:00.000Z',updatedAt:'2026-09-21T00:00:00.000Z',payload:{name:'Invoice',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]}};
+    await expect(repo.publishTemplate({templateId:'invoice',name:'Invoice',version:1,status:'ACTIVE',metadata:{source:'desktop'},template})).resolves.toMatchObject({status:'published',version:1});
+    await expect(repo.getTemplate('invoice',1)).resolves.toMatchObject({id:'invoice',version:1});
+    await expect(repo.publishTemplate({templateId:'invoice',name:'Invoice',version:2,expectedVersion:0,status:'ACTIVE',metadata:{},template})).rejects.toMatchObject({code:'TEMPLATE_VERSION_CONFLICT'});
+    await expect(repo.publishTemplate({templateId:'invoice',name:'Invoice',version:2,expectedVersion:1,status:'ACTIVE',metadata:{},template})).resolves.toMatchObject({status:'updated',version:2});
+    expect(await repo.getTemplate('invoice',1)).toMatchObject({version:1});
+    expect(await repo.getTemplate('invoice')).toMatchObject({version:2});
+    expect((await import('node:fs/promises')).readFile(join(dir,'invoice.v1.json'),'utf8')).resolves.toContain('document-builder-template-publication/v1');
+  });
+  it('treats an existing local-mirror file as unpublished during first explicit publish',async()=>{
+    const {dir,repo}=await tempRepo();
+    const template={id:'invoice',name:'Invoice',status:'Saved' as const,createdAt:'2026-09-21T00:00:00.000Z',updatedAt:'2026-09-21T00:00:00.000Z',payload:{name:'Invoice',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]}};
+    await writeFile(join(dir,'invoice.json'),JSON.stringify(template));
+    await expect(repo.publishTemplate({templateId:'invoice',name:'Invoice',version:1,status:'ACTIVE',metadata:{},template})).resolves.toMatchObject({status:'published',version:1});
+  });
+  it('does not let an ordinary local save overwrite a published current record',async()=>{
+    const {repo}=await tempRepo();
+    const template={id:'invoice',name:'Invoice',status:'Saved' as const,createdAt:'2026-09-21T00:00:00.000Z',updatedAt:'2026-09-21T00:00:00.000Z',payload:{name:'Invoice',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]}};
+    await repo.publishTemplate({templateId:'invoice',name:'Invoice',version:1,status:'ACTIVE',metadata:{},template});
+    await repo.saveDesktopTemplateEntry({...template,name:'Edited locally',payload:{...template.payload,name:'Edited locally'}});
+    expect(await repo.getTemplate('invoice')).toMatchObject({name:'Invoice',version:1});
+    await expect(repo.publishTemplate({templateId:'invoice',name:'Edited locally',version:2,expectedVersion:1,status:'ACTIVE',metadata:{},template:{...template,name:'Edited locally'}})).resolves.toMatchObject({status:'updated',version:2});
+  });
 });

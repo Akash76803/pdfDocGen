@@ -6,3 +6,4 @@ export * from './grouping.js';
 export * from './design.js';
 
 export * from './api-path.js';
+export * from './template-publication.js';

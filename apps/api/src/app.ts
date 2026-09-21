@@ -8,11 +8,13 @@ import {
   type GenerateDocumentBatchCommand,
   type GenerateDocumentCommand,
 } from '@document-tool/generation-core';
+import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
 import { resolveApiBodyLimitConfig, type ApiBodyLimitConfig } from './config.js';
 
 export type LocalTemplateFileStore = {
   saveDesktopTemplateEntry(value: unknown): Promise<string>;
   deleteTemplateFile(templateId: string): Promise<void>;
+  publishTemplate?(request: PublishTemplateRequest): Promise<PublishTemplateResponse>;
 };
 
 export type ApiDependencies = {
@@ -36,6 +38,7 @@ const RESPONSE_MODES = new Set<DocumentResponseMode>(['binary','base64']);
 const BATCH_OUTPUT_MODES = new Set(['separate','combined'] as const);
 const BATCH_PAGE_NUMBERING = new Set(['per-document','global'] as const);
 const TEMPLATE_ROUTE = /^\/api\/v1\/templates\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})$/;
+const TEMPLATE_PUBLISH_ROUTE = /^\/api\/v1\/templates\/([A-Za-z0-9][A-Za-z0-9._-]{0,127})\/publish$/;
 
 function applyCors(req: IncomingMessage, res: ServerResponse) {
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
@@ -166,10 +169,32 @@ export function parseGenerateDocumentBatchCommand(value: unknown): GenerateDocum
   };
 }
 
+export function parsePublishTemplateRequest(value: unknown, routeTemplateId: string): PublishTemplateRequest {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw Object.assign(new Error('Request body must be a JSON object.'), { code:'INVALID_TEMPLATE_PAYLOAD' });
+  const input = value as Record<string, unknown>;
+  const templateId = typeof input.templateId === 'string' ? input.templateId.trim() : '';
+  const name = typeof input.name === 'string' ? input.name.trim() : '';
+  const version = input.version;
+  const expectedVersion = input.expectedVersion;
+  const status = input.status;
+  const metadata = input.metadata;
+  const template = input.template;
+  if (!templateId || templateId !== routeTemplateId) throw Object.assign(new Error('templateId must match the URL template id.'), { code:'INVALID_TEMPLATE_PAYLOAD' });
+  if (!name) throw Object.assign(new Error('name is required.'), { code:'INVALID_TEMPLATE_PAYLOAD' });
+  if (!Number.isInteger(version) || Number(version) < 1) throw Object.assign(new Error('version must be a positive integer.'), { code:'INVALID_TEMPLATE_VERSION' });
+  if (expectedVersion !== undefined && (!Number.isInteger(expectedVersion) || Number(expectedVersion) < 0)) throw Object.assign(new Error('expectedVersion must be a non-negative integer when provided.'), { code:'INVALID_TEMPLATE_VERSION' });
+  if (status !== 'DRAFT' && status !== 'ACTIVE' && status !== 'ARCHIVED') throw Object.assign(new Error('status must be DRAFT, ACTIVE, or ARCHIVED.'), { code:'INVALID_TEMPLATE_STATUS' });
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw Object.assign(new Error('metadata must be a JSON object.'), { code:'INVALID_TEMPLATE_PAYLOAD' });
+  if (!template || typeof template !== 'object' || Array.isArray(template) || (template as { id?: unknown }).id !== templateId) throw Object.assign(new Error('template must be a matching desktop template entry.'), { code:'INVALID_TEMPLATE_PAYLOAD' });
+  return { templateId, name, version:Number(version), ...(expectedVersion === undefined ? {} : { expectedVersion:Number(expectedVersion) }), status, metadata:metadata as Record<string, unknown>, template };
+}
+
 function errorStatus(code: string) {
   return code === 'PAYLOAD_TOO_LARGE' ? 413
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
     : code === 'TEMPLATE_NOT_FOUND' ? 404
+    : code === 'TEMPLATE_VERSION_CONFLICT' ? 409
+    : code === 'INVALID_TEMPLATE_VERSION' || code === 'INVALID_TEMPLATE_STATUS' ? 400
     : code === 'UNSUPPORTED_OUTPUT_FORMAT' || code === 'EXACT_RENDER_UNAVAILABLE' || code === 'EXACT_DOCX_UNAVAILABLE' || code === 'TEMPLATE_RENDER_FAILED' ? 422
     : 500;
 }
@@ -182,6 +207,22 @@ export function createApiHandler(deps: ApiDependencies) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
     if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'DB-6B', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb } });
+
+    const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
+    if (publishMatch && method === 'PUT') {
+      if (!deps.templateStore?.publishTemplate) return sendJson(res, 503, { error:{ code:'TEMPLATE_PUBLISH_UNAVAILABLE', message:'Template publish repository is not configured.' } } satisfies ApiError);
+      const templateId = decodeURIComponent(publishMatch[1] ?? '');
+      try {
+        const request = parsePublishTemplateRequest(await readJson(req, bodyLimitConfig), templateId);
+        const result = await deps.templateStore.publishTemplate(request);
+        return sendJson(res, result.status === 'published' ? 201 : 200, result);
+      } catch (error) {
+        const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'TEMPLATE_PUBLISH_FAILED';
+        const message = error instanceof Error ? error.message : 'Template publish failed.';
+        const details = typeof error === 'object' && error && 'details' in error ? (error as { details?: unknown }).details : undefined;
+        return sendJson(res, errorStatus(code), { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
+      }
+    }
 
     const templateMatch = TEMPLATE_ROUTE.exec(url.pathname);
     if (templateMatch && (method === 'PUT' || method === 'DELETE')) {
