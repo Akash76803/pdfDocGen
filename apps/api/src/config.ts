@@ -125,3 +125,13 @@ export function resolveApiAuthConfig(env: NodeJS.ProcessEnv = process.env): ApiA
   }
   return { mode, staticBearerToken };
 }
+
+
+export function assertSecureCloudAuthConfig(server: ApiServerConfig, auth: ApiAuthConfig): void {
+  if (server.cloudRuntime && auth.mode === 'disabled') {
+    throw Object.assign(
+      new Error('Hosted Cloud Run runtime requires API authentication to be enabled.'),
+      { code:'INSECURE_CLOUD_AUTH_CONFIG' },
+    );
+  }
+}
