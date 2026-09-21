@@ -76,4 +76,13 @@ describe('DB-2 Fix2/Fix3 template library', () => {
     expect(published).toMatchObject({id:local.id,status:'Published',version:2,cloudPublication:{version:2,status:'ACTIVE'}});
     expect(readTemplateLibrary(storage)).toHaveLength(1);
   });
+
+  it('preserves confirmed cloud version metadata across later Builder saves',()=>{
+    const storage=new MemoryStorage();
+    const local=saveTemplateToLibrary(storage,{name:'Invoice A',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]});
+    recordCloudPublication(storage,local.id,{version:2,status:'ACTIVE',publishedAt:'2026-09-21T00:01:00.000Z',apiBaseUrl:'https://api.example.com'});
+    const saved=saveTemplateToLibrary(storage,{name:'Invoice A edited',status:'Saved',updatedAt:'2026-09-21T00:02:00.000Z',pages:[{id:'p1'}]});
+    expect(saved.cloudPublication).toMatchObject({version:2,status:'ACTIVE',apiBaseUrl:'https://api.example.com'});
+    expect(saved.name).toBe('Invoice A edited');
+  });
 });

@@ -118,6 +118,7 @@ export function saveTemplateToLibrary(storage: Storage, payload: TemplateLibrary
     updatedAt: now,
     category: payload.category ?? existing?.category ?? 'General',
     version: payload.version ?? existing?.version ?? 1,
+    cloudPublication: existing?.cloudPublication,
     payload: { ...payload, status, category: payload.category ?? existing?.category ?? 'General', version: payload.version ?? existing?.version ?? 1, updatedAt: now },
   };
   const next = library.filter((item) => item.id !== entry.id);
@@ -261,6 +262,7 @@ export function duplicateTemplate(storage: Storage, id: string): TemplateLibrary
     createdAt: now,
     updatedAt: now,
     version: 1,
+    cloudPublication: undefined,
     payload: { ...source.payload, name: `${source.name} Copy`, status: 'Draft', version: 1, publishedAt: undefined, updatedAt: now },
   };
   storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify([entry, ...readTemplateLibrary(storage)]));

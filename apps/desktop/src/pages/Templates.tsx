@@ -20,7 +20,7 @@ import {
   type NewTemplateRequest,
   type TemplateLibraryEntry,
 } from '../lib/templateLibrary.ts';
-import { publishTemplateToCloud, TemplatePublishError } from '../lib/cloudTemplatePublisher.ts';
+import { publishTemplateToCloud, resolveCloudApiBaseUrl, TemplatePublishError } from '../lib/cloudTemplatePublisher.ts';
 
 export function Templates({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
   const [templates, setTemplates] = useState<TemplateLibraryEntry[]>(() => migrateLegacyTemplateToLibrary(window.localStorage));
@@ -85,7 +85,21 @@ export function Templates({ onNavigate }: { onNavigate: (route: AppRoute) => voi
       refreshLibrary();
       setPublishNotice({ tone:'success', text:`${item.name} ${result.status === 'published' ? 'published' : 'updated'} successfully as cloud version ${result.version}.` });
     } catch (error) {
-      const message = error instanceof TemplatePublishError ? `${error.message} (${error.code})` : error instanceof Error ? error.message : 'Template publish failed.';
+      const conflictVersion = error instanceof TemplatePublishError && error.code === 'TEMPLATE_VERSION_CONFLICT'
+        && error.details && typeof error.details === 'object' && typeof (error.details as { currentVersion?: unknown }).currentVersion === 'number'
+        ? (error.details as { currentVersion: number }).currentVersion : null;
+      if (conflictVersion !== null) {
+        recordCloudPublication(window.localStorage, item.id, {
+          version: conflictVersion,
+          status: 'ACTIVE',
+          publishedAt: item.cloudPublication?.publishedAt ?? new Date().toISOString(),
+          apiBaseUrl: item.cloudPublication?.apiBaseUrl ?? resolveCloudApiBaseUrl(window.localStorage),
+        });
+        refreshLibrary();
+      }
+      const message = conflictVersion !== null
+        ? `Cloud is already at version ${conflictVersion}. Local cloud state was refreshed; review the template and click Update cloud template again.`
+        : error instanceof TemplatePublishError ? `${error.message} (${error.code})` : error instanceof Error ? error.message : 'Template publish failed.';
       setPublishNotice({ tone:'error', text:message });
     } finally {
       setPublishingTemplateId(null);

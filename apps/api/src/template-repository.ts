@@ -58,6 +58,18 @@ export class FileSystemTemplateRepository implements TemplateRepository {
     const filePath = this.resolveTemplatePath(value.id);
     if (!filePath) throw Object.assign(new Error('Template ID is invalid.'), { code: 'INVALID_TEMPLATE_ID' });
     await mkdir(dirname(filePath), { recursive: true });
+    try {
+      const existing: unknown = JSON.parse(await readFile(filePath, 'utf8'));
+      if (isPublishedTemplateRecord(existing, value.id)) {
+        // Ordinary Desktop Save is local-first and must never replace the
+        // explicitly published cloud/current record. A later publish carries
+        // the edited self-contained template through the versioned endpoint.
+        return filePath;
+      }
+    } catch (error) {
+      const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : '';
+      if (code !== 'ENOENT' && !(error instanceof SyntaxError)) throw error;
+    }
     await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
     return filePath;
   }
@@ -83,6 +95,19 @@ export class FileSystemTemplateRepository implements TemplateRepository {
     } catch (error) {
       const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : '';
       if (code !== 'ENOENT') throw error;
+    }
+
+    if (!current && request.expectedVersion !== undefined && request.expectedVersion > 0) {
+      const expectedPath = this.resolveTemplatePath(request.templateId, request.expectedVersion);
+      if (expectedPath) {
+        try {
+          const parsed: unknown = JSON.parse(await readFile(expectedPath, 'utf8'));
+          if (isPublishedTemplateRecord(parsed, request.templateId)) current = parsed;
+        } catch (error) {
+          const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : '';
+          if (code !== 'ENOENT') throw error;
+        }
+      }
     }
 
     if (current) {
@@ -121,7 +146,10 @@ export class FileSystemTemplateRepository implements TemplateRepository {
     const serialized = `${JSON.stringify(record, null, 2)}\n`;
     await writeFile(versionPath, serialized, { encoding: 'utf8', flag: 'wx' }).catch((error: unknown) => {
       const code = typeof error === 'object' && error && 'code' in error ? String((error as { code?: unknown }).code) : '';
-      if (code === 'EEXIST') throw Object.assign(new Error(`Template version ${request.version} already exists.`), { code: 'TEMPLATE_VERSION_CONFLICT' });
+      if (code === 'EEXIST') throw Object.assign(new Error(`Template version ${request.version} already exists.`), {
+        code: 'TEMPLATE_VERSION_CONFLICT',
+        details: { templateId: request.templateId, currentVersion: request.version },
+      });
       throw error;
     });
     await writeFile(currentPath, serialized, 'utf8');

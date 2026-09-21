@@ -41,4 +41,12 @@ describe('filesystem template repository',()=>{
     await writeFile(join(dir,'invoice.json'),JSON.stringify(template));
     await expect(repo.publishTemplate({templateId:'invoice',name:'Invoice',version:1,status:'ACTIVE',metadata:{},template})).resolves.toMatchObject({status:'published',version:1});
   });
+  it('does not let an ordinary local save overwrite a published current record',async()=>{
+    const {repo}=await tempRepo();
+    const template={id:'invoice',name:'Invoice',status:'Saved' as const,createdAt:'2026-09-21T00:00:00.000Z',updatedAt:'2026-09-21T00:00:00.000Z',payload:{name:'Invoice',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]}};
+    await repo.publishTemplate({templateId:'invoice',name:'Invoice',version:1,status:'ACTIVE',metadata:{},template});
+    await repo.saveDesktopTemplateEntry({...template,name:'Edited locally',payload:{...template.payload,name:'Edited locally'}});
+    expect(await repo.getTemplate('invoice')).toMatchObject({name:'Invoice',version:1});
+    await expect(repo.publishTemplate({templateId:'invoice',name:'Edited locally',version:2,expectedVersion:1,status:'ACTIVE',metadata:{},template:{...template,name:'Edited locally'}})).resolves.toMatchObject({status:'updated',version:2});
+  });
 });
