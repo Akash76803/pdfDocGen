@@ -46,6 +46,10 @@ describe('CLOUD-1 repository composition', () => {
       async deleteTemplateFile(templateId:string) {
         saved.push(`deleted:${templateId}`);
       },
+      async publishTemplate(request) {
+        saved.push(`published:${request.templateId}`);
+        return { status:'published', templateId:request.templateId, version:request.version, publicationStatus:request.status, publishedAt:'2026-09-21T00:00:00.000Z' };
+      },
     };
 
     const result = createTemplateRepositoryComposition({

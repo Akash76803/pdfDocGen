@@ -2,14 +2,14 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { DocumentGenerationService } from '@document-tool/generation-core';
-import { createApiHandler } from './app.js';
+import { createApiHandler, type LocalTemplateFileStore } from './app.js';
 import type { ApiBodyLimitConfig } from './config.js';
 
 const servers: Server[] = [];
 afterEach(async()=>{ await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve())))); });
 
-async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig) {
-  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig})(req,res); });
+async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore) {
+  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, templateStore})(req,res); });
   servers.push(server);
   await new Promise<void>((resolve)=>server.listen(0,'127.0.0.1',()=>resolve()));
   const {port}=server.address() as AddressInfo;
@@ -62,6 +62,40 @@ describe('DB-6B document generation API',()=>{
     const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'',output:{format:'pdf'},data:{}})});
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
+  });
+
+  it('publishes a validated template and returns the repository result',async()=>{
+    const published: unknown[]=[];
+    const templateStore: LocalTemplateFileStore = {
+      async saveDesktopTemplateEntry(){ return 'unused'; },
+      async deleteTemplateFile(){},
+      async publishTemplate(request){
+        published.push(request);
+        return {status:'published',templateId:request.templateId,version:request.version,publicationStatus:request.status,publishedAt:'2026-09-21T00:00:00.000Z'};
+      },
+    };
+    const base=await start({generate:async()=>{throw new Error('unused');}},undefined,templateStore);
+    const template={id:'invoice',name:'Invoice',status:'Saved',createdAt:'2026-09-21T00:00:00.000Z',updatedAt:'2026-09-21T00:00:00.000Z',payload:{name:'Invoice',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]}};
+    const response=await fetch(`${base}/api/v1/templates/invoice/publish`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'invoice',name:'Invoice',version:1,status:'ACTIVE',metadata:{source:'desktop'},template})});
+    expect(response.status).toBe(201);
+    expect(await response.json()).toMatchObject({status:'published',templateId:'invoice',version:1,publicationStatus:'ACTIVE'});
+    expect(published).toHaveLength(1);
+  });
+
+  it('returns structured publish validation and version-conflict errors',async()=>{
+    const templateStore: LocalTemplateFileStore = {
+      async saveDesktopTemplateEntry(){ return 'unused'; },
+      async deleteTemplateFile(){},
+      async publishTemplate(){ throw Object.assign(new Error('stale'),{code:'TEMPLATE_VERSION_CONFLICT',details:{currentVersion:2}}); },
+    };
+    const base=await start({generate:async()=>{throw new Error('unused');}},undefined,templateStore);
+    const invalid=await fetch(`${base}/api/v1/templates/invoice/publish`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'other'})});
+    expect(invalid.status).toBe(400);
+    expect(await invalid.json()).toMatchObject({error:{code:'INVALID_TEMPLATE_PAYLOAD'}});
+    const template={id:'invoice',name:'Invoice',status:'Saved',createdAt:'2026-09-21T00:00:00.000Z',updatedAt:'2026-09-21T00:00:00.000Z',payload:{name:'Invoice',updatedAt:'2026-09-21T00:00:00.000Z',pages:[]}};
+    const conflict=await fetch(`${base}/api/v1/templates/invoice/publish`,{method:'PUT',headers:{'content-type':'application/json'},body:JSON.stringify({templateId:'invoice',name:'Invoice',version:3,expectedVersion:1,status:'ACTIVE',metadata:{},template})});
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({error:{code:'TEMPLATE_VERSION_CONFLICT',details:{currentVersion:2}}});
   });
 
   it('routes combined batch generation through the additive batch adapter without changing single generation',async()=>{

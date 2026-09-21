@@ -43,6 +43,12 @@ export type TemplateLibraryEntry = {
   payload: TemplateLibraryPayload;
   category?: string;
   version?: number;
+  cloudPublication?: {
+    version: number;
+    status: 'DRAFT' | 'ACTIVE' | 'ARCHIVED';
+    publishedAt: string;
+    apiBaseUrl: string;
+  };
 };
 
 function safeParse<T>(raw: string | null, fallback: T): T {
@@ -207,6 +213,36 @@ export function updateTemplateMetadata(storage: Storage, id: string, patch: { na
   };
   const result = library.map((item) => item.id === id ? next : item);
   storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify(result));
+  if (storage.getItem(ACTIVE_TEMPLATE_ID_KEY) === id) storage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(next.payload));
+  notifyLibraryChanged(storage);
+  void persistTemplateFile(next);
+  return next;
+}
+
+export function recordCloudPublication(
+  storage: Storage,
+  id: string,
+  publication: NonNullable<TemplateLibraryEntry['cloudPublication']>,
+): TemplateLibraryEntry | null {
+  const library = readTemplateLibrary(storage);
+  const current = library.find((item) => item.id === id);
+  if (!current) return null;
+  const now = new Date().toISOString();
+  const next: TemplateLibraryEntry = {
+    ...current,
+    status: publication.status === 'ACTIVE' ? 'Published' : publication.status === 'ARCHIVED' ? 'Archived' : 'Draft',
+    version: publication.version,
+    updatedAt: now,
+    cloudPublication: publication,
+    payload: {
+      ...current.payload,
+      status: publication.status === 'ACTIVE' ? 'Published' : publication.status === 'ARCHIVED' ? 'Archived' : 'Draft',
+      version: publication.version,
+      publishedAt: publication.publishedAt,
+      updatedAt: now,
+    },
+  };
+  storage.setItem(TEMPLATE_LIBRARY_KEY, JSON.stringify(library.map((item) => item.id === id ? next : item)));
   if (storage.getItem(ACTIVE_TEMPLATE_ID_KEY) === id) storage.setItem(TEMPLATE_STORAGE_KEY, JSON.stringify(next.payload));
   notifyLibraryChanged(storage);
   void persistTemplateFile(next);

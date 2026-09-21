@@ -59,7 +59,7 @@ async function normalizeEmbeddedImageSource(source: string): Promise<string> {
   try { const response = await fetch(source); return await imageBlobToHeadlessDataUrl(await response.blob()); } catch { return source; }
 }
 
-async function selfContainedTemplateEntry(entry: TemplateLibraryEntry): Promise<TemplateLibraryEntry> {
+export async function selfContainedTemplateEntry(entry: TemplateLibraryEntry): Promise<TemplateLibraryEntry> {
   // The REST API cannot read browser IndexedDB. Before mirroring a template to
   // the shared local repository, materialize static imageAssetId references as
   // data URLs inside the persisted JSON. The in-app template keeps the asset ID
