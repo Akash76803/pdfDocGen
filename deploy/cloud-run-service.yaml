@@ -20,6 +20,8 @@ spec:
             - name: http1
               containerPort: 8080
           env:
+            - name: API_TEMPLATE_REPOSITORY_MODE
+              value: "filesystem"
             - name: API_MAX_BODY_MB
               value: "20"
             - name: API_ABSOLUTE_MAX_BODY_MB
