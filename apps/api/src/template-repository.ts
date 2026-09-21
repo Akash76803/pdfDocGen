@@ -77,9 +77,9 @@ export class FileSystemTemplateRepository implements TemplateRepository {
 }
 
 export class CompositeTemplateRepository implements TemplateRepository {
-  readonly repositories: readonly FileSystemTemplateRepository[];
+  readonly repositories: readonly TemplateRepository[];
 
-  constructor(repositories: readonly FileSystemTemplateRepository[]) {
+  constructor(repositories: readonly TemplateRepository[]) {
     this.repositories = repositories;
   }
 

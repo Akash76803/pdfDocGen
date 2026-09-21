@@ -1,21 +1,36 @@
 import { createServer } from 'node:http';
 import { HeadlessDocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler } from './app.js';
+import { resolveApiBodyLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
-import { CompositeTemplateRepository, FileSystemTemplateRepository } from './template-repository.js';
+import { createTemplateRepositoryComposition } from './repository-composition.js';
+import { buildApiStartupDiagnostics, formatApiStartupDiagnostics } from './startup-diagnostics.js';
 
-const port = Number(process.env.PORT || 8787);
-const host = process.env.HOST || '127.0.0.1';
-const sharedTemplateDirectory = resolveSharedTemplateDirectory();
-const bundledTemplateDirectory = resolveBundledTemplateDirectory();
-const sharedRepository = new FileSystemTemplateRepository(sharedTemplateDirectory);
-const bundledRepository = new FileSystemTemplateRepository(bundledTemplateDirectory);
-const repository = new CompositeTemplateRepository([sharedRepository, bundledRepository]);
-const generationService = new HeadlessDocumentGenerationService(repository);
-const handler = createApiHandler({ generationService, templateStore: sharedRepository });
+const serverConfig = resolveApiServerConfig();
+const repositoryConfig = resolveApiRepositoryConfig();
+const bodyLimitConfig = resolveApiBodyLimitConfig();
+const { host, port } = serverConfig;
+
+const composition = createTemplateRepositoryComposition({
+  mode: repositoryConfig.mode,
+  sharedTemplateDirectory: resolveSharedTemplateDirectory(),
+  bundledTemplateDirectory: resolveBundledTemplateDirectory(),
+});
+
+const generationService = new HeadlessDocumentGenerationService(composition.repository);
+const handler = createApiHandler({
+  generationService,
+  templateStore: composition.templateStore,
+  bodyLimitConfig,
+});
 
 createServer((req,res)=>{ void handler(req,res); }).listen(port,host,()=>{
-  console.log(`Document Builder API listening on http://${host}:${port}`);
-  console.log(`Shared template directory: ${sharedRepository.rootDirectory}`);
-  console.log(`Fallback template directory: ${bundledRepository.rootDirectory}`);
+  const startup = buildApiStartupDiagnostics(serverConfig, repositoryConfig, bodyLimitConfig);
+  console.log(formatApiStartupDiagnostics(startup));
+  if (composition.diagnostics.sharedTemplateDirectory) {
+    console.log(`Shared template directory: ${composition.diagnostics.sharedTemplateDirectory}`);
+  }
+  if (composition.diagnostics.bundledTemplateDirectory) {
+    console.log(`Fallback template directory: ${composition.diagnostics.bundledTemplateDirectory}`);
+  }
 });
