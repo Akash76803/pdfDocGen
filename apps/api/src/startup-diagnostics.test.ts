@@ -8,6 +8,7 @@ describe('CLOUD-1 startup diagnostics', () => {
       { mode:'filesystem' },
       { requestedLimitMb:20, absoluteMaxMb:50, effectiveLimitMb:20, effectiveLimitBytes:20 * 1024 * 1024 },
       { requestedTimeoutMs:240000, absoluteTimeoutMs:295000, effectiveTimeoutMs:240000, requestedMaxBatchDocuments:100, absoluteMaxBatchDocuments:500, effectiveMaxBatchDocuments:100 },
+      { mode:'static-bearer', staticBearerToken:'must-not-be-logged' },
     );
 
     expect(diagnostics).toEqual({
@@ -19,6 +20,7 @@ describe('CLOUD-1 startup diagnostics', () => {
       absoluteMaxBodyMb:50,
       generationTimeoutMs:240000,
       maxBatchDocuments:100,
+      authMode:'static-bearer',
     });
 
     const line = formatApiStartupDiagnostics(diagnostics);
@@ -27,9 +29,11 @@ describe('CLOUD-1 startup diagnostics', () => {
       service:'document-builder-api',
       runtime:'cloud',
       repositoryMode:'filesystem',
+      authMode:'static-bearer',
     });
     expect(line).not.toContain('token');
     expect(line).not.toContain('secret');
     expect(line).not.toContain('password');
+    expect(line).not.toContain('must-not-be-logged');
   });
 });
