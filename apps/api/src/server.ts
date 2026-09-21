@@ -1,7 +1,8 @@
 import { createServer } from 'node:http';
 import { HeadlessDocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler } from './app.js';
-import { resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
+import { createStaticBearerAuthenticator } from './auth.js';
+import { resolveApiAuthConfig, resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
 import { createTemplateRepositoryComposition } from './repository-composition.js';
 import { buildApiStartupDiagnostics, formatApiStartupDiagnostics } from './startup-diagnostics.js';
@@ -12,6 +13,10 @@ const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
 const bodyLimitConfig = resolveApiBodyLimitConfig();
 const generationLimitConfig = resolveApiGenerationLimitConfig();
+const authConfig = resolveApiAuthConfig();
+const authenticator = authConfig.mode === 'static-bearer'
+  ? createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! })
+  : undefined;
 const { host, port } = serverConfig;
 
 const composition = createTemplateRepositoryComposition({
@@ -27,6 +32,7 @@ const handler = createApiHandler({
   templateStore: composition.templateStore,
   bodyLimitConfig,
   generationLimitConfig,
+  authenticator,
 });
 
 createServer((req,res)=>{ void handler(req,res); }).listen(port,host,()=>{
