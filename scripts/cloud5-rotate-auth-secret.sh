@@ -6,7 +6,26 @@ REGION="${REGION:-us-central1}"
 SERVICE="${SERVICE:-pdf-doc-gen-api-staging}"
 AUTH_SECRET="${AUTH_SECRET:-pdf-doc-gen-api-auth-token}"
 
-OLD_SECRET_VERSION="$(gcloud run services describe "$SERVICE"   --project="$PROJECT_ID"   --region="$REGION"   --format='value(spec.template.spec.containers[0].env[?name="API_AUTH_STATIC_BEARER_TOKEN"].valueFrom.secretKeyRef.key)')"
+SERVICE_JSON="$(gcloud run services describe "$SERVICE"   --project="$PROJECT_ID"   --region="$REGION"   --format=json)"
+
+OLD_SECRET_VERSION="$(python3 - "$SERVICE_JSON" "$AUTH_SECRET" <<'PY'
+import json, sys
+service=json.loads(sys.argv[1])
+expected_secret=sys.argv[2]
+containers=service.get('spec',{}).get('template',{}).get('spec',{}).get('containers',[])
+if not containers:
+    raise SystemExit('no Cloud Run container config found')
+env={e.get('name'):e for e in containers[0].get('env',[])}
+secret_ref=env.get('API_AUTH_STATIC_BEARER_TOKEN',{}).get('valueFrom',{}).get('secretKeyRef',{})
+name=secret_ref.get('name','')
+key=str(secret_ref.get('key',''))
+if expected_secret not in name:
+    raise SystemExit(f'unexpected auth secret reference: {name!r}')
+if not key.isdigit():
+    raise SystemExit(f'secret version is not numerically pinned: {key!r}')
+print(key)
+PY
+)"
 
 [[ "$OLD_SECRET_VERSION" =~ ^[0-9]+$ ]] || {
   echo "ERROR: could not resolve currently pinned numeric secret version." >&2
