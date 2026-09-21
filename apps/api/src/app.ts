@@ -9,6 +9,7 @@ import {
   type GenerateDocumentCommand,
 } from '@document-tool/generation-core';
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
+import { ApiAuthenticationError, authenticateRequest, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
 import {
   DEFAULT_API_MAX_BATCH_DOCUMENTS,
   resolveApiBodyLimitConfig,
@@ -28,6 +29,7 @@ export type ApiDependencies = {
   bodyLimitConfig?: ApiBodyLimitConfig;
   generationLimitConfig?: ApiGenerationLimitConfig;
   templateStore?: LocalTemplateFileStore;
+  authenticator?: ApiAuthenticator;
 };
 
 type ApiError = { error: { code: string; message: string; details?: unknown } };
@@ -70,7 +72,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization');
     res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings');
   }
 }
@@ -234,12 +236,22 @@ function errorStatus(code: string) {
 export function createApiHandler(deps: ApiDependencies) {
   const bodyLimitConfig = deps.bodyLimitConfig ?? resolveApiBodyLimitConfig();
   const generationLimitConfig = deps.generationLimitConfig ?? resolveApiGenerationLimitConfig();
-  return async (req: IncomingMessage, res: ServerResponse) => {
+  return async (req: AuthenticatedIncomingMessage, res: ServerResponse) => {
     applyCors(req, res);
     const method = req.method ?? 'GET';
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
-    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-4', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
+    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-5', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
+
+    try {
+      await authenticateRequest(req, deps.authenticator);
+    } catch (error) {
+      if (error instanceof ApiAuthenticationError) {
+        res.setHeader('www-authenticate', 'Bearer');
+        return sendJson(res, 401, { error:{ code:error.code, message:error.message } } satisfies ApiError);
+      }
+      return sendJson(res, 401, { error:{ code:'UNAUTHORIZED', message:'Authentication is required.' } } satisfies ApiError);
+    }
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
     if (publishMatch && method === 'PUT') {
