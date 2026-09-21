@@ -10,6 +10,8 @@
   },
   "dependencies": {
     "@document-tool/contracts": "*",
-    "@document-tool/generation-core": "*"
+    "@document-tool/generation-core": "*",
+    "@google-cloud/firestore": "^7.11.6",
+    "@google-cloud/storage": "^7.22.0"
   }
 }

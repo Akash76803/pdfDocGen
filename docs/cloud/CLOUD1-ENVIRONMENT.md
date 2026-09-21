@@ -14,6 +14,10 @@ This file defines the runtime configuration contract for the Document Builder he
 | `API_TEMPLATE_REPOSITORY_MODE` | No | `filesystem` | `filesystem` or `cloud`. Cloud mode requires a persistent cloud driver. |
 | `API_TEMPLATE_DIR` | Filesystem mode only | OS application-data directory | Writable template directory used by local/offline mode. |
 | `API_FALLBACK_TEMPLATE_DIR` | No | `./data/templates` | Read fallback location for bundled templates. |
+| `API_GCP_TEMPLATE_BUCKET` | Cloud mode | none | Cloud Storage bucket for immutable templates and assets. |
+| `API_GCP_FIRESTORE_DATABASE` | No | `(default)` | Firestore database containing current/version metadata. |
+| `API_GCP_TEMPLATE_PREFIX` | No | `document-builder/templates` | Template object prefix. |
+| `API_GCP_ASSET_PREFIX` | No | `document-builder/assets` | Content-addressed asset object prefix. |
 
 ## Local development
 
@@ -49,6 +53,7 @@ Once CLOUD-3 is ready:
 
 ```text
 API_TEMPLATE_REPOSITORY_MODE=cloud
+API_GCP_TEMPLATE_BUCKET=PROJECT_ID-document-builder-assets
 ```
 
 Startup must fail if cloud mode is selected without a configured persistent cloud driver. Silent fallback to ephemeral filesystem storage is intentionally forbidden.
