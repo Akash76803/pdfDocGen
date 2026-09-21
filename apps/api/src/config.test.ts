@@ -17,26 +17,6 @@ describe('DB-6B API body limit configuration', () => {
       absoluteMaxMb: DEFAULT_API_ABSOLUTE_MAX_BODY_MB,
       effectiveLimitMb: DEFAULT_API_MAX_BODY_MB,
     });
-
-describe('CLOUD-1 template repository configuration', () => {
-  it('defaults to filesystem mode for local/offline compatibility', () => {
-    expect(resolveApiRepositoryConfig({})).toEqual({ mode: 'filesystem' });
-  });
-
-  it('allows explicit persistent cloud repository mode', () => {
-    expect(resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: 'cloud' })).toEqual({ mode: 'cloud' });
-  });
-
-  it('normalizes explicit filesystem mode', () => {
-    expect(resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: '  FILESYSTEM  ' })).toEqual({ mode: 'filesystem' });
-  });
-
-  it('fails fast for an invalid repository mode', () => {
-    expect(() => resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: 'memory' })).toThrow(
-      'API_TEMPLATE_REPOSITORY_MODE must be "filesystem" or "cloud".',
-    );
-  });
-});
   });
 
   it('uses runtime environment values instead of a route-level hardcoded limit', () => {
@@ -94,5 +74,25 @@ describe('CLOUD-1 API server configuration', () => {
       host: DEFAULT_LOCAL_API_HOST,
       port: DEFAULT_API_PORT,
     });
+  });
+});
+
+describe('CLOUD-1 template repository configuration', () => {
+  it('defaults to filesystem mode for local/offline compatibility', () => {
+    expect(resolveApiRepositoryConfig({})).toEqual({ mode: 'filesystem' });
+  });
+
+  it('allows explicit persistent cloud repository mode', () => {
+    expect(resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: 'cloud' })).toEqual({ mode: 'cloud' });
+  });
+
+  it('normalizes explicit filesystem mode', () => {
+    expect(resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: '  FILESYSTEM  ' })).toEqual({ mode: 'filesystem' });
+  });
+
+  it('fails fast for an invalid repository mode', () => {
+    expect(() => resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: 'memory' })).toThrow(
+      'API_TEMPLATE_REPOSITORY_MODE must be "filesystem" or "cloud".',
+    );
   });
 });
