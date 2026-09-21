@@ -8,6 +8,7 @@ export const DEFAULT_API_PORT = 8787;
 export const DEFAULT_LOCAL_API_HOST = '127.0.0.1';
 export const DEFAULT_CLOUD_API_HOST = '0.0.0.0';
 export const DEFAULT_TEMPLATE_REPOSITORY_MODE = 'filesystem' as const;
+export const DEFAULT_API_AUTH_MODE = 'disabled' as const;
 
 export type ApiBodyLimitConfig = {
   requestedLimitMb: number;
@@ -32,6 +33,12 @@ export type ApiGenerationLimitConfig = {
 };
 
 export type ApiTemplateRepositoryMode = 'filesystem' | 'cloud';
+export type ApiAuthMode = 'disabled' | 'static-bearer';
+
+export type ApiAuthConfig = {
+  mode: ApiAuthMode;
+  staticBearerToken?: string;
+};
 
 export type ApiRepositoryConfig = {
   mode: ApiTemplateRepositoryMode;
@@ -98,4 +105,23 @@ export function resolveApiRepositoryConfig(env: NodeJS.ProcessEnv = process.env)
     new Error('API_TEMPLATE_REPOSITORY_MODE must be "filesystem" or "cloud".'),
     { code: 'INVALID_TEMPLATE_REPOSITORY_MODE', details: { value: env.API_TEMPLATE_REPOSITORY_MODE } },
   );
+}
+
+
+export function resolveApiAuthConfig(env: NodeJS.ProcessEnv = process.env): ApiAuthConfig {
+  const rawMode = env.API_AUTH_MODE?.trim().toLowerCase();
+  const mode: ApiAuthMode = !rawMode ? DEFAULT_API_AUTH_MODE
+    : rawMode === 'disabled' || rawMode === 'static-bearer' ? rawMode
+    : (()=>{ throw Object.assign(new Error('API_AUTH_MODE must be "disabled" or "static-bearer".'), { code:'INVALID_API_AUTH_MODE', details:{ value:env.API_AUTH_MODE } }); })();
+
+  if (mode === 'disabled') return { mode };
+
+  const staticBearerToken = env.API_AUTH_STATIC_BEARER_TOKEN?.trim();
+  if (!staticBearerToken) {
+    throw Object.assign(
+      new Error('API_AUTH_STATIC_BEARER_TOKEN is required when API_AUTH_MODE is "static-bearer".'),
+      { code:'MISSING_API_AUTH_TOKEN' },
+    );
+  }
+  return { mode, staticBearerToken };
 }
