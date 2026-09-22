@@ -54,7 +54,7 @@ function readSafeCorrelationId(req: IncomingMessage): string | undefined {
   return SAFE_CORRELATION_ID.test(trimmed) ? trimmed : undefined;
 }
 
-export function defaultApiLogger(entry: ApiRequestLogEntry): void {
+export function defaultApiLogger(entry: ApiLogEntry): void {
   console.log(JSON.stringify(entry));
 }
 
