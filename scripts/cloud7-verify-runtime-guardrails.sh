@@ -11,13 +11,15 @@ EXPECTED_CONCURRENCY="${CONCURRENCY:-4}"
 EXPECTED_TIMEOUT="${CLOUD_RUN_TIMEOUT:-300}"
 EXPECTED_CPU="${CPU:-1}"
 EXPECTED_MEMORY="${MEMORY:-1Gi}"
+EXPECTED_RATE_LIMIT="${API_RATE_LIMIT_PER_MINUTE:-120}"
+EXPECTED_ABSOLUTE_RATE_LIMIT="${API_ABSOLUTE_RATE_LIMIT_PER_MINUTE:-1000}"
 
 SERVICE_JSON="$(gcloud run services describe "${SERVICE}" --project="${PROJECT_ID}" --region="${REGION}" --format=json)"
 
-python3 - "$SERVICE_JSON" "$EXPECTED_MIN" "$EXPECTED_MAX" "$EXPECTED_CONCURRENCY" "$EXPECTED_TIMEOUT" "$EXPECTED_CPU" "$EXPECTED_MEMORY" <<'PY'
+python3 - "$SERVICE_JSON" "$EXPECTED_MIN" "$EXPECTED_MAX" "$EXPECTED_CONCURRENCY" "$EXPECTED_TIMEOUT" "$EXPECTED_CPU" "$EXPECTED_MEMORY" "$EXPECTED_RATE_LIMIT" "$EXPECTED_ABSOLUTE_RATE_LIMIT" <<'PY'
 import json, sys
 service=json.loads(sys.argv[1])
-expected_min,expected_max,expected_concurrency,expected_timeout,expected_cpu,expected_memory=sys.argv[2:]
+expected_min,expected_max,expected_concurrency,expected_timeout,expected_cpu,expected_memory,expected_rate_limit,expected_absolute_rate_limit=sys.argv[2:]
 template=service.get('spec',{}).get('template',{})
 metadata=template.get('metadata',{})
 annotations=metadata.get('annotations',{})
@@ -66,8 +68,8 @@ required={
  'API_ABSOLUTE_MAX_BATCH_DOCUMENTS':'500',
  'API_MAX_BODY_MB':'20',
  'API_ABSOLUTE_MAX_BODY_MB':'50',
- 'API_RATE_LIMIT_PER_MINUTE':'120',
- 'API_ABSOLUTE_RATE_LIMIT_PER_MINUTE':'1000',
+ 'API_RATE_LIMIT_PER_MINUTE':expected_rate_limit,
+ 'API_ABSOLUTE_RATE_LIMIT_PER_MINUTE':expected_absolute_rate_limit,
 }
 for key,expected in required.items():
     actual=env.get(key)
