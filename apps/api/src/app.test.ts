@@ -22,7 +22,7 @@ describe('DB-6B document generation API',()=>{
     const base=await start({ generate: async()=>{ throw new Error('unused'); } });
     const response=await fetch(`${base}/health`);
     expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({status:'ok',phase:'CLOUD-5',limits:{requestBodyMb:20,absoluteMaxMb:50,generationTimeoutMs:240000,maxBatchDocuments:100}});
+    expect(await response.json()).toMatchObject({status:'ok',phase:'CLOUD-6',limits:{requestBodyMb:20,absoluteMaxMb:50,generationTimeoutMs:240000,maxBatchDocuments:100}});
   });
   it('keeps health public when authentication is enabled',async()=>{
     const base=await start({ generate: async()=>{ throw new Error('unused'); } },undefined,undefined,undefined,createStaticBearerAuthenticator({token:'test-token'}));
