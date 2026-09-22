@@ -59,6 +59,8 @@ required={
  'API_ABSOLUTE_MAX_BATCH_DOCUMENTS':'500',
  'API_MAX_BODY_MB':'20',
  'API_ABSOLUTE_MAX_BODY_MB':'50',
+ 'API_RATE_LIMIT_PER_MINUTE':'120',
+ 'API_ABSOLUTE_RATE_LIMIT_PER_MINUTE':'1000',
 }
 for key,expected in required.items():
     actual=env.get(key)
