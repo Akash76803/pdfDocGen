@@ -8,6 +8,8 @@ export class TemplatePublishError extends Error {
   constructor(readonly code: string, message: string, readonly details?: unknown) { super(message); }
 }
 
+export type CloudApiAccessTokenProvider = () => Promise<string | null | undefined>;
+
 function normalizeBaseUrl(value: string): string {
   const normalized = value.trim().replace(/\/+$/, '');
   if (!normalized) throw new TemplatePublishError('CLOUD_API_NOT_CONFIGURED', 'Configure the hosted Document API URL in Settings before publishing.');
@@ -40,6 +42,7 @@ export async function publishTemplateToCloud(
   storage: Storage,
   entry: TemplateLibraryEntry,
   fetchImpl: typeof fetch = fetch,
+  accessTokenProvider?: CloudApiAccessTokenProvider,
 ): Promise<PublishTemplateResponse & { apiBaseUrl: string }> {
   if (!entry.id.trim() || !entry.name.trim()) throw new TemplatePublishError('INVALID_TEMPLATE', 'Template ID and name are required before publishing.');
   const apiBaseUrl = resolveCloudApiBaseUrl(storage);
@@ -61,11 +64,17 @@ export async function publishTemplateToCloud(
     },
     template,
   };
+  let accessToken: string | null | undefined;
+  if (accessTokenProvider) {
+    try { accessToken = (await accessTokenProvider())?.trim(); }
+    catch (error) { throw new TemplatePublishError('CLOUD_AUTH_UNAVAILABLE', error instanceof Error ? `Unable to acquire an access token: ${error.message}` : 'Unable to acquire an access token.'); }
+    if (!accessToken) throw new TemplatePublishError('CLOUD_AUTH_REQUIRED', 'Sign in or configure a secure cloud access token before publishing.');
+  }
   let response: Response;
   try {
     response = await fetchImpl(`${apiBaseUrl}/api/v1/templates/${encodeURIComponent(entry.id)}/publish`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', ...(accessToken ? { authorization:`Bearer ${accessToken}` } : {}) },
       body: JSON.stringify(request),
     });
   } catch (error) {

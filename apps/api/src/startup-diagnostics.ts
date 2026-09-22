@@ -1,4 +1,4 @@
-import type { ApiBodyLimitConfig, ApiGenerationLimitConfig, ApiRepositoryConfig, ApiServerConfig } from './config.js';
+import type { ApiAuthConfig, ApiBodyLimitConfig, ApiGenerationLimitConfig, ApiRepositoryConfig, ApiServerConfig } from './config.js';
 
 export type ApiStartupDiagnostics = {
   runtime: 'local' | 'cloud';
@@ -9,6 +9,7 @@ export type ApiStartupDiagnostics = {
   absoluteMaxBodyMb: number;
   generationTimeoutMs: number;
   maxBatchDocuments: number;
+  authMode: ApiAuthConfig['mode'];
 };
 
 export function buildApiStartupDiagnostics(
@@ -16,6 +17,7 @@ export function buildApiStartupDiagnostics(
   repository: ApiRepositoryConfig,
   body: ApiBodyLimitConfig,
   generation: ApiGenerationLimitConfig,
+  auth: ApiAuthConfig,
 ): ApiStartupDiagnostics {
   return {
     runtime: server.cloudRuntime ? 'cloud' : 'local',
@@ -26,6 +28,7 @@ export function buildApiStartupDiagnostics(
     absoluteMaxBodyMb: body.absoluteMaxMb,
     generationTimeoutMs: generation.effectiveTimeoutMs,
     maxBatchDocuments: generation.effectiveMaxBatchDocuments,
+    authMode: auth.mode,
   };
 }
 

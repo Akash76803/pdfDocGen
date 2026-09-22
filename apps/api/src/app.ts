@@ -9,6 +9,7 @@ import {
   type GenerateDocumentCommand,
 } from '@document-tool/generation-core';
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
+import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
 import {
   DEFAULT_API_MAX_BATCH_DOCUMENTS,
   resolveApiBodyLimitConfig,
@@ -28,6 +29,7 @@ export type ApiDependencies = {
   bodyLimitConfig?: ApiBodyLimitConfig;
   generationLimitConfig?: ApiGenerationLimitConfig;
   templateStore?: LocalTemplateFileStore;
+  authenticator?: ApiAuthenticator;
 };
 
 type ApiError = { error: { code: string; message: string; details?: unknown } };
@@ -70,7 +72,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization');
     res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings');
   }
 }
@@ -234,15 +236,28 @@ function errorStatus(code: string) {
 export function createApiHandler(deps: ApiDependencies) {
   const bodyLimitConfig = deps.bodyLimitConfig ?? resolveApiBodyLimitConfig();
   const generationLimitConfig = deps.generationLimitConfig ?? resolveApiGenerationLimitConfig();
-  return async (req: IncomingMessage, res: ServerResponse) => {
+  return async (req: AuthenticatedIncomingMessage, res: ServerResponse) => {
     applyCors(req, res);
     const method = req.method ?? 'GET';
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
-    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-4', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
+    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-5', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
+
+    let principal;
+    try {
+      principal = await authenticateRequest(req, deps.authenticator);
+    } catch (error) {
+      if (error instanceof ApiAuthenticationError) {
+        res.setHeader('www-authenticate', 'Bearer');
+        return sendJson(res, 401, { error:{ code:error.code, message:error.message } } satisfies ApiError);
+      }
+      return sendJson(res, 401, { error:{ code:'UNAUTHORIZED', message:'Authentication is required.' } } satisfies ApiError);
+    }
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
     if (publishMatch && method === 'PUT') {
+      try { requireCapability(principal, 'template:publish'); }
+      catch (error) { if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError); throw error; }
       if (!deps.templateStore?.publishTemplate) return sendJson(res, 503, { error:{ code:'TEMPLATE_PUBLISH_UNAVAILABLE', message:'Template publish repository is not configured.' } } satisfies ApiError);
       const templateId = decodeURIComponent(publishMatch[1] ?? '');
       try {
@@ -259,6 +274,8 @@ export function createApiHandler(deps: ApiDependencies) {
 
     const templateMatch = TEMPLATE_ROUTE.exec(url.pathname);
     if (templateMatch && (method === 'PUT' || method === 'DELETE')) {
+      try { requireCapability(principal, method === 'DELETE' ? 'template:delete' : 'template:write'); }
+      catch (error) { if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError); throw error; }
       if (!deps.templateStore) return sendJson(res, 503, { error:{ code:'TEMPLATE_STORE_UNAVAILABLE', message:'Local template file store is not configured.' } } satisfies ApiError);
       const templateId = decodeURIComponent(templateMatch[1] ?? '');
       try {
@@ -280,6 +297,8 @@ export function createApiHandler(deps: ApiDependencies) {
     }
 
     if (method === 'POST' && url.pathname === '/api/v1/documents/generate/batch') {
+      try { requireCapability(principal, 'document:generate-batch'); }
+      catch (error) { if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError); throw error; }
       try {
         const command = parseGenerateDocumentBatchCommand(await readJson(req, bodyLimitConfig),generationLimitConfig.effectiveMaxBatchDocuments);
         if (!deps.generationService.generateBatch) throw new GenerationServiceUnavailableError('Batch document generation adapter is not configured.');
@@ -345,6 +364,7 @@ export function createApiHandler(deps: ApiDependencies) {
 
     if (method !== 'POST' || url.pathname !== '/api/v1/documents/generate') return sendJson(res, 404, { error:{ code:'NOT_FOUND', message:'Route not found.' } } satisfies ApiError);
     try {
+      requireCapability(principal, 'document:generate');
       const command = parseGenerateDocumentCommand(await readJson(req, bodyLimitConfig));
       const result = await withGenerationDeadline(deps.generationService.generate(command),generationLimitConfig);
       if ((command.output.responseMode ?? 'binary') === 'binary') return sendBinary(res, result);
@@ -355,6 +375,7 @@ export function createApiHandler(deps: ApiDependencies) {
       };
       return sendJson(res, 200, response);
     } catch (error) {
+      if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);
       if (error instanceof GenerationServiceUnavailableError) return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
       const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'GENERATION_FAILED';
       const message = error instanceof Error ? error.message : 'Document generation failed.';

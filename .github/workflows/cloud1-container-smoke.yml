@@ -34,7 +34,14 @@ jobs:
 
       - name: Start Cloud Run-like container
         run: |
-          docker run -d --rm             --name document-builder-api-cloud1             -e K_SERVICE=document-builder-api             -e PORT=8080             -p 8080:8080             document-builder-api:cloud1
+          docker run -d --rm \
+            --name document-builder-api-cloud1 \
+            -e K_SERVICE=document-builder-api \
+            -e PORT=8080 \
+            -e API_AUTH_MODE=static-bearer \
+            -e API_AUTH_STATIC_BEARER_TOKEN=cloud1-ci-smoke-token \
+            -p 8080:8080 \
+            document-builder-api:cloud1
 
       - name: Wait for health
         run: |
@@ -48,6 +55,8 @@ jobs:
           exit 1
 
       - name: Health + single + combined batch smoke
+        env:
+          AUTH_TOKEN: cloud1-ci-smoke-token
         run: bash scripts/cloud1-container-smoke.sh
 
       - name: Container logs

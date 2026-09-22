@@ -7,6 +7,8 @@ import {
   DEFAULT_API_PORT,
   DEFAULT_CLOUD_API_HOST,
   DEFAULT_LOCAL_API_HOST,
+  assertSecureCloudAuthConfig,
+  resolveApiAuthConfig,
   resolveApiBodyLimitConfig,
   resolveApiGenerationLimitConfig,
   resolveApiRepositoryConfig,
@@ -127,5 +129,55 @@ describe('CLOUD-1 template repository configuration', () => {
     expect(() => resolveApiRepositoryConfig({ API_TEMPLATE_REPOSITORY_MODE: 'memory' })).toThrow(
       'API_TEMPLATE_REPOSITORY_MODE must be "filesystem" or "cloud".',
     );
+  });
+});
+
+
+describe('CLOUD-5 authentication configuration',()=> {
+  it('defaults to disabled for local backward compatibility',()=> {
+    expect(resolveApiAuthConfig({})).toEqual({mode:'disabled'});
+  });
+
+  it('requires a token when static bearer mode is enabled',()=> {
+    expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'static-bearer'})).toThrow(
+      'API_AUTH_STATIC_BEARER_TOKEN is required when API_AUTH_MODE is "static-bearer".',
+    );
+  });
+
+  it('loads static bearer authentication without exposing the token through other config',()=> {
+    expect(resolveApiAuthConfig({API_AUTH_MODE:'static-bearer',API_AUTH_STATIC_BEARER_TOKEN:'secret-value'})).toEqual({
+      mode:'static-bearer',
+      staticBearerToken:'secret-value',
+    });
+  });
+
+  it('rejects unsupported auth modes',()=> {
+    expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'basic'})).toThrow(
+      'API_AUTH_MODE must be "disabled" or "static-bearer".',
+    );
+  });
+});
+
+
+describe('CLOUD-5 hosted auth hardening',()=> {
+  it('allows disabled auth for local development',()=> {
+    expect(()=>assertSecureCloudAuthConfig(
+      {host:'127.0.0.1',port:8787,cloudRuntime:false},
+      {mode:'disabled'},
+    )).not.toThrow();
+  });
+
+  it('fails closed when Cloud Run starts with auth disabled',()=> {
+    expect(()=>assertSecureCloudAuthConfig(
+      {host:'0.0.0.0',port:8080,cloudRuntime:true},
+      {mode:'disabled'},
+    )).toThrow('Hosted Cloud Run runtime requires API authentication to be enabled.');
+  });
+
+  it('allows an authenticated Cloud Run configuration',()=> {
+    expect(()=>assertSecureCloudAuthConfig(
+      {host:'0.0.0.0',port:8080,cloudRuntime:true},
+      {mode:'static-bearer',staticBearerToken:'secret-from-secret-manager'},
+    )).not.toThrow();
   });
 });

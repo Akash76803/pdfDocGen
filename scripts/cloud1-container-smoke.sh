@@ -2,6 +2,11 @@
 set -euo pipefail
 
 BASE_URL="${BASE_URL:-http://127.0.0.1:8080}"
+AUTH_TOKEN="${AUTH_TOKEN:-}"
+AUTH_ARGS=()
+if [[ -n "$AUTH_TOKEN" ]]; then
+  AUTH_ARGS=(-H "Authorization: Bearer $AUTH_TOKEN")
+fi
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
@@ -47,17 +52,17 @@ cat > "$TMP_DIR/template.json" <<'JSON'
 }
 JSON
 
-curl --fail --silent --show-error   -X PUT   -H "content-type: application/json"   --data-binary @"$TMP_DIR/template.json"   "${BASE_URL}/api/v1/templates/cloud1-smoke" > "$TMP_DIR/template-response.json"
+curl --fail --silent --show-error   -X PUT   "${AUTH_ARGS[@]}"   -H "content-type: application/json"   --data-binary @"$TMP_DIR/template.json"   "${BASE_URL}/api/v1/templates/cloud1-smoke" > "$TMP_DIR/template-response.json"
 
 node -e "const x=require('$TMP_DIR/template-response.json'); if(x.status!=='saved'||x.templateId!=='cloud1-smoke') process.exit(1)"
 
 echo "[3/4] single PDF"
-curl --fail --silent --show-error   -D "$TMP_DIR/single.headers"   -H "content-type: application/json"   --data '{"templateId":"cloud1-smoke","output":{"format":"pdf","fileName":"cloud-single"},"data":{"invoiceNo":"CLOUD-1"}}'   "${BASE_URL}/api/v1/documents/generate"   -o "$TMP_DIR/single.pdf"
+curl --fail --silent --show-error   -D "$TMP_DIR/single.headers"   "${AUTH_ARGS[@]}"   -H "content-type: application/json"   --data '{"templateId":"cloud1-smoke","output":{"format":"pdf","fileName":"cloud-single"},"data":{"invoiceNo":"CLOUD-1"}}'   "${BASE_URL}/api/v1/documents/generate"   -o "$TMP_DIR/single.pdf"
 
 node -e "const fs=require('fs');const b=fs.readFileSync('$TMP_DIR/single.pdf');if(b.subarray(0,5).toString()!=='%PDF-')process.exit(1)"
 
 echo "[4/4] combined batch PDF"
-curl --fail --silent --show-error   -D "$TMP_DIR/batch.headers"   -H "content-type: application/json"   --data '{"templateId":"cloud1-smoke","output":{"format":"pdf","outputMode":"combined","fileName":"cloud-batch"},"documents":[{"id":"ONE","data":{"invoiceNo":"CLOUD-1-A"}},{"id":"TWO","data":{"invoiceNo":"CLOUD-1-B"}}]}'   "${BASE_URL}/api/v1/documents/generate/batch"   -o "$TMP_DIR/batch.pdf"
+curl --fail --silent --show-error   -D "$TMP_DIR/batch.headers"   "${AUTH_ARGS[@]}"   -H "content-type: application/json"   --data '{"templateId":"cloud1-smoke","output":{"format":"pdf","outputMode":"combined","fileName":"cloud-batch"},"documents":[{"id":"ONE","data":{"invoiceNo":"CLOUD-1-A"}},{"id":"TWO","data":{"invoiceNo":"CLOUD-1-B"}}]}'   "${BASE_URL}/api/v1/documents/generate/batch"   -o "$TMP_DIR/batch.pdf"
 
 node -e "const fs=require('fs');const b=fs.readFileSync('$TMP_DIR/batch.pdf');if(b.subarray(0,5).toString()!=='%PDF-')process.exit(1)"
 grep -qi '^x-document-page-count: 2' "$TMP_DIR/batch.headers"
