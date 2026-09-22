@@ -14,13 +14,7 @@ echo "Source bucket: $SOURCE_BUCKET"
 gcloud firestore databases describe   --project="$PROJECT_ID"   --database="$FIRESTORE_DATABASE"   --format='value(name,type,locationId)' >/dev/null
 echo "PASS: Firestore database accessible"
 
-SOURCE_JSON="$(gcloud storage buckets describe "gs://$SOURCE_BUCKET" --project="$PROJECT_ID" --format=json)"
-VERSIONING="$(python3 - "$SOURCE_JSON" <<'PY'
-import json,sys
-value=json.loads(sys.argv[1])
-print(str(bool(value.get('versioning',{}).get('enabled',False))).lower())
-PY
-)"
+VERSIONING="$(gcloud storage buckets describe "gs://$SOURCE_BUCKET"   --project="$PROJECT_ID"   --format='value(versioning_enabled)' | tr '[:upper:]' '[:lower:]')"
 if [[ "$VERSIONING" == "true" ]]; then
   echo "PASS: source GCS bucket versioning enabled"
 else
