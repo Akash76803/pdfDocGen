@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ID="${PROJECT_ID:-pdf-gen-509308}"
+REGION="${REGION:-us-central1}"
+SERVICE="${SERVICE:-pdf-doc-gen-api-staging}"
+
+MIN_INSTANCES="${MIN_INSTANCES:-0}"
+MAX_INSTANCES="${MAX_INSTANCES:-10}"
+CONCURRENCY="${CONCURRENCY:-4}"
+CLOUD_RUN_TIMEOUT="${CLOUD_RUN_TIMEOUT:-300}"
+CPU="${CPU:-1}"
+MEMORY="${MEMORY:-1Gi}"
+
+API_GENERATION_TIMEOUT_MS="${API_GENERATION_TIMEOUT_MS:-240000}"
+API_ABSOLUTE_GENERATION_TIMEOUT_MS="${API_ABSOLUTE_GENERATION_TIMEOUT_MS:-295000}"
+API_MAX_BATCH_DOCUMENTS="${API_MAX_BATCH_DOCUMENTS:-100}"
+API_ABSOLUTE_MAX_BATCH_DOCUMENTS="${API_ABSOLUTE_MAX_BATCH_DOCUMENTS:-500}"
+API_MAX_BODY_MB="${API_MAX_BODY_MB:-20}"
+API_ABSOLUTE_MAX_BODY_MB="${API_ABSOLUTE_MAX_BODY_MB:-50}"
+
+if (( CLOUD_RUN_TIMEOUT * 1000 <= API_ABSOLUTE_GENERATION_TIMEOUT_MS )); then
+  echo "ERROR: Cloud Run timeout must exceed API absolute generation timeout." >&2
+  exit 1
+fi
+
+if (( MIN_INSTANCES < 0 || MAX_INSTANCES < 1 || MIN_INSTANCES > MAX_INSTANCES )); then
+  echo "ERROR: invalid min/max instance configuration." >&2
+  exit 1
+fi
+
+if (( CONCURRENCY < 1 )); then
+  echo "ERROR: concurrency must be at least 1." >&2
+  exit 1
+fi
+
+echo "Applying CLOUD-7.1 runtime guardrails"
+echo "Service: ${SERVICE}"
+echo "Region: ${REGION}"
+echo "Instances: ${MIN_INSTANCES}..${MAX_INSTANCES}"
+echo "Concurrency: ${CONCURRENCY}"
+echo "Timeout: ${CLOUD_RUN_TIMEOUT}s"
+echo "CPU/Memory: ${CPU} / ${MEMORY}"
+
+gcloud run services update "${SERVICE}" \
+  --project="${PROJECT_ID}" \
+  --region="${REGION}" \
+  --min="${MIN_INSTANCES}" \
+  --max="${MAX_INSTANCES}" \
+  --concurrency="${CONCURRENCY}" \
+  --timeout="${CLOUD_RUN_TIMEOUT}" \
+  --cpu="${CPU}" \
+  --memory="${MEMORY}" \
+  --update-env-vars="API_GENERATION_TIMEOUT_MS=${API_GENERATION_TIMEOUT_MS},API_ABSOLUTE_GENERATION_TIMEOUT_MS=${API_ABSOLUTE_GENERATION_TIMEOUT_MS},API_MAX_BATCH_DOCUMENTS=${API_MAX_BATCH_DOCUMENTS},API_ABSOLUTE_MAX_BATCH_DOCUMENTS=${API_ABSOLUTE_MAX_BATCH_DOCUMENTS},API_MAX_BODY_MB=${API_MAX_BODY_MB},API_ABSOLUTE_MAX_BODY_MB=${API_ABSOLUTE_MAX_BODY_MB}"
+
+echo
+echo "CLOUD-7.1 runtime guardrails applied."
