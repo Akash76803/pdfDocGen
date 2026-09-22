@@ -41,8 +41,11 @@ describe('CLOUD-6 request observability',()=>{
       statusCode:201,
       principal:{subject:'caller-1',roles:['generator'],authType:'api-key'},
     });
-    expect(entries[0].durationMs).toBeGreaterThanOrEqual(0);
-    const serialized=JSON.stringify(entries[0]);
+    const requestEntry=entries[0];
+    expect(requestEntry?.event).toBe('api_request_completed');
+    if (!requestEntry || requestEntry.event !== 'api_request_completed') throw new Error('Expected request completion log.');
+    expect(requestEntry.durationMs).toBeGreaterThanOrEqual(0);
+    const serialized=JSON.stringify(requestEntry);
     expect(serialized).not.toContain('must-never-log');
     expect(serialized).not.toContain('sensitive-body');
     expect(serialized).not.toContain('query-value');
@@ -55,7 +58,10 @@ describe('CLOUD-6 request observability',()=>{
     const response=await fetch(`${base}/health`,{headers:{'x-correlation-id':'unsafe value with spaces'}});
     expect(response.headers.get('x-correlation-id')).toBeNull();
     await vi.waitFor(()=>expect(entries).toHaveLength(1));
-    expect(entries[0].correlationId).toBeUndefined();
+    const requestEntry=entries[0];
+    expect(requestEntry?.event).toBe('api_request_completed');
+    if (!requestEntry || requestEntry.event !== 'api_request_completed') throw new Error('Expected request completion log.');
+    expect(requestEntry.correlationId).toBeUndefined();
   });
 });
 
