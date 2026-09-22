@@ -11,6 +11,7 @@ import {
   resolveApiAuthConfig,
   resolveApiBodyLimitConfig,
   resolveApiGenerationLimitConfig,
+  resolveApiRateLimitConfig,
   resolveApiRepositoryConfig,
   resolveApiServerConfig,
 } from './config.js';
@@ -179,5 +180,28 @@ describe('CLOUD-5 hosted auth hardening',()=> {
       {host:'0.0.0.0',port:8080,cloudRuntime:true},
       {mode:'static-bearer',staticBearerToken:'secret-from-secret-manager'},
     )).not.toThrow();
+  });
+});
+
+
+describe('CLOUD-7 API rate limit configuration',()=> {
+  it('uses a bounded default rate limit',()=> {
+    expect(resolveApiRateLimitConfig({})).toMatchObject({
+      requestedPerMinute:120,
+      absolutePerMinute:1000,
+      effectivePerMinute:120,
+      windowMs:60000,
+    });
+  });
+
+  it('clamps requested rate to the absolute ceiling',()=> {
+    expect(resolveApiRateLimitConfig({
+      API_RATE_LIMIT_PER_MINUTE:'5000',
+      API_ABSOLUTE_RATE_LIMIT_PER_MINUTE:'250',
+    })).toMatchObject({
+      requestedPerMinute:5000,
+      absolutePerMinute:250,
+      effectivePerMinute:250,
+    });
   });
 });
