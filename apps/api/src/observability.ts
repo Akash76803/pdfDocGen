@@ -20,7 +20,24 @@ export type ApiRequestLogEntry = {
   };
 };
 
-export type ApiLogger = (entry: ApiRequestLogEntry) => void;
+export type ApiOperationLogEntry = {
+  event: 'api_operation';
+  service: 'document-builder-api';
+  requestId?: string;
+  correlationId?: string;
+  operation: 'document.generate' | 'document.generate-batch' | 'template.publish' | 'template.write' | 'template.delete';
+  outcome: 'success' | 'failure';
+  statusCode: number;
+  durationMs: number;
+  templateId?: string;
+  templateVersion?: number;
+  format?: string;
+  documentCount?: number;
+  errorCode?: string;
+};
+
+export type ApiLogEntry = ApiRequestLogEntry | ApiOperationLogEntry;
+export type ApiLogger = (entry: ApiLogEntry) => void;
 
 export type ObservableIncomingMessage = IncomingMessage & {
   apiPrincipal?: ApiPrincipal;
@@ -81,5 +98,20 @@ export function attachRequestObservability(
         },
       } : {}),
     });
+  });
+}
+
+
+export function emitApiOperationLog(
+  req: ObservableIncomingMessage,
+  logger: ApiLogger = defaultApiLogger,
+  entry: Omit<ApiOperationLogEntry,'event'|'service'|'requestId'|'correlationId'>,
+): void {
+  logger({
+    event:'api_operation',
+    service:'document-builder-api',
+    ...(req.apiRequestId ? {requestId:req.apiRequestId} : {}),
+    ...(req.apiCorrelationId ? {correlationId:req.apiCorrelationId} : {}),
+    ...entry,
   });
 }
