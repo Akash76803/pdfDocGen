@@ -49,6 +49,7 @@ gcloud run services update "${SERVICE}" \
   --region="${REGION}" \
   --min="${MIN_INSTANCES}" \
   --max="${MAX_INSTANCES}" \
+  --max-instances=default \
   --concurrency="${CONCURRENCY}" \
   --timeout="${CLOUD_RUN_TIMEOUT}" \
   --cpu="${CPU}" \
