@@ -9,6 +9,8 @@ export const DEFAULT_LOCAL_API_HOST = '127.0.0.1';
 export const DEFAULT_CLOUD_API_HOST = '0.0.0.0';
 export const DEFAULT_TEMPLATE_REPOSITORY_MODE = 'filesystem' as const;
 export const DEFAULT_API_AUTH_MODE = 'disabled' as const;
+export const DEFAULT_API_RATE_LIMIT_PER_MINUTE = 120;
+export const DEFAULT_API_ABSOLUTE_RATE_LIMIT_PER_MINUTE = 1000;
 
 export type ApiBodyLimitConfig = {
   requestedLimitMb: number;
@@ -30,6 +32,13 @@ export type ApiGenerationLimitConfig = {
   requestedMaxBatchDocuments: number;
   absoluteMaxBatchDocuments: number;
   effectiveMaxBatchDocuments: number;
+};
+
+export type ApiRateLimitConfig = {
+  requestedPerMinute: number;
+  absolutePerMinute: number;
+  effectivePerMinute: number;
+  windowMs: number;
 };
 
 export type ApiTemplateRepositoryMode = 'filesystem' | 'cloud';
@@ -134,4 +143,16 @@ export function assertSecureCloudAuthConfig(server: ApiServerConfig, auth: ApiAu
       { code:'INSECURE_CLOUD_AUTH_CONFIG' },
     );
   }
+}
+
+
+export function resolveApiRateLimitConfig(env: NodeJS.ProcessEnv = process.env): ApiRateLimitConfig {
+  const requestedPerMinute = parsePositiveInteger(env.API_RATE_LIMIT_PER_MINUTE, DEFAULT_API_RATE_LIMIT_PER_MINUTE);
+  const absolutePerMinute = parsePositiveInteger(env.API_ABSOLUTE_RATE_LIMIT_PER_MINUTE, DEFAULT_API_ABSOLUTE_RATE_LIMIT_PER_MINUTE);
+  return {
+    requestedPerMinute,
+    absolutePerMinute,
+    effectivePerMinute: Math.min(requestedPerMinute, absolutePerMinute),
+    windowMs: 60_000,
+  };
 }
