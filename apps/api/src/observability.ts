@@ -36,7 +36,21 @@ export type ApiOperationLogEntry = {
   errorCode?: string;
 };
 
-export type ApiLogEntry = ApiRequestLogEntry | ApiOperationLogEntry;
+export type ApiMetricLogEntry = {
+  event: 'api_metric';
+  service: 'document-builder-api';
+  metric:
+    | 'api.request.count'
+    | 'api.request.error_count'
+    | 'api.request.duration_ms'
+    | 'api.operation.count'
+    | 'api.operation.failure_count'
+    | 'api.operation.duration_ms';
+  value: number;
+  labels: Record<string,string>;
+};
+
+export type ApiLogEntry = ApiRequestLogEntry | ApiOperationLogEntry | ApiMetricLogEntry;
 export type ApiLogger = (entry: ApiLogEntry) => void;
 
 export type ObservableIncomingMessage = IncomingMessage & {
@@ -114,4 +128,40 @@ export function emitApiOperationLog(
     ...(req.apiCorrelationId ? {correlationId:req.apiCorrelationId} : {}),
     ...entry,
   });
+}
+
+
+export function createMonitoringLogger(baseLogger: ApiLogger = defaultApiLogger): ApiLogger {
+  return (entry) => {
+    baseLogger(entry);
+
+    if (entry.event === 'api_request_completed') {
+      const labels = {
+        method: entry.method,
+        path: entry.path,
+        statusClass: `${Math.floor(entry.statusCode / 100)}xx`,
+      };
+      baseLogger({event:'api_metric',service:'document-builder-api',metric:'api.request.count',value:1,labels});
+      baseLogger({event:'api_metric',service:'document-builder-api',metric:'api.request.duration_ms',value:entry.durationMs,labels});
+      if (entry.statusCode >= 400) {
+        baseLogger({event:'api_metric',service:'document-builder-api',metric:'api.request.error_count',value:1,labels});
+      }
+      return;
+    }
+
+    if (entry.event === 'api_operation') {
+      const labels = {
+        operation: entry.operation,
+        outcome: entry.outcome,
+        statusClass: `${Math.floor(entry.statusCode / 100)}xx`,
+        ...(entry.format ? {format:entry.format} : {}),
+        ...(entry.errorCode ? {errorCode:entry.errorCode} : {}),
+      };
+      baseLogger({event:'api_metric',service:'document-builder-api',metric:'api.operation.count',value:1,labels});
+      baseLogger({event:'api_metric',service:'document-builder-api',metric:'api.operation.duration_ms',value:entry.durationMs,labels});
+      if (entry.outcome === 'failure') {
+        baseLogger({event:'api_metric',service:'document-builder-api',metric:'api.operation.failure_count',value:1,labels});
+      }
+    }
+  };
 }
