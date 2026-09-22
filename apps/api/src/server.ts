@@ -10,6 +10,7 @@ import { resolveGcpStorageConfig } from './cloud-storage-config.js';
 import { createGcpCloudTemplateRepository } from './gcp-cloud-storage.js';
 import { createMonitoringLogger } from './observability.js';
 import { createInMemoryApiRateLimiter } from './rate-limit.js';
+import { createGcpApiIdempotencyStore } from './gcp-idempotency-store.js';
 
 const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
@@ -22,16 +23,18 @@ const authenticator = authConfig.mode === 'static-bearer'
   ? createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! })
   : undefined;
 const { host, port } = serverConfig;
+const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
 
 const composition = createTemplateRepositoryComposition({
   mode: repositoryConfig.mode,
   sharedTemplateDirectory: resolveSharedTemplateDirectory(),
   bundledTemplateDirectory: resolveBundledTemplateDirectory(),
-  ...(repositoryConfig.mode === 'cloud' ? { cloudDriver:createGcpCloudTemplateRepository(resolveGcpStorageConfig()) } : {}),
+  ...(gcpStorageConfig ? { cloudDriver:createGcpCloudTemplateRepository(gcpStorageConfig) } : {}),
 });
 
 const generationService = new HeadlessDocumentGenerationService(composition.repository);
 const rateLimiter = createInMemoryApiRateLimiter(rateLimitConfig);
+const idempotencyStore = gcpStorageConfig ? createGcpApiIdempotencyStore(gcpStorageConfig) : undefined;
 const handler = createApiHandler({
   generationService,
   templateStore: composition.templateStore,
@@ -39,6 +42,7 @@ const handler = createApiHandler({
   generationLimitConfig,
   authenticator,
   rateLimiter,
+  idempotencyStore,
   logger:createMonitoringLogger(),
 });
 
