@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { Firestore, FieldValue } from '@google-cloud/firestore';
 import { Storage } from '@google-cloud/storage';
+import type { GcpStorageConfig } from './cloud-storage-config.js';
 import type {
   ApiIdempotencyStore,
   IdempotencyBeginResult,
@@ -121,4 +122,11 @@ export class GcpApiIdempotencyStore<T = unknown> implements ApiIdempotencyStore<
       if (record.status === 'pending' && record.fingerprint === input.fingerprint) transaction.delete(ref);
     });
   }
+}
+
+
+export function createGcpApiIdempotencyStore(config:GcpStorageConfig):GcpApiIdempotencyStore {
+  const firestore=new Firestore({...(config.projectId?{projectId:config.projectId}:{}),databaseId:config.firestoreDatabaseId});
+  const storage=new Storage(config.projectId?{projectId:config.projectId}:{});
+  return new GcpApiIdempotencyStore(firestore,storage,config.templateBucket);
 }
