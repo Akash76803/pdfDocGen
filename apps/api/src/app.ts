@@ -11,6 +11,7 @@ import {
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
 import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
 import { attachRequestObservability, emitApiOperationLog, type ApiLogger } from './observability.js';
+import type { ApiRateLimiter } from './rate-limit.js';
 import {
   DEFAULT_API_MAX_BATCH_DOCUMENTS,
   resolveApiBodyLimitConfig,
@@ -31,6 +32,7 @@ export type ApiDependencies = {
   generationLimitConfig?: ApiGenerationLimitConfig;
   templateStore?: LocalTemplateFileStore;
   authenticator?: ApiAuthenticator;
+  rateLimiter?: ApiRateLimiter;
   logger?: ApiLogger;
 };
 
@@ -256,6 +258,15 @@ export function createApiHandler(deps: ApiDependencies) {
         return sendJson(res, 401, { error:{ code:error.code, message:error.message } } satisfies ApiError);
       }
       return sendJson(res, 401, { error:{ code:'UNAUTHORIZED', message:'Authentication is required.' } } satisfies ApiError);
+    }
+
+    if (principal && deps.rateLimiter) {
+      const decision=deps.rateLimiter.check(principal);
+      res.setHeader('x-rate-limit-remaining', String(decision.remaining));
+      if (!decision.allowed) {
+        res.setHeader('retry-after', String(decision.retryAfterSeconds));
+        return sendJson(res, 429, { error:{ code:'RATE_LIMIT_EXCEEDED', message:'Too many requests. Retry after the indicated delay.', details:{ retryAfterSeconds:decision.retryAfterSeconds } } } satisfies ApiError);
+      }
     }
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
