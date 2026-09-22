@@ -12,6 +12,7 @@ import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-
 import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
 import { attachRequestObservability, emitApiOperationLog, type ApiLogger } from './observability.js';
 import type { ApiRateLimiter } from './rate-limit.js';
+import { canonicalRequestFingerprint, readIdempotencyKey, type ApiIdempotencyStore, type IdempotencyOperation } from './idempotency.js';
 import {
   DEFAULT_API_MAX_BATCH_DOCUMENTS,
   resolveApiBodyLimitConfig,
@@ -33,6 +34,7 @@ export type ApiDependencies = {
   templateStore?: LocalTemplateFileStore;
   authenticator?: ApiAuthenticator;
   rateLimiter?: ApiRateLimiter;
+  idempotencyStore?: ApiIdempotencyStore;
   logger?: ApiLogger;
 };
 
@@ -76,8 +78,8 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type, authorization');
-    res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings,x-request-id,x-correlation-id,x-rate-limit-remaining,retry-after');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization, idempotency-key');
+    res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings,x-request-id,x-correlation-id,x-rate-limit-remaining,retry-after,x-idempotency-replayed');
   }
 }
 
@@ -90,6 +92,45 @@ function sendJson(res: ServerResponse, status: number, value: unknown) {
 function contentDisposition(fileName: string): string {
   const ascii = fileName.replace(/[^ -~]+/g, '_').replace(/["\\]/g, '_') || 'document';
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+type IdempotencyContext = {
+  key: string;
+  owner: string;
+  operation: IdempotencyOperation;
+  fingerprint: string;
+};
+
+function idempotencyOwner(principal: { subject:string; clientId?:string } | undefined):string {
+  return principal?.clientId || principal?.subject || 'anonymous';
+}
+
+async function beginIdempotentOperation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  store: ApiIdempotencyStore | undefined,
+  owner: string,
+  operation: IdempotencyOperation,
+  payload: unknown,
+): Promise<{context?:IdempotencyContext; replay?:unknown; handled:boolean}> {
+  const key=readIdempotencyKey(req.headers['idempotency-key']);
+  if (!key || !store) return {handled:false};
+  const context={key,owner,operation,fingerprint:canonicalRequestFingerprint(payload)};
+  const decision=await store.begin(context);
+  if (decision.state === 'replay') {
+    res.setHeader('x-idempotency-replayed','true');
+    return {context,replay:decision.record.result,handled:false};
+  }
+  if (decision.state === 'in-progress') {
+    res.setHeader('retry-after','1');
+    sendJson(res,409,{error:{code:'IDEMPOTENCY_IN_PROGRESS',message:'A request with this Idempotency-Key is already in progress.'}} satisfies ApiError);
+    return {context,handled:true};
+  }
+  if (decision.state === 'conflict') {
+    sendJson(res,409,{error:{code:'IDEMPOTENCY_KEY_REUSED',message:'This Idempotency-Key was already used for a different request.'}} satisfies ApiError);
+    return {context,handled:true};
+  }
+  return {context,handled:false};
 }
 
 function sendBinary(res: ServerResponse, result: Awaited<ReturnType<DocumentGenerationService['generate']>>) {
@@ -223,7 +264,9 @@ export function parsePublishTemplateRequest(value: unknown, routeTemplateId: str
 }
 
 function errorStatus(code: string) {
-  return code === 'PAYLOAD_TOO_LARGE' ? 413
+  return code === 'INVALID_IDEMPOTENCY_KEY' ? 400
+    : code === 'IDEMPOTENCY_IN_PROGRESS' || code === 'IDEMPOTENCY_KEY_REUSED' ? 409
+    : code === 'PAYLOAD_TOO_LARGE' ? 413
     : code === 'BATCH_LIMIT_EXCEEDED' ? 413
     : code === 'GENERATION_TIMEOUT' ? 504
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
