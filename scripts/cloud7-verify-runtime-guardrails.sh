@@ -21,21 +21,23 @@ expected_min,expected_max,expected_concurrency,expected_timeout,expected_cpu,exp
 template=service.get('spec',{}).get('template',{})
 metadata=template.get('metadata',{})
 annotations=metadata.get('annotations',{})
+service_annotations=service.get('metadata',{}).get('annotations',{})
 spec=template.get('spec',{})
 containers=spec.get('containers',[])
 if not containers:
     raise SystemExit('FAIL: no Cloud Run container found')
 container=containers[0]
 resources=container.get('resources',{}).get('limits',{})
-actual_min=annotations.get('autoscaling.knative.dev/minScale','0')
-actual_max=annotations.get('autoscaling.knative.dev/maxScale','')
+actual_min=service_annotations.get('run.googleapis.com/minScale','0')
+actual_max=service_annotations.get('run.googleapis.com/maxScale','')
+revision_max=annotations.get('autoscaling.knative.dev/maxScale','')
 actual_concurrency=str(spec.get('containerConcurrency',''))
 actual_timeout=str(spec.get('timeoutSeconds',''))
 actual_cpu=str(resources.get('cpu',''))
 actual_memory=str(resources.get('memory',''))
 checks=[
  ('min instances',actual_min,expected_min),
- ('max instances',actual_max,expected_max),
+ ('service max instances',actual_max,expected_max),
  ('concurrency',actual_concurrency,expected_concurrency),
  ('timeout',actual_timeout,expected_timeout),
  ('cpu',actual_cpu,expected_cpu),
@@ -48,6 +50,11 @@ for name,actual,expected in checks:
         failed=True
     else:
         print(f'PASS: {name} = {actual}')
+if revision_max and int(revision_max) < int(expected_max):
+    print(f'FAIL: revision max instances {revision_max} conflicts with service max {expected_max}')
+    failed=True
+else:
+    print(f'PASS: revision max instances = {revision_max or "default"}')
 if failed:
     raise SystemExit(1)
 
