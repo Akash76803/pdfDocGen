@@ -10,6 +10,7 @@ import {
 } from '@document-tool/generation-core';
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
 import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
+import { attachRequestObservability, emitApiOperationLog, type ApiLogger } from './observability.js';
 import {
   DEFAULT_API_MAX_BATCH_DOCUMENTS,
   resolveApiBodyLimitConfig,
@@ -30,6 +31,7 @@ export type ApiDependencies = {
   generationLimitConfig?: ApiGenerationLimitConfig;
   templateStore?: LocalTemplateFileStore;
   authenticator?: ApiAuthenticator;
+  logger?: ApiLogger;
 };
 
 type ApiError = { error: { code: string; message: string; details?: unknown } };
@@ -73,7 +75,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');
     res.setHeader('access-control-allow-headers', 'content-type, authorization');
-    res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings');
+    res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings,x-request-id,x-correlation-id');
   }
 }
 
@@ -236,12 +238,14 @@ function errorStatus(code: string) {
 export function createApiHandler(deps: ApiDependencies) {
   const bodyLimitConfig = deps.bodyLimitConfig ?? resolveApiBodyLimitConfig();
   const generationLimitConfig = deps.generationLimitConfig ?? resolveApiGenerationLimitConfig();
+  const durationMs=(startedAt:bigint)=>Math.max(0,Number((process.hrtime.bigint()-startedAt)/1_000_000n));
   return async (req: AuthenticatedIncomingMessage, res: ServerResponse) => {
+    attachRequestObservability(req, res, deps.logger);
     applyCors(req, res);
     const method = req.method ?? 'GET';
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
-    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-5', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
+    if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-6', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
 
     let principal;
     try {
@@ -256,31 +260,50 @@ export function createApiHandler(deps: ApiDependencies) {
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
     if (publishMatch && method === 'PUT') {
+      const operationStartedAt=process.hrtime.bigint();
       try { requireCapability(principal, 'template:publish'); }
-      catch (error) { if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError); throw error; }
+      catch (error) {
+        if (error instanceof ApiAuthorizationError) {
+          emitApiOperationLog(req,deps.logger,{operation:'template.publish',outcome:'failure',statusCode:403,durationMs:durationMs(operationStartedAt),templateId:decodeURIComponent(publishMatch[1] ?? ''),errorCode:error.code});
+          return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);
+        }
+        throw error;
+      }
       if (!deps.templateStore?.publishTemplate) return sendJson(res, 503, { error:{ code:'TEMPLATE_PUBLISH_UNAVAILABLE', message:'Template publish repository is not configured.' } } satisfies ApiError);
       const templateId = decodeURIComponent(publishMatch[1] ?? '');
       try {
         const request = parsePublishTemplateRequest(await readJson(req, bodyLimitConfig), templateId);
         const result = await deps.templateStore.publishTemplate(request);
-        return sendJson(res, result.status === 'published' ? 201 : 200, result);
+        const statusCode=result.status === 'published' ? 201 : 200;
+        emitApiOperationLog(req,deps.logger,{operation:'template.publish',outcome:'success',statusCode,durationMs:durationMs(operationStartedAt),templateId:request.templateId,templateVersion:request.version});
+        return sendJson(res, statusCode, result);
       } catch (error) {
         const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'TEMPLATE_PUBLISH_FAILED';
         const message = error instanceof Error ? error.message : 'Template publish failed.';
         const details = typeof error === 'object' && error && 'details' in error ? (error as { details?: unknown }).details : undefined;
-        return sendJson(res, errorStatus(code), { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
+        const statusCode=errorStatus(code);
+        emitApiOperationLog(req,deps.logger,{operation:'template.publish',outcome:'failure',statusCode,durationMs:durationMs(operationStartedAt),templateId:decodeURIComponent(publishMatch[1] ?? ''),errorCode:code});
+        return sendJson(res, statusCode, { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
       }
     }
 
     const templateMatch = TEMPLATE_ROUTE.exec(url.pathname);
     if (templateMatch && (method === 'PUT' || method === 'DELETE')) {
+      const operationStartedAt=process.hrtime.bigint();
       try { requireCapability(principal, method === 'DELETE' ? 'template:delete' : 'template:write'); }
-      catch (error) { if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError); throw error; }
+      catch (error) {
+        if (error instanceof ApiAuthorizationError) {
+          emitApiOperationLog(req,deps.logger,{operation:method === 'DELETE' ? 'template.delete' : 'template.write',outcome:'failure',statusCode:403,durationMs:durationMs(operationStartedAt),templateId:decodeURIComponent(templateMatch[1] ?? ''),errorCode:error.code});
+          return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);
+        }
+        throw error;
+      }
       if (!deps.templateStore) return sendJson(res, 503, { error:{ code:'TEMPLATE_STORE_UNAVAILABLE', message:'Local template file store is not configured.' } } satisfies ApiError);
       const templateId = decodeURIComponent(templateMatch[1] ?? '');
       try {
         if (method === 'DELETE') {
           await deps.templateStore.deleteTemplateFile(templateId);
+          emitApiOperationLog(req,deps.logger,{operation:'template.delete',outcome:'success',statusCode:200,durationMs:durationMs(operationStartedAt),templateId});
           return sendJson(res, 200, { status:'deleted', templateId });
         }
         const payload = await readJson(req, bodyLimitConfig);
@@ -288,21 +311,32 @@ export function createApiHandler(deps: ApiDependencies) {
           throw Object.assign(new Error('Template payload id must match the URL template id.'), { code:'INVALID_TEMPLATE_PAYLOAD' });
         }
         await deps.templateStore.saveDesktopTemplateEntry(payload);
+        emitApiOperationLog(req,deps.logger,{operation:'template.write',outcome:'success',statusCode:200,durationMs:durationMs(operationStartedAt),templateId});
         return sendJson(res, 200, { status:'saved', templateId });
       } catch (error) {
         const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'TEMPLATE_SAVE_FAILED';
         const message = error instanceof Error ? error.message : 'Template operation failed.';
-        return sendJson(res, errorStatus(code), { error:{ code, message } } satisfies ApiError);
+        const statusCode=errorStatus(code);
+        emitApiOperationLog(req,deps.logger,{operation:method === 'DELETE' ? 'template.delete' : 'template.write',outcome:'failure',statusCode,durationMs:durationMs(operationStartedAt),templateId,errorCode:code});
+        return sendJson(res, statusCode, { error:{ code, message } } satisfies ApiError);
       }
     }
 
     if (method === 'POST' && url.pathname === '/api/v1/documents/generate/batch') {
+      const operationStartedAt=process.hrtime.bigint();
       try { requireCapability(principal, 'document:generate-batch'); }
-      catch (error) { if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError); throw error; }
+      catch (error) {
+        if (error instanceof ApiAuthorizationError) {
+          emitApiOperationLog(req,deps.logger,{operation:'document.generate-batch',outcome:'failure',statusCode:403,durationMs:durationMs(operationStartedAt),errorCode:error.code});
+          return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);
+        }
+        throw error;
+      }
       try {
         const command = parseGenerateDocumentBatchCommand(await readJson(req, bodyLimitConfig),generationLimitConfig.effectiveMaxBatchDocuments);
         if (!deps.generationService.generateBatch) throw new GenerationServiceUnavailableError('Batch document generation adapter is not configured.');
         const result = await withGenerationDeadline(deps.generationService.generateBatch(command),generationLimitConfig);
+        emitApiOperationLog(req,deps.logger,{operation:'document.generate-batch',outcome:'success',statusCode:200,durationMs:durationMs(operationStartedAt),templateId:command.templateId,templateVersion:command.templateVersion,format:command.output.format,documentCount:command.documents.length});
 
         if (result.outputMode === 'combined') {
           if (!result.combined) throw Object.assign(new Error('Combined generation completed without a combined file.'), { code:'GENERATION_FAILED' });
@@ -354,19 +388,26 @@ export function createApiHandler(deps: ApiDependencies) {
           })),
         });
       } catch (error) {
-        if (error instanceof GenerationServiceUnavailableError) return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
+        if (error instanceof GenerationServiceUnavailableError) {
+          emitApiOperationLog(req,deps.logger,{operation:'document.generate-batch',outcome:'failure',statusCode:503,durationMs:durationMs(operationStartedAt),errorCode:error.code});
+          return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
+        }
         const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'GENERATION_FAILED';
         const message = error instanceof Error ? error.message : 'Batch document generation failed.';
         const details = typeof error === 'object' && error && 'details' in error ? (error as { details?: unknown }).details : undefined;
-        return sendJson(res, errorStatus(code), { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
+        const statusCode=errorStatus(code);
+        emitApiOperationLog(req,deps.logger,{operation:'document.generate-batch',outcome:'failure',statusCode,durationMs:durationMs(operationStartedAt),errorCode:code});
+        return sendJson(res, statusCode, { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
       }
     }
 
     if (method !== 'POST' || url.pathname !== '/api/v1/documents/generate') return sendJson(res, 404, { error:{ code:'NOT_FOUND', message:'Route not found.' } } satisfies ApiError);
+    const operationStartedAt=process.hrtime.bigint();
     try {
       requireCapability(principal, 'document:generate');
       const command = parseGenerateDocumentCommand(await readJson(req, bodyLimitConfig));
       const result = await withGenerationDeadline(deps.generationService.generate(command),generationLimitConfig);
+      emitApiOperationLog(req,deps.logger,{operation:'document.generate',outcome:'success',statusCode:200,durationMs:durationMs(operationStartedAt),templateId:command.templateId,templateVersion:command.templateVersion,format:command.output.format});
       if ((command.output.responseMode ?? 'binary') === 'binary') return sendBinary(res, result);
       const response = {
         jobId: result.jobId || randomUUID(), status: result.status, templateId: result.templateId, templateVersion: result.templateVersion,
@@ -375,12 +416,20 @@ export function createApiHandler(deps: ApiDependencies) {
       };
       return sendJson(res, 200, response);
     } catch (error) {
-      if (error instanceof ApiAuthorizationError) return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);
-      if (error instanceof GenerationServiceUnavailableError) return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
+      if (error instanceof ApiAuthorizationError) {
+        emitApiOperationLog(req,deps.logger,{operation:'document.generate',outcome:'failure',statusCode:403,durationMs:durationMs(operationStartedAt),errorCode:error.code});
+        return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);
+      }
+      if (error instanceof GenerationServiceUnavailableError) {
+        emitApiOperationLog(req,deps.logger,{operation:'document.generate',outcome:'failure',statusCode:503,durationMs:durationMs(operationStartedAt),errorCode:error.code});
+        return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
+      }
       const code = typeof error === 'object' && error && 'code' in error ? String((error as {code:unknown}).code) : 'GENERATION_FAILED';
       const message = error instanceof Error ? error.message : 'Document generation failed.';
       const details = typeof error === 'object' && error && 'details' in error ? (error as { details?: unknown }).details : undefined;
-      return sendJson(res, errorStatus(code), { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
+      const statusCode=errorStatus(code);
+      emitApiOperationLog(req,deps.logger,{operation:'document.generate',outcome:'failure',statusCode,durationMs:durationMs(operationStartedAt),errorCode:code});
+      return sendJson(res, statusCode, { error:{ code, message, ...(details === undefined ? {} : { details }) } } satisfies ApiError);
     }
   };
 }
