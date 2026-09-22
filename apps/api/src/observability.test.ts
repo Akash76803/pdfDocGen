@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { attachRequestObservability, emitApiOperationLog, type ApiLogEntry, type ApiRequestLogEntry } from './observability.js';
+import { attachRequestObservability, emitApiOperationLog, type ApiLogEntry } from './observability.js';
 
 const servers: Server[] = [];
 afterEach(async()=>{ await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve())))); });
