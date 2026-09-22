@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { attachRequestObservability, emitApiOperationLog, type ApiLogEntry } from './observability.js';
+import { attachRequestObservability, createMonitoringLogger, emitApiOperationLog, type ApiLogEntry } from './observability.js';
 
 const servers: Server[] = [];
 afterEach(async()=>{ await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve())))); });
@@ -110,5 +110,52 @@ describe('CLOUD-6 operation diagnostics',()=>{
     expect(serialized).not.toContain('Bearer');
     expect(serialized).not.toContain('password');
     expect(serialized).not.toContain('secret-value');
+  });
+});
+
+
+describe('CLOUD-6 monitoring metrics',()=>{
+  it('derives request count, latency and error signals',()=>{
+    const entries:ApiLogEntry[]=[];
+    const logger=createMonitoringLogger((entry)=>entries.push(entry));
+    logger({
+      event:'api_request_completed',
+      service:'document-builder-api',
+      requestId:'req-3',
+      method:'POST',
+      path:'/api/v1/documents/generate',
+      statusCode:504,
+      durationMs:250,
+    });
+    const metrics=entries.filter((entry)=>entry.event==='api_metric');
+    expect(metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({metric:'api.request.count',value:1,labels:expect.objectContaining({statusClass:'5xx'})}),
+      expect.objectContaining({metric:'api.request.duration_ms',value:250}),
+      expect.objectContaining({metric:'api.request.error_count',value:1}),
+    ]));
+  });
+
+  it('derives operation failure metrics with safe dimensions',()=>{
+    const entries:ApiLogEntry[]=[];
+    const logger=createMonitoringLogger((entry)=>entries.push(entry));
+    logger({
+      event:'api_operation',
+      service:'document-builder-api',
+      requestId:'req-4',
+      operation:'document.generate',
+      outcome:'failure',
+      statusCode:422,
+      durationMs:33,
+      format:'pdf',
+      errorCode:'TEMPLATE_RENDER_FAILED',
+    });
+    const metrics=entries.filter((entry)=>entry.event==='api_metric');
+    expect(metrics).toEqual(expect.arrayContaining([
+      expect.objectContaining({metric:'api.operation.count',value:1}),
+      expect.objectContaining({metric:'api.operation.duration_ms',value:33}),
+      expect.objectContaining({metric:'api.operation.failure_count',value:1,labels:expect.objectContaining({operation:'document.generate',format:'pdf',errorCode:'TEMPLATE_RENDER_FAILED'})}),
+    ]));
+    expect(JSON.stringify(metrics)).not.toContain('templateId');
+    expect(JSON.stringify(metrics)).not.toContain('authorization');
   });
 });
