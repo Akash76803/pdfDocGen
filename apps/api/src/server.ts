@@ -8,6 +8,7 @@ import { createTemplateRepositoryComposition } from './repository-composition.js
 import { buildApiStartupDiagnostics, formatApiStartupDiagnostics } from './startup-diagnostics.js';
 import { resolveGcpStorageConfig } from './cloud-storage-config.js';
 import { createGcpCloudTemplateRepository } from './gcp-cloud-storage.js';
+import { createMonitoringLogger } from './observability.js';
 
 const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
@@ -34,6 +35,7 @@ const handler = createApiHandler({
   bodyLimitConfig,
   generationLimitConfig,
   authenticator,
+  logger:createMonitoringLogger(),
 });
 
 createServer((req,res)=>{ void handler(req,res); }).listen(port,host,()=>{
