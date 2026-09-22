@@ -49,6 +49,64 @@ describe('DB-6B document generation API',()=>{
     expect(called).toBe(false);
   });
 
+  it('rejects malformed authorization headers before generation',async()=>{
+    const malformedHeaders = ['Basic abc123','Bearer','Bearer   '];
+    for (const authorization of malformedHeaders) {
+      let called=false;
+      const base=await start({generate:async()=>{called=true;throw new Error('must not run');}},undefined,undefined,undefined,createStaticBearerAuthenticator({token:'test-token'}));
+      const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json',authorization},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}})});
+      expect(response.status).toBe(401);
+      expect(response.headers.get('www-authenticate')).toBe('Bearer');
+      expect(await response.json()).toEqual({error:{code:'UNAUTHORIZED',message:'Authentication is required.'}});
+      expect(called).toBe(false);
+    }
+  });
+
+  it('rejects an unauthorized batch caller before batch generation',async()=>{
+    let batchCalled=false;
+    const authenticator=createStaticBearerAuthenticator({
+      token:'publisher-token',
+      principal:{subject:'publisher-only',roles:['publisher'],authType:'api-key'},
+    });
+    const base=await start({
+      generate:async()=>{throw new Error('unused');},
+      generateBatch:async()=>{batchCalled=true;throw new Error('must not run');},
+    },undefined,undefined,undefined,authenticator);
+    const response=await fetch(`${base}/api/v1/documents/generate/batch`,{
+      method:'POST',
+      headers:{'content-type':'application/json',authorization:'Bearer publisher-token'},
+      body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf',outputMode:'combined'},documents:[{data:{}}]}),
+    });
+    expect(response.status).toBe(403);
+    expect(await response.json()).toEqual({error:{code:'FORBIDDEN',message:'The authenticated caller is not allowed to perform this operation.'}});
+    expect(batchCalled).toBe(false);
+  });
+
+  it('allows CORS preflight for local desktop origins and the authorization header',async()=>{
+    const base=await start({generate:async()=>{throw new Error('unused');}},undefined,undefined,undefined,createStaticBearerAuthenticator({token:'test-token'}));
+    const response=await fetch(`${base}/api/v1/documents/generate`,{
+      method:'OPTIONS',
+      headers:{origin:'http://localhost:5173','access-control-request-method':'POST','access-control-request-headers':'content-type, authorization'},
+    });
+    expect(response.status).toBe(204);
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+    expect(response.headers.get('access-control-allow-methods')).toContain('POST');
+    expect(response.headers.get('access-control-allow-headers')).toContain('authorization');
+  });
+
+  it('keeps unknown protected routes behind authentication when auth is enabled',async()=>{
+    const authenticator=createStaticBearerAuthenticator({token:'test-token'});
+    const base=await start({generate:async()=>{throw new Error('unused');}},undefined,undefined,undefined,authenticator);
+
+    const unauthenticated=await fetch(`${base}/api/v1/unknown`);
+    expect(unauthenticated.status).toBe(401);
+    expect(await unauthenticated.json()).toMatchObject({error:{code:'UNAUTHORIZED'}});
+
+    const authenticated=await fetch(`${base}/api/v1/unknown`,{headers:{authorization:'Bearer test-token'}});
+    expect(authenticated.status).toBe(404);
+    expect(await authenticated.json()).toEqual({error:{code:'NOT_FOUND',message:'Route not found.'}});
+  });
+
   it('allows a valid bearer token and preserves generation behavior',async()=>{
     const base=await start({ generate: async(command)=>({ jobId:'job-auth',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'auth.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[] }) },undefined,undefined,undefined,createStaticBearerAuthenticator({token:'test-token'}));
     const response=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers:{'content-type':'application/json',authorization:'Bearer test-token'},body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}})});
