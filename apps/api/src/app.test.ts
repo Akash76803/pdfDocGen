@@ -4,13 +4,14 @@ import type { AddressInfo } from 'node:net';
 import type { DocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler, type LocalTemplateFileStore } from './app.js';
 import { createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
+import { createInMemoryApiRateLimiter, type ApiRateLimiter } from './rate-limit.js';
 import type { ApiBodyLimitConfig, ApiGenerationLimitConfig } from './config.js';
 
 const servers: Server[] = [];
 afterEach(async()=>{ await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve())))); });
 
-async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore, generationLimitConfig?: ApiGenerationLimitConfig, authenticator?: ApiAuthenticator) {
-  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, generationLimitConfig, templateStore, authenticator})(req,res); });
+async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore, generationLimitConfig?: ApiGenerationLimitConfig, authenticator?: ApiAuthenticator, rateLimiter?: ApiRateLimiter) {
+  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, generationLimitConfig, templateStore, authenticator, rateLimiter})(req,res); });
   servers.push(server);
   await new Promise<void>((resolve)=>server.listen(0,'127.0.0.1',()=>resolve()));
   const {port}=server.address() as AddressInfo;
@@ -80,6 +81,44 @@ describe('DB-6B document generation API',()=>{
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({error:{code:'FORBIDDEN',message:'The authenticated caller is not allowed to perform this operation.'}});
     expect(batchCalled).toBe(false);
+  });
+
+  it('returns 429 with Retry-After when an authenticated client exceeds its rate limit',async()=>{
+    let called=0;
+    const authenticator=createStaticBearerAuthenticator({token:'test-token'});
+    const rateLimiter=createInMemoryApiRateLimiter({
+      requestedPerMinute:1,
+      absolutePerMinute:1,
+      effectivePerMinute:1,
+      windowMs:60000,
+    },()=>1000);
+    const base=await start({
+      generate:async(command)=>{
+        called++;
+        return {jobId:'rate',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'rate.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]};
+      },
+    },undefined,undefined,undefined,authenticator,rateLimiter);
+    const request=()=>fetch(`${base}/api/v1/documents/generate`,{
+      method:'POST',
+      headers:{'content-type':'application/json',authorization:'Bearer test-token'},
+      body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}}),
+    });
+
+    const first=await request();
+    expect(first.status).toBe(200);
+    expect(first.headers.get('x-rate-limit-remaining')).toBe('0');
+
+    const second=await request();
+    expect(second.status).toBe(429);
+    expect(second.headers.get('retry-after')).toBe('60');
+    expect(await second.json()).toEqual({
+      error:{
+        code:'RATE_LIMIT_EXCEEDED',
+        message:'Too many requests. Retry after the indicated delay.',
+        details:{retryAfterSeconds:60},
+      },
+    });
+    expect(called).toBe(1);
   });
 
   it('allows CORS preflight for local desktop origins and the authorization header',async()=>{
