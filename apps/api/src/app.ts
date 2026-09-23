@@ -7,10 +7,14 @@ import {
   type DocumentResponseMode,
   type GenerateDocumentBatchCommand,
   type GenerateDocumentCommand,
+  type GeneratedDocument,
+  type GeneratedDocumentBatch,
 } from '@document-tool/generation-core';
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
 import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
 import { attachRequestObservability, emitApiOperationLog, type ApiLogger } from './observability.js';
+import type { ApiRateLimiter } from './rate-limit.js';
+import { canonicalRequestFingerprint, readIdempotencyKey, type ApiIdempotencyStore, type IdempotencyOperation } from './idempotency.js';
 import {
   DEFAULT_API_MAX_BATCH_DOCUMENTS,
   resolveApiBodyLimitConfig,
@@ -31,6 +35,8 @@ export type ApiDependencies = {
   generationLimitConfig?: ApiGenerationLimitConfig;
   templateStore?: LocalTemplateFileStore;
   authenticator?: ApiAuthenticator;
+  rateLimiter?: ApiRateLimiter;
+  idempotencyStore?: ApiIdempotencyStore;
   logger?: ApiLogger;
 };
 
@@ -74,8 +80,8 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type, authorization');
-    res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings,x-request-id,x-correlation-id');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization, idempotency-key');
+    res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings,x-request-id,x-correlation-id,x-rate-limit-remaining,retry-after,x-idempotency-replayed');
   }
 }
 
@@ -88,6 +94,45 @@ function sendJson(res: ServerResponse, status: number, value: unknown) {
 function contentDisposition(fileName: string): string {
   const ascii = fileName.replace(/[^ -~]+/g, '_').replace(/["\\]/g, '_') || 'document';
   return `attachment; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(fileName)}`;
+}
+
+type IdempotencyContext = {
+  key: string;
+  owner: string;
+  operation: IdempotencyOperation;
+  fingerprint: string;
+};
+
+function idempotencyOwner(principal: { subject:string; clientId?:string } | undefined):string {
+  return principal?.clientId || principal?.subject || 'anonymous';
+}
+
+async function beginIdempotentOperation(
+  req: IncomingMessage,
+  res: ServerResponse,
+  store: ApiIdempotencyStore | undefined,
+  owner: string,
+  operation: IdempotencyOperation,
+  payload: unknown,
+): Promise<{context?:IdempotencyContext; replay?:unknown; handled:boolean}> {
+  const key=readIdempotencyKey(req.headers['idempotency-key']);
+  if (!key || !store) return {handled:false};
+  const context={key,owner,operation,fingerprint:canonicalRequestFingerprint(payload)};
+  const decision=await store.begin(context);
+  if (decision.state === 'replay') {
+    res.setHeader('x-idempotency-replayed','true');
+    return {context,replay:decision.record.result,handled:false};
+  }
+  if (decision.state === 'in-progress') {
+    res.setHeader('retry-after','1');
+    sendJson(res,409,{error:{code:'IDEMPOTENCY_IN_PROGRESS',message:'A request with this Idempotency-Key is already in progress.'}} satisfies ApiError);
+    return {context,handled:true};
+  }
+  if (decision.state === 'conflict') {
+    sendJson(res,409,{error:{code:'IDEMPOTENCY_KEY_REUSED',message:'This Idempotency-Key was already used for a different request.'}} satisfies ApiError);
+    return {context,handled:true};
+  }
+  return {context,handled:false};
 }
 
 function sendBinary(res: ServerResponse, result: Awaited<ReturnType<DocumentGenerationService['generate']>>) {
@@ -221,7 +266,9 @@ export function parsePublishTemplateRequest(value: unknown, routeTemplateId: str
 }
 
 function errorStatus(code: string) {
-  return code === 'PAYLOAD_TOO_LARGE' ? 413
+  return code === 'INVALID_IDEMPOTENCY_KEY' ? 400
+    : code === 'IDEMPOTENCY_IN_PROGRESS' || code === 'IDEMPOTENCY_KEY_REUSED' ? 409
+    : code === 'PAYLOAD_TOO_LARGE' ? 413
     : code === 'BATCH_LIMIT_EXCEEDED' ? 413
     : code === 'GENERATION_TIMEOUT' ? 504
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
@@ -256,6 +303,15 @@ export function createApiHandler(deps: ApiDependencies) {
         return sendJson(res, 401, { error:{ code:error.code, message:error.message } } satisfies ApiError);
       }
       return sendJson(res, 401, { error:{ code:'UNAUTHORIZED', message:'Authentication is required.' } } satisfies ApiError);
+    }
+
+    if (principal && deps.rateLimiter) {
+      const decision=deps.rateLimiter.check(principal);
+      res.setHeader('x-rate-limit-remaining', String(decision.remaining));
+      if (!decision.allowed) {
+        res.setHeader('retry-after', String(decision.retryAfterSeconds));
+        return sendJson(res, 429, { error:{ code:'RATE_LIMIT_EXCEEDED', message:'Too many requests. Retry after the indicated delay.', details:{ retryAfterSeconds:decision.retryAfterSeconds } } } satisfies ApiError);
+      }
     }
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
@@ -324,6 +380,7 @@ export function createApiHandler(deps: ApiDependencies) {
 
     if (method === 'POST' && url.pathname === '/api/v1/documents/generate/batch') {
       const operationStartedAt=process.hrtime.bigint();
+      let idempotencyContext:IdempotencyContext|undefined;
       try { requireCapability(principal, 'document:generate-batch'); }
       catch (error) {
         if (error instanceof ApiAuthorizationError) {
@@ -333,16 +390,37 @@ export function createApiHandler(deps: ApiDependencies) {
         throw error;
       }
       try {
-        const command = parseGenerateDocumentBatchCommand(await readJson(req, bodyLimitConfig),generationLimitConfig.effectiveMaxBatchDocuments);
-        if (!deps.generationService.generateBatch) throw new GenerationServiceUnavailableError('Batch document generation adapter is not configured.');
-        const result = await withGenerationDeadline(deps.generationService.generateBatch(command),generationLimitConfig);
+        const payload=await readJson(req, bodyLimitConfig);
+        const command = parseGenerateDocumentBatchCommand(payload,generationLimitConfig.effectiveMaxBatchDocuments);
+        const idempotency=await beginIdempotentOperation(
+          req,res,deps.idempotencyStore,idempotencyOwner(principal),'document.generate-batch',command,
+        );
+        idempotencyContext=idempotency.context;
+        if (idempotency.handled) return;
+
+        let result:GeneratedDocumentBatch;
+        if (idempotency.replay) {
+          result=idempotency.replay as GeneratedDocumentBatch;
+        } else {
+          if (!deps.generationService.generateBatch) throw new GenerationServiceUnavailableError('Batch document generation adapter is not configured.');
+          const generated=await withGenerationDeadline(deps.generationService.generateBatch(command),generationLimitConfig);
+          const stableJobId=generated.jobId || randomUUID();
+          result={
+            ...generated,
+            jobId:stableJobId,
+            ...(generated.combined?{combined:{...generated.combined,jobId:generated.combined.jobId||stableJobId}}:{}),
+            ...(generated.files?{files:generated.files.map(file=>({...file,jobId:file.jobId||stableJobId}))}:{}),
+          };
+          if (idempotencyContext) await deps.idempotencyStore!.complete({...idempotencyContext,result});
+        }
+
         emitApiOperationLog(req,deps.logger,{operation:'document.generate-batch',outcome:'success',statusCode:200,durationMs:durationMs(operationStartedAt),templateId:command.templateId,templateVersion:command.templateVersion,format:command.output.format,documentCount:command.documents.length});
 
         if (result.outputMode === 'combined') {
           if (!result.combined) throw Object.assign(new Error('Combined generation completed without a combined file.'), { code:'GENERATION_FAILED' });
           if ((command.output.responseMode ?? 'binary') === 'binary') return sendBinary(res, result.combined);
           return sendJson(res, 200, {
-            jobId: result.jobId || randomUUID(),
+            jobId: result.jobId,
             status: result.status,
             templateId: result.templateId,
             templateVersion: result.templateVersion,
@@ -363,7 +441,7 @@ export function createApiHandler(deps: ApiDependencies) {
 
         const files = result.files ?? [];
         return sendJson(res, 200, {
-          jobId: result.jobId || randomUUID(),
+          jobId: result.jobId,
           status: result.status,
           templateId: result.templateId,
           templateVersion: result.templateVersion,
@@ -388,6 +466,7 @@ export function createApiHandler(deps: ApiDependencies) {
           })),
         });
       } catch (error) {
+        if (idempotencyContext) await deps.idempotencyStore?.release(idempotencyContext).catch(()=>{});
         if (error instanceof GenerationServiceUnavailableError) {
           emitApiOperationLog(req,deps.logger,{operation:'document.generate-batch',outcome:'failure',statusCode:503,durationMs:durationMs(operationStartedAt),errorCode:error.code});
           return sendJson(res, 503, { error:{ code:error.code, message:error.message, ...(error.details === undefined ? {} : { details:error.details }) } } satisfies ApiError);
@@ -403,19 +482,36 @@ export function createApiHandler(deps: ApiDependencies) {
 
     if (method !== 'POST' || url.pathname !== '/api/v1/documents/generate') return sendJson(res, 404, { error:{ code:'NOT_FOUND', message:'Route not found.' } } satisfies ApiError);
     const operationStartedAt=process.hrtime.bigint();
+    let idempotencyContext:IdempotencyContext|undefined;
     try {
       requireCapability(principal, 'document:generate');
-      const command = parseGenerateDocumentCommand(await readJson(req, bodyLimitConfig));
-      const result = await withGenerationDeadline(deps.generationService.generate(command),generationLimitConfig);
+      const payload=await readJson(req, bodyLimitConfig);
+      const command = parseGenerateDocumentCommand(payload);
+      const idempotency=await beginIdempotentOperation(
+        req,res,deps.idempotencyStore,idempotencyOwner(principal),'document.generate',command,
+      );
+      idempotencyContext=idempotency.context;
+      if (idempotency.handled) return;
+
+      let result:GeneratedDocument;
+      if (idempotency.replay) {
+        result=idempotency.replay as GeneratedDocument;
+      } else {
+        const generated=await withGenerationDeadline(deps.generationService.generate(command),generationLimitConfig);
+        result={...generated,jobId:generated.jobId||randomUUID()};
+        if (idempotencyContext) await deps.idempotencyStore!.complete({...idempotencyContext,result});
+      }
+
       emitApiOperationLog(req,deps.logger,{operation:'document.generate',outcome:'success',statusCode:200,durationMs:durationMs(operationStartedAt),templateId:command.templateId,templateVersion:command.templateVersion,format:command.output.format});
       if ((command.output.responseMode ?? 'binary') === 'binary') return sendBinary(res, result);
       const response = {
-        jobId: result.jobId || randomUUID(), status: result.status, templateId: result.templateId, templateVersion: result.templateVersion,
+        jobId: result.jobId, status: result.status, templateId: result.templateId, templateVersion: result.templateVersion,
         output: { format: result.format, fileName: result.fileName, contentType: result.contentType, sizeBytes: result.bytes.byteLength, pageCount: result.pageCount, warnings: result.warnings ?? [] },
         file: { encoding:'base64', content: Buffer.from(result.bytes).toString('base64') },
       };
       return sendJson(res, 200, response);
     } catch (error) {
+      if (idempotencyContext) await deps.idempotencyStore?.release(idempotencyContext).catch(()=>{});
       if (error instanceof ApiAuthorizationError) {
         emitApiOperationLog(req,deps.logger,{operation:'document.generate',outcome:'failure',statusCode:403,durationMs:durationMs(operationStartedAt),errorCode:error.code});
         return sendJson(res, 403, { error:{ code:error.code, message:error.message } } satisfies ApiError);

@@ -4,13 +4,15 @@ import type { AddressInfo } from 'node:net';
 import type { DocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler, type LocalTemplateFileStore } from './app.js';
 import { createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
+import { createInMemoryApiRateLimiter, type ApiRateLimiter } from './rate-limit.js';
+import { InMemoryApiIdempotencyStore, type ApiIdempotencyStore } from './idempotency.js';
 import type { ApiBodyLimitConfig, ApiGenerationLimitConfig } from './config.js';
 
 const servers: Server[] = [];
 afterEach(async()=>{ await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve())))); });
 
-async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore, generationLimitConfig?: ApiGenerationLimitConfig, authenticator?: ApiAuthenticator) {
-  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, generationLimitConfig, templateStore, authenticator})(req,res); });
+async function start(service: DocumentGenerationService, bodyLimitConfig?: ApiBodyLimitConfig, templateStore?: LocalTemplateFileStore, generationLimitConfig?: ApiGenerationLimitConfig, authenticator?: ApiAuthenticator, rateLimiter?: ApiRateLimiter, idempotencyStore?: ApiIdempotencyStore) {
+  const server=createServer((req,res)=>{ void createApiHandler({generationService:service, bodyLimitConfig, generationLimitConfig, templateStore, authenticator, rateLimiter, idempotencyStore})(req,res); });
   servers.push(server);
   await new Promise<void>((resolve)=>server.listen(0,'127.0.0.1',()=>resolve()));
   const {port}=server.address() as AddressInfo;
@@ -80,6 +82,44 @@ describe('DB-6B document generation API',()=>{
     expect(response.status).toBe(403);
     expect(await response.json()).toEqual({error:{code:'FORBIDDEN',message:'The authenticated caller is not allowed to perform this operation.'}});
     expect(batchCalled).toBe(false);
+  });
+
+  it('returns 429 with Retry-After when an authenticated client exceeds its rate limit',async()=>{
+    let called=0;
+    const authenticator=createStaticBearerAuthenticator({token:'test-token'});
+    const rateLimiter=createInMemoryApiRateLimiter({
+      requestedPerMinute:1,
+      absolutePerMinute:1,
+      effectivePerMinute:1,
+      windowMs:60000,
+    },()=>1000);
+    const base=await start({
+      generate:async(command)=>{
+        called++;
+        return {jobId:'rate',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'rate.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]};
+      },
+    },undefined,undefined,undefined,authenticator,rateLimiter);
+    const request=()=>fetch(`${base}/api/v1/documents/generate`,{
+      method:'POST',
+      headers:{'content-type':'application/json',authorization:'Bearer test-token'},
+      body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}}),
+    });
+
+    const first=await request();
+    expect(first.status).toBe(200);
+    expect(first.headers.get('x-rate-limit-remaining')).toBe('0');
+
+    const second=await request();
+    expect(second.status).toBe(429);
+    expect(second.headers.get('retry-after')).toBe('60');
+    expect(await second.json()).toEqual({
+      error:{
+        code:'RATE_LIMIT_EXCEEDED',
+        message:'Too many requests. Retry after the indicated delay.',
+        details:{retryAfterSeconds:60},
+      },
+    });
+    expect(called).toBe(1);
   });
 
   it('allows CORS preflight for local desktop origins and the authorization header',async()=>{
@@ -347,6 +387,73 @@ describe('DB-6B document generation API',()=>{
     })});
     expect(combinedDocx.status).toBe(400);
     expect(await combinedDocx.json()).toMatchObject({error:{code:'INVALID_REQUEST'}});
+  });
+
+  it('replays a completed generation for the same Idempotency-Key without regenerating',async()=>{
+    let calls=0;
+    const store=new InMemoryApiIdempotencyStore();
+    const authenticator=createStaticBearerAuthenticator({token:'test-token'});
+    const base=await start({
+      generate:async(command)=>{
+        calls++;
+        return {jobId:'',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'idem.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]};
+      },
+    },undefined,undefined,undefined,authenticator,undefined,store);
+    const request=()=>fetch(`${base}/api/v1/documents/generate`,{
+      method:'POST',
+      headers:{'content-type':'application/json',authorization:'Bearer test-token','idempotency-key':'invoice-123'},
+      body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf',responseMode:'base64'},data:{invoiceNo:'123'}}),
+    });
+    const first=await request();
+    const firstBody=await first.json() as any;
+    const second=await request();
+    const secondBody=await second.json() as any;
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect(second.headers.get('x-idempotency-replayed')).toBe('true');
+    expect(secondBody.jobId).toBe(firstBody.jobId);
+    expect(secondBody.file.content).toBe(firstBody.file.content);
+    expect(calls).toBe(1);
+  });
+
+  it('rejects reuse of an Idempotency-Key for a different generation payload',async()=>{
+    let calls=0;
+    const store=new InMemoryApiIdempotencyStore();
+    const authenticator=createStaticBearerAuthenticator({token:'test-token'});
+    const base=await start({
+      generate:async(command)=>{
+        calls++;
+        return {jobId:'job',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'idem.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]};
+      },
+    },undefined,undefined,undefined,authenticator,undefined,store);
+    const headers={'content-type':'application/json',authorization:'Bearer test-token','idempotency-key':'same-key'};
+    const first=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers,body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{invoiceNo:'1'}})});
+    expect(first.status).toBe(200);
+    const conflict=await fetch(`${base}/api/v1/documents/generate`,{method:'POST',headers,body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{invoiceNo:'2'}})});
+    expect(conflict.status).toBe(409);
+    expect(await conflict.json()).toMatchObject({error:{code:'IDEMPOTENCY_KEY_REUSED'}});
+    expect(calls).toBe(1);
+  });
+
+  it('releases a failed idempotent generation so a later retry can run again',async()=>{
+    let calls=0;
+    const store=new InMemoryApiIdempotencyStore();
+    const authenticator=createStaticBearerAuthenticator({token:'test-token'});
+    const base=await start({
+      generate:async(command)=>{
+        calls++;
+        if (calls===1) throw Object.assign(new Error('temporary'),{code:'GENERATION_FAILED'});
+        return {jobId:'job-retry',status:'completed',templateId:command.templateId,templateVersion:1,format:command.output.format,fileName:'retry.pdf',contentType:'application/pdf',bytes:new Uint8Array([37,80,68,70]),pageCount:1,warnings:[]};
+      },
+    },undefined,undefined,undefined,authenticator,undefined,store);
+    const request=()=>fetch(`${base}/api/v1/documents/generate`,{
+      method:'POST',
+      headers:{'content-type':'application/json',authorization:'Bearer test-token','idempotency-key':'retry-after-failure'},
+      body:JSON.stringify({templateId:'invoice-v1',output:{format:'pdf'},data:{}}),
+    });
+    expect((await request()).status).toBe(500);
+    expect((await request()).status).toBe(200);
+    expect(calls).toBe(2);
   });
 
 });
