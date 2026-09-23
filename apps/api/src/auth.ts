@@ -30,7 +30,13 @@ export type StaticBearerAuthenticatorOptions = {
 };
 
 function readBearerToken(req: IncomingMessage): string {
-  const header = req.headers.authorization;
+  const gatewayClientHeader = req.headers['x-pdfdocgen-authorization'];
+  const forwardedHeader = req.headers['x-forwarded-authorization'];
+  const header = typeof gatewayClientHeader === 'string'
+    ? gatewayClientHeader
+    : typeof forwardedHeader === 'string'
+      ? forwardedHeader
+      : req.headers.authorization;
   if (typeof header !== 'string') throw new ApiAuthenticationError();
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   if (!match?.[1]) throw new ApiAuthenticationError();
