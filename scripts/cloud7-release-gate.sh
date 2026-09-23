@@ -28,7 +28,22 @@ LATEST_CREATED="$(gcloud run services describe "$SERVICE"   --project="$PROJECT_
 
 IMAGE="$(gcloud run services describe "$SERVICE"   --project="$PROJECT_ID"   --region="$REGION"   --format='value(spec.template.spec.containers[0].image)')"
 
-SECRET_VERSION="$(gcloud run services describe "$SERVICE"   --project="$PROJECT_ID"   --region="$REGION"   --format="value(spec.template.spec.containers[0].env[?name='API_AUTH_STATIC_BEARER_TOKEN'].valueFrom.secretKeyRef.key)")"
+SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json)"
+
+SECRET_VERSION="$(python3 - "$SERVICE_JSON" <<'PY'
+import json,sys
+service=json.loads(sys.argv[1])
+containers=service.get('spec',{}).get('template',{}).get('spec',{}).get('containers',[])
+if not containers:
+    raise SystemExit('')
+for env in containers[0].get('env',[]):
+    if env.get('name') != 'API_AUTH_STATIC_BEARER_TOKEN':
+        continue
+    ref=env.get('valueFrom',{}).get('secretKeyRef',{})
+    print(ref.get('key') or ref.get('version') or '')
+    break
+PY
+)"
 
 [[ -n "$LATEST_READY" ]] || { echo "ERROR: latest ready revision could not be resolved." >&2; exit 1; }
 [[ "$LATEST_READY" == "$LATEST_CREATED" ]] || {
