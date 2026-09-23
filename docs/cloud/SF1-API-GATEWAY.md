@@ -10,7 +10,7 @@ Salesforce -> API Gateway -> private Cloud Run -> pdfDocGen application auth -> 
 
 API Gateway authenticates to Cloud Run with its backend service account. Cloud Run remains protected by IAM and grants only the gateway service account `roles/run.invoker`.
 
-The pdfDocGen application still performs its own client authentication. Because API Gateway replaces the backend `Authorization` header with its Cloud Run ID token, the original client bearer token is read from `X-Forwarded-Authorization` when present. Direct desktop/proxy calls continue to use the normal `Authorization` header.
+The pdfDocGen application still performs its own client authentication. For Salesforce/API Gateway calls, use `X-PdfDocGen-Authorization: Bearer <client-token>` so the application token does not compete with the gateway-to-Cloud-Run IAM `Authorization` header. The API also retains `X-Forwarded-Authorization` compatibility and normal `Authorization` fallback for direct desktop/proxy calls.
 
 ## Public gateway surface
 
@@ -26,7 +26,7 @@ Template publishing and administrative template routes are intentionally not exp
 
 - `deploy/api-gateway-openapi.yaml` — API Gateway OpenAPI 2.0 definition.
 - `scripts/sf1-deploy-api-gateway.sh` — enables required services, creates gateway identity, grants Cloud Run invoker, creates an immutable API config, and creates/updates the gateway.
-- `apps/api/src/auth.ts` — supports API Gateway forwarded client bearer authentication.
+- `apps/api/src/auth.ts` — supports dedicated gateway client bearer authentication plus forwarded/direct fallbacks.
 
 ## Deployment
 
@@ -48,6 +48,7 @@ The gateway can be provisioned before the new API code is deployed, but authenti
 - Gateway backend identity receives only `roles/run.invoker` on the target service.
 - Salesforce/client bearer tokens are never stored in source control.
 - Apex must not hardcode a bearer token.
+- Salesforce calls through the gateway will send the application credential using `X-PdfDocGen-Authorization`.
 - SF-1.3 will store Salesforce-side credentials using External Credential / Named Credential.
 - The OpenAPI surface intentionally excludes template mutation endpoints.
 
