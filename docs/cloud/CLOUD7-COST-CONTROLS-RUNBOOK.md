@@ -48,8 +48,10 @@ Do not lock the log bucket during staging; locking is irreversible.
 Create a project-scoped alerts-only monthly budget using an amount chosen by the operator:
 
 ```bash
-MONTHLY_BUDGET_USD=<amount> bash scripts/cloud7-create-budget.sh
+MONTHLY_BUDGET_AMOUNT=<amount> bash scripts/cloud7-create-budget.sh
 ```
+
+Budget amount is interpreted in the linked billing account currency.
 
 Default thresholds:
 - 50% actual spend
