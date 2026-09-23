@@ -1,0 +1,83 @@
+swagger: "2.0"
+info:
+  title: pdfDocGen Salesforce Gateway
+  description: Secured public API surface for Salesforce-to-pdfDocGen document generation.
+  version: "1.0.0"
+schemes:
+  - https
+produces:
+  - application/json
+consumes:
+  - application/json
+
+x-google-backend:
+  address: https://pdf-doc-gen-api-staging-933068485086.us-central1.run.app
+  jwt_audience: https://pdf-doc-gen-api-staging-933068485086.us-central1.run.app
+  path_translation: APPEND_PATH_TO_ADDRESS
+  deadline: 300.0
+
+paths:
+  /health:
+    get:
+      operationId: health
+      responses:
+        "200":
+          description: API health response
+
+  /api/v1/documents/generate:
+    post:
+      operationId: generateDocument
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+      responses:
+        "200":
+          description: Generated document
+        "400":
+          description: Invalid request
+        "401":
+          description: Invalid or missing client bearer token
+        "413":
+          description: Payload limit exceeded
+        "422":
+          description: Rendering/generation validation failure
+        "429":
+          description: Rate limit exceeded
+        "500":
+          description: Generation failed
+        "503":
+          description: Generation service unavailable
+        "504":
+          description: Generation deadline exceeded
+
+  /api/v1/documents/generate/batch:
+    post:
+      operationId: generateDocumentBatch
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+      responses:
+        "200":
+          description: Generated batch output
+        "400":
+          description: Invalid request
+        "401":
+          description: Invalid or missing client bearer token
+        "413":
+          description: Payload or batch limit exceeded
+        "422":
+          description: Rendering/generation validation failure
+        "429":
+          description: Rate limit exceeded
+        "500":
+          description: Generation failed
+        "503":
+          description: Generation service unavailable
+        "504":
+          description: Generation deadline exceeded
