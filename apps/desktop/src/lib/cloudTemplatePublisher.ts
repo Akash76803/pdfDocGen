@@ -3,6 +3,7 @@ import { selfContainedTemplateEntry } from './templateFileStore.ts';
 import type { TemplateLibraryEntry } from './templateLibrary.ts';
 
 export const CLOUD_API_BASE_URL_KEY = 'document-builder.cloud-api-base-url.v1';
+export const CLOUD_API_ACCESS_TOKEN_SESSION_KEY = 'document-builder.cloud-api-access-token.session.v1';
 
 export class TemplatePublishError extends Error {
   constructor(readonly code: string, message: string, readonly details?: unknown) { super(message); }
@@ -28,6 +29,21 @@ export function saveCloudApiBaseUrl(storage: Storage, value: string): string {
   const normalized = normalizeBaseUrl(value);
   storage.setItem(CLOUD_API_BASE_URL_KEY, normalized);
   return normalized;
+}
+
+export function saveCloudApiAccessToken(storage: Storage, value: string): string {
+  const token = value.trim();
+  if (!token) throw new TemplatePublishError('CLOUD_AUTH_REQUIRED', 'Enter the Cloud API access token for this app session.');
+  storage.setItem(CLOUD_API_ACCESS_TOKEN_SESSION_KEY, token);
+  return token;
+}
+
+export function clearCloudApiAccessToken(storage: Storage): void {
+  storage.removeItem(CLOUD_API_ACCESS_TOKEN_SESSION_KEY);
+}
+
+export async function readSessionCloudApiAccessToken(storage: Storage): Promise<string | null> {
+  return storage.getItem(CLOUD_API_ACCESS_TOKEN_SESSION_KEY)?.trim() || null;
 }
 
 async function readError(response: Response): Promise<TemplatePublishError> {
