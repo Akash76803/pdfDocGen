@@ -12,7 +12,14 @@ LOG_BUCKET="${LOG_BUCKET:-_Default}"
 echo "CLOUD-7.5 cost-control readiness"
 echo "Project: $PROJECT_ID"
 
-MAX_SCALE="$(gcloud run services describe "$SERVICE" --project="$PROJECT_ID" --region="$REGION" --format='value(metadata.annotations.run.googleapis.com/maxScale)')"
+SERVICE_JSON="$(gcloud run services describe "$SERVICE" --project="$PROJECT_ID" --region="$REGION" --format=json)"
+MAX_SCALE="$(python3 - "$SERVICE_JSON" <<'PY'
+import json,sys
+service=json.loads(sys.argv[1])
+annotations=service.get('metadata',{}).get('annotations',{})
+print(annotations.get('run.googleapis.com/maxScale',''))
+PY
+)"
 echo "Cloud Run service max instances: ${MAX_SCALE:-unset}"
 [[ "${MAX_SCALE:-}" == "10" ]] && echo "PASS: Cloud Run service max instances = 10" || echo "WARN: expected service max instances 10"
 
