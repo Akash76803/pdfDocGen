@@ -136,12 +136,12 @@ describe('CLOUD-1 template repository configuration', () => {
 
 describe('CLOUD-5 authentication configuration',()=> {
   it('defaults to disabled for local backward compatibility',()=> {
-    expect(resolveApiAuthConfig({})).toEqual({mode:'disabled'});
+    expect(resolveApiAuthConfig({})).toEqual({mode:'disabled',identityAllowedEmails:[],identityRequireEmailVerified:true});
   });
 
   it('requires a token when static bearer mode is enabled',()=> {
     expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'static-bearer'})).toThrow(
-      'API_AUTH_STATIC_BEARER_TOKEN is required when API_AUTH_MODE is "static-bearer".',
+      'API_AUTH_STATIC_BEARER_TOKEN is required when API_AUTH_MODE uses static bearer authentication.',
     );
   });
 
@@ -149,12 +149,33 @@ describe('CLOUD-5 authentication configuration',()=> {
     expect(resolveApiAuthConfig({API_AUTH_MODE:'static-bearer',API_AUTH_STATIC_BEARER_TOKEN:'secret-value'})).toEqual({
       mode:'static-bearer',
       staticBearerToken:'secret-value',
+      identityAllowedEmails:[],
+      identityRequireEmailVerified:true,
     });
+  });
+
+
+  it('loads identity-platform auth and optional publisher allowlist',()=> {
+    expect(resolveApiAuthConfig({
+      API_AUTH_MODE:'identity-platform',
+      API_AUTH_IDENTITY_PROJECT_ID:'pdf-gen-509308',
+      API_AUTH_IDENTITY_ALLOWED_EMAILS:'a@example.com, B@example.com ',
+    })).toEqual({
+      mode:'identity-platform',
+      identityProjectId:'pdf-gen-509308',
+      identityAllowedEmails:['a@example.com','b@example.com'],
+      identityRequireEmailVerified:true,
+    });
+  });
+
+  it('requires project id for identity-platform and both credentials for hybrid',()=> {
+    expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'identity-platform'})).toThrow('API_AUTH_IDENTITY_PROJECT_ID is required');
+    expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'hybrid',API_AUTH_STATIC_BEARER_TOKEN:'secret'})).toThrow('API_AUTH_IDENTITY_PROJECT_ID is required');
   });
 
   it('rejects unsupported auth modes',()=> {
     expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'basic'})).toThrow(
-      'API_AUTH_MODE must be "disabled" or "static-bearer".',
+      'API_AUTH_MODE must be "disabled", "static-bearer", "identity-platform", or "hybrid".',
     );
   });
 });
