@@ -39,17 +39,24 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
   }
 
   async function generateToken() {
-    if (busy) return;
+    console.log('[Settings] generateToken clicked, busy:', busy, 'connected:', connected);
+    if (busy) {
+      console.warn('[Settings] generateToken ignored because busy is true');
+      return;
+    }
     setBusy(true);
     setCopied(false);
     setCloudMessage('Opening Google verification in your browser…');
     try {
-      const apiBaseUrl=resolveCloudApiBaseUrl(window.localStorage);
-      const result=await generateIntegrationApiToken(apiBaseUrl);
+      const apiBaseUrl = resolveCloudApiBaseUrl(window.localStorage);
+      console.log('[Settings] Calling generateIntegrationApiToken with apiBaseUrl:', apiBaseUrl);
+      const result = await generateIntegrationApiToken(apiBaseUrl);
+      console.log('[Settings] generateIntegrationApiToken success:', result);
       setIssuedToken(result.token);
       setConnected(true);
       setCloudMessage('Connected. Your new API token is stored securely on this computer. Copy it now if you also want to configure an ERP/Salesforce callout.');
     } catch (error) {
+      console.error('[Settings] generateToken caught error:', error);
       setCloudMessage(error instanceof Error ? error.message : 'Unable to generate API token.');
     } finally {
       setBusy(false);

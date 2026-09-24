@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use tauri::api::shell;
+use tauri::Manager;
 use url::Url;
 
 const CLOUD_AUTH_SERVICE: &str = "pdfDocGen";
@@ -182,9 +183,15 @@ async fn google_oauth_verify(window: tauri::Window, client_id: String) -> Result
   tokens.id_token.ok_or_else(|| "Google verification did not return an ID token.".to_string())
 }
 
+#[tauri::command]
+fn tauri_ipc_smoke() -> String {
+  "TAURI_IPC_OK".into()
+}
+
 fn main() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![
+      tauri_ipc_smoke,
       cloud_auth_store_refresh_token,
       cloud_auth_read_refresh_token,
       cloud_auth_clear_refresh_token,
