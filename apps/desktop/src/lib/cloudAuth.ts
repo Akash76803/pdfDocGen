@@ -33,10 +33,6 @@ function googleOAuthClientId(): string {
   return clientId;
 }
 
-function googleOAuthClientSecret(): string | undefined {
-  const secret = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_SECRET?.trim();
-  return secret || undefined;
-}
 
 export async function verifyWithGoogle(): Promise<string> {
   console.log('[cloudAuth] verifyWithGoogle started...');
@@ -45,9 +41,8 @@ export async function verifyWithGoogle(): Promise<string> {
   }
   try {
     const clientId = googleOAuthClientId();
-    const clientSecret = googleOAuthClientSecret();
-    console.log('[cloudAuth] Invoking google_oauth_verify with clientId:', clientId, 'hasSecret:', Boolean(clientSecret));
-    const token = await invoke<string>('google_oauth_verify', { clientId, clientSecret });
+    console.log('[cloudAuth] Invoking google_oauth_verify with configured Desktop OAuth client ID.');
+    const token = await invoke<string>('google_oauth_verify', { clientId });
     console.log('[cloudAuth] google_oauth_verify returned token');
     return token;
   } catch (error) {
