@@ -26,6 +26,18 @@ let cachedIdToken: string | null = null;
 let cachedExpiresAt = 0;
 let cachedEmail: string | undefined;
 
+function googleOAuthClientId(): string {
+  const env = (import.meta as ImportMeta & { env?: Record<string,string|undefined> }).env;
+  const clientId = env?.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim();
+  if (!clientId) throw new Error('Google verification is not configured.');
+  return clientId;
+}
+
+export async function verifyWithGoogle(): Promise<string> {
+  if (!isTauriRuntime()) throw new Error('Google verification requires the desktop app runtime.');
+  return await invoke<string>('google_oauth_verify', { clientId: googleOAuthClientId() });
+}
+
 function apiKey(): string {
   const env = (import.meta as ImportMeta & { env?: Record<string,string|undefined> }).env;
   const key = env?.VITE_IDENTITY_PLATFORM_API_KEY?.trim();
