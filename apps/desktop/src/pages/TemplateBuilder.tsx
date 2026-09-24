@@ -2483,7 +2483,7 @@ function ImagePropertiesPanel({ selected, selectedBand, bindingPreview, dynamicT
 
       <details className="inspector-accordion text-accordion" open>
         <summary><span>Layout <InspectorHelp text="Flow keeps the image in automatic document flow. Floating enables exact placement and layer/overlap controls."/></span><ChevronDown size={15}/></summary>
-        <div className="inspector-accordion-content">{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <TextLayoutControls selected={selected} elements={relativeElements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction} showRowManager={false}/>}</div>
+        <div className="inspector-accordion-content">{selectedBand ? <BandPositionControls selected={selected} region={selectedBand} settings={pageSettings} onUpdate={onUpdate}/> : <TextLayoutControls selected={selected} elements={relativeElements} pageSettings={pageSettings} onUpdate={onUpdate} onMove={onMoveFlow} onRowAction={onFlowRowAction}/>}</div>
       </details>
 
       <details className="inspector-accordion text-accordion" open>
