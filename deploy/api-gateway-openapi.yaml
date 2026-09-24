@@ -24,6 +24,20 @@ paths:
         "200":
           description: API health response
 
+  /api/v1/auth/tokens:
+    post:
+      operationId: createIntegrationCredential
+      responses:
+        "201":
+          description: Integration credential created
+
+  /api/v1/auth/tokens/current:
+    delete:
+      operationId: revokeCurrentIntegrationCredential
+      responses:
+        "200":
+          description: Current integration credential revoked
+
   /api/v1/templates/{templateId}/publish:
     put:
       operationId: publishTemplate

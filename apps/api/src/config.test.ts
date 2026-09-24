@@ -173,9 +173,32 @@ describe('CLOUD-5 authentication configuration',()=> {
     expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'hybrid',API_AUTH_STATIC_BEARER_TOKEN:'secret'})).toThrow('API_AUTH_IDENTITY_PROJECT_ID is required');
   });
 
+
+  it('loads token-hybrid mode for Google verification plus reusable API tokens',()=> {
+    expect(resolveApiAuthConfig({
+      API_AUTH_MODE:'token-hybrid',
+      API_AUTH_STATIC_BEARER_TOKEN:'bootstrap-secret',
+      API_AUTH_GOOGLE_CLIENT_ID:'desktop-client.apps.googleusercontent.com',
+      API_AUTH_IDENTITY_ALLOWED_EMAILS:'owner@example.com',
+    })).toEqual({
+      mode:'token-hybrid',
+      staticBearerToken:'bootstrap-secret',
+      googleClientId:'desktop-client.apps.googleusercontent.com',
+      identityAllowedEmails:['owner@example.com'],
+      identityRequireEmailVerified:true,
+    });
+  });
+
+  it('requires Google client id in token-hybrid mode',()=> {
+    expect(()=>resolveApiAuthConfig({
+      API_AUTH_MODE:'token-hybrid',
+      API_AUTH_STATIC_BEARER_TOKEN:'bootstrap-secret',
+    })).toThrow('API_AUTH_GOOGLE_CLIENT_ID is required');
+  });
+
   it('rejects unsupported auth modes',()=> {
     expect(()=>resolveApiAuthConfig({API_AUTH_MODE:'basic'})).toThrow(
-      'API_AUTH_MODE must be "disabled", "static-bearer", "identity-platform", or "hybrid".',
+      'API_AUTH_MODE must be "disabled", "static-bearer", "identity-platform", "hybrid", or "token-hybrid".',
     );
   });
 });
