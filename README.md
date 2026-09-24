@@ -4,9 +4,9 @@ Standalone PDF/DOCX business-document application extracted from `Akash76803/doc
 
 ## Current phase
 
-**DB-4 — Dynamic + Custom Table Engine (DB-4.2 Row / Column Structure Editor)**
+**AUTH-UX-2 — Unified Desktop + ERP API Token (desktop OAuth / Tauri hardening and E2E validation)**
 
-The active desktop app is intentionally document-focused. The historical Card Designer, CAD and packaging source is preserved under `reference/` and is not part of the active build.
+The active desktop app is intentionally document-focused. The current cloud-auth work is tracked under AUTH-UX-2; historical builder phases remain documented below for implementation context. The historical Card Designer, CAD and packaging source is preserved under `reference/` and is not part of the active build.
 
 ## Run locally
 
