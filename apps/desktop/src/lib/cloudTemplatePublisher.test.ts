@@ -43,7 +43,7 @@ describe('CLOUD-2 desktop template publisher',()=>{
   it('injects a short-lived bearer token from a provider without persisting it',async()=>{
     const storage=new MemoryStorage(); storage.setItem(CLOUD_API_BASE_URL_KEY,'https://api.example.com');
     const fetchImpl=vi.fn(async(_input:RequestInfo|URL,init?:RequestInit)=>{
-      expect((init?.headers as Record<string,string>)?.authorization).toBe('Bearer short-lived-token');
+      expect((init?.headers as Record<string,string>)?.['x-pdfdocgen-authorization']).toBe('Bearer short-lived-token');
       expect([...Array(storage.length)].map((_,i)=>storage.key(i)).some((key)=>key?.toLowerCase().includes('token'))).toBe(false);
       return new Response(JSON.stringify({status:'published',templateId:'invoice',version:1,publicationStatus:'ACTIVE',publishedAt:'2026-09-21T00:00:00.000Z'}),{status:201,headers:{'content-type':'application/json'}});
     });
