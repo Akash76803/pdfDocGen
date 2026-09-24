@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { HeadlessDocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler } from './app.js';
-import { createCompositeAuthenticator, createIdentityPlatformAuthenticator, createIssuedApiTokenAuthenticator, createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
+import { createCompositeAuthenticator, createGoogleOidcAuthenticator, createIdentityPlatformAuthenticator, createIssuedApiTokenAuthenticator, createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
 import { assertSecureCloudAuthConfig, resolveApiAuthConfig, resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRateLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
 import { createTemplateRepositoryComposition } from './repository-composition.js';
@@ -41,6 +41,19 @@ if (authConfig.mode === 'static-bearer') {
       projectId: authConfig.identityProjectId!,
       allowedEmails: authConfig.identityAllowedEmails ?? [],
       requireEmailVerified: authConfig.identityRequireEmailVerified ?? true,
+      roles:['publisher'],
+    }),
+  ]);
+} else if (authConfig.mode === 'token-hybrid') {
+  authenticator = createCompositeAuthenticator([
+    createStaticBearerAuthenticator({
+      token: authConfig.staticBearerToken!,
+      principal:{ subject:'salesforce-bootstrap', roles:['generator'], authType:'api-key' },
+    }),
+    ...(apiTokenStore ? [createIssuedApiTokenAuthenticator(apiTokenStore)] : []),
+    createGoogleOidcAuthenticator({
+      clientId:authConfig.googleClientId!,
+      allowedEmails:authConfig.identityAllowedEmails ?? [],
       roles:['publisher'],
     }),
   ]);
