@@ -20,7 +20,8 @@ import {
   type NewTemplateRequest,
   type TemplateLibraryEntry,
 } from '../lib/templateLibrary.ts';
-import { publishTemplateToCloud, readSessionCloudApiAccessToken, resolveCloudApiBaseUrl, TemplatePublishError } from '../lib/cloudTemplatePublisher.ts';
+import { publishTemplateToCloud, resolveCloudApiBaseUrl, TemplatePublishError } from '../lib/cloudTemplatePublisher.ts';
+import { getCloudAccessToken } from '../lib/cloudAuth.ts';
 
 export function Templates({ onNavigate }: { onNavigate: (route: AppRoute) => void }) {
   const [templates, setTemplates] = useState<TemplateLibraryEntry[]>(() => migrateLegacyTemplateToLibrary(window.localStorage));
@@ -80,7 +81,7 @@ export function Templates({ onNavigate }: { onNavigate: (route: AppRoute) => voi
     setPublishingTemplateId(item.id);
     setPublishNotice(null);
     try {
-      const result = await publishTemplateToCloud(window.localStorage, item, fetch, () => readSessionCloudApiAccessToken(window.sessionStorage));
+      const result = await publishTemplateToCloud(window.localStorage, item, fetch, getCloudAccessToken);
       recordCloudPublication(window.localStorage, item.id, { version:result.version, status:result.publicationStatus, publishedAt:result.publishedAt, apiBaseUrl:result.apiBaseUrl });
       refreshLibrary();
       setPublishNotice({ tone:'success', text:`${item.name} ${result.status === 'published' ? 'published' : 'updated'} successfully as cloud version ${result.version}.` });
