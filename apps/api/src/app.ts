@@ -80,7 +80,7 @@ function applyCors(req: IncomingMessage, res: ServerResponse) {
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');
-    res.setHeader('access-control-allow-headers', 'content-type, authorization, idempotency-key');
+    res.setHeader('access-control-allow-headers', 'content-type, authorization, x-pdfdocgen-authorization, idempotency-key');
     res.setHeader('access-control-expose-headers', 'content-disposition,content-length,x-document-job-id,x-document-template-id,x-document-template-version,x-document-format,x-document-page-count,x-document-warnings,x-request-id,x-correlation-id,x-rate-limit-remaining,retry-after,x-idempotency-replayed');
   }
 }
