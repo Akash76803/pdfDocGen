@@ -12,6 +12,7 @@ import {
   generateIntegrationApiToken,
   getIntegrationApiToken,
   revokeIntegrationApiToken,
+  testTauriIpcSmoke,
 } from '../lib/cloudAuth.ts';
 
 export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThemeChange: (theme: 'light' | 'dark') => void }) {
@@ -21,10 +22,27 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
   const [busy, setBusy] = useState(false);
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [ipcStatus, setIpcStatus] = useState<string>('Testing IPC…');
 
   useEffect(() => {
     const refresh = () => { void getIntegrationApiToken().then((token)=>setConnected(Boolean(token))).catch(()=>setConnected(false)); };
     refresh();
+    console.log('[Runtime Diagnostic] typeof window.__TAURI_IPC__:', typeof (window as unknown as { __TAURI_IPC__?: unknown }).__TAURI_IPC__);
+    console.log('[Runtime Diagnostic] typeof window.__TAURI__:', typeof (window as unknown as { __TAURI__?: unknown }).__TAURI__);
+    console.log('[Runtime Diagnostic] window.location.href:', window.location.href);
+    console.log('[Runtime Diagnostic] navigator.userAgent:', navigator.userAgent);
+    
+    void testTauriIpcSmoke()
+      .then((res) => {
+        console.log('[IPC Smoke PASS]', res);
+        setIpcStatus(`IPC Smoke: ${res}`);
+      })
+      .catch((err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[IPC Smoke FAIL]', msg);
+        setIpcStatus(`IPC Error: ${msg}`);
+      });
+
     window.addEventListener(CLOUD_AUTH_EVENT,refresh);
     return () => window.removeEventListener(CLOUD_AUTH_EVENT,refresh);
   },[]);
@@ -125,6 +143,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
       </div>
 
       {cloudMessage ? <div><span><strong>Cloud status</strong><small className="cloud-api-message">{cloudMessage}</small></span></div> : null}
+      <div><span><strong>IPC Runtime Diagnostic</strong><small>Tauri native IPC bridge state.</small></span><span className="status-pill">{ipcStatus}</span></div>
       <div><span><strong>Storage</strong><small>Templates and workspace data remain local-first.</small></span><span className="status-pill">Local-first</span></div>
       <div><span><strong>Desktop credential storage</strong><small>The reusable API token is stored in the operating-system credential manager, not localStorage.</small></span><span className="status-pill">Secure</span></div>
     </section>

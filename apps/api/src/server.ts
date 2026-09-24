@@ -12,6 +12,7 @@ import { createMonitoringLogger } from './observability.js';
 import { createInMemoryApiRateLimiter } from './rate-limit.js';
 import { createGcpApiIdempotencyStore } from './gcp-idempotency-store.js';
 import { createFirestoreApiTokenStore } from './gcp-api-token-store.js';
+import { InMemoryApiTokenStore } from './api-token-store.js';
 
 const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
@@ -23,7 +24,7 @@ assertSecureCloudAuthConfig(serverConfig, authConfig);
 const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
 const apiTokenStore = gcpStorageConfig
   ? createFirestoreApiTokenStore(gcpStorageConfig.projectId,gcpStorageConfig.firestoreDatabaseId)
-  : undefined;
+  : new InMemoryApiTokenStore();
 let authenticator: ApiAuthenticator | undefined;
 if (authConfig.mode === 'static-bearer') {
   authenticator = createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! });

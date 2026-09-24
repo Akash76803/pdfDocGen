@@ -78,7 +78,13 @@ const TEMPLATE_PUBLISH_ROUTE = /^\/api\/v1\/templates\/([A-Za-z0-9][A-Za-z0-9._-
 
 function applyCors(req: IncomingMessage, res: ServerResponse) {
   const origin = typeof req.headers.origin === 'string' ? req.headers.origin : '';
-  if (/^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin) || origin === 'tauri://localhost') {
+  if (
+    /^https?:\/\/(localhost|127\.0\.0\.1|tauri\.localhost)(:\d+)?$/i.test(origin) ||
+    origin === 'tauri://localhost' ||
+    origin.startsWith('tauri://') ||
+    origin.startsWith('http://tauri.') ||
+    origin.startsWith('https://tauri.')
+  ) {
     res.setHeader('access-control-allow-origin', origin);
     res.setHeader('vary', 'Origin');
     res.setHeader('access-control-allow-methods', 'GET,POST,PUT,DELETE,OPTIONS');

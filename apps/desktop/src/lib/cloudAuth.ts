@@ -27,11 +27,15 @@ let cachedExpiresAt = 0;
 let cachedEmail: string | undefined;
 
 function googleOAuthClientId(): string {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  const clientId = env?.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim();
+  const clientId = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_ID?.trim();
   console.log('[cloudAuth] Read googleOAuthClientId:', clientId);
   if (!clientId) throw new Error('Google verification is not configured.');
   return clientId;
+}
+
+function googleOAuthClientSecret(): string | undefined {
+  const secret = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_SECRET?.trim();
+  return secret || undefined;
 }
 
 export async function verifyWithGoogle(): Promise<string> {
@@ -41,8 +45,9 @@ export async function verifyWithGoogle(): Promise<string> {
   }
   try {
     const clientId = googleOAuthClientId();
-    console.log('[cloudAuth] Invoking google_oauth_verify with clientId:', clientId);
-    const token = await invoke<string>('google_oauth_verify', { clientId });
+    const clientSecret = googleOAuthClientSecret();
+    console.log('[cloudAuth] Invoking google_oauth_verify with clientId:', clientId, 'hasSecret:', Boolean(clientSecret));
+    const token = await invoke<string>('google_oauth_verify', { clientId, clientSecret });
     console.log('[cloudAuth] google_oauth_verify returned token');
     return token;
   } catch (error) {
@@ -52,8 +57,7 @@ export async function verifyWithGoogle(): Promise<string> {
 }
 
 function apiKey(): string {
-  const env = (import.meta as ImportMeta & { env?: Record<string, string | undefined> }).env;
-  const key = env?.VITE_IDENTITY_PLATFORM_API_KEY?.trim();
+  const key = import.meta.env.VITE_IDENTITY_PLATFORM_API_KEY?.trim();
   if (!key) throw new Error('Desktop cloud sign-in is not configured. Missing VITE_IDENTITY_PLATFORM_API_KEY.');
   return key;
 }
