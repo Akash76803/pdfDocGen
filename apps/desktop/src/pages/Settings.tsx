@@ -1,29 +1,29 @@
 import { useEffect, useState } from 'react';
-import { Cloud, LogIn, LogOut, Moon, Sun } from 'lucide-react';
+import { Check, Cloud, Copy, KeyRound, Moon, RotateCcw, Sun, Unplug } from 'lucide-react';
 import { PageHeader } from '../components/PageHeader.tsx';
 import {
   CLOUD_API_BASE_URL_KEY,
+  resolveCloudApiBaseUrl,
   saveCloudApiBaseUrl,
   TemplatePublishError,
 } from '../lib/cloudTemplatePublisher.ts';
 import {
   CLOUD_AUTH_EVENT,
-  getCloudAuthState,
-  signInToCloud,
-  signOutFromCloud,
-  type CloudAuthState,
+  generateIntegrationApiToken,
+  getIntegrationApiToken,
+  revokeIntegrationApiToken,
 } from '../lib/cloudAuth.ts';
 
 export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; onThemeChange: (theme: 'light' | 'dark') => void }) {
   const [cloudApiUrl, setCloudApiUrl] = useState(() => window.localStorage.getItem(CLOUD_API_BASE_URL_KEY) ?? '');
   const [cloudMessage, setCloudMessage] = useState<string | null>(null);
-  const [cloudAuth, setCloudAuth] = useState<CloudAuthState>({ signedIn:false });
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [authBusy, setAuthBusy] = useState(false);
+  const [connected, setConnected] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [issuedToken, setIssuedToken] = useState<string | null>(null);
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
-    const refresh = () => { void getCloudAuthState().then(setCloudAuth); };
+    const refresh = () => { void getIntegrationApiToken().then((token)=>setConnected(Boolean(token))).catch(()=>setConnected(false)); };
     refresh();
     window.addEventListener(CLOUD_AUTH_EVENT,refresh);
     return () => window.removeEventListener(CLOUD_AUTH_EVENT,refresh);
@@ -38,34 +38,44 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
     }
   }
 
-  async function signIn() {
-    if (authBusy) return;
-    setAuthBusy(true);
-    setCloudMessage(null);
+  async function generateToken() {
+    if (busy) return;
+    setBusy(true);
+    setCopied(false);
+    setCloudMessage('Opening Google verification in your browser…');
     try {
-      const state=await signInToCloud(email,password);
-      setCloudAuth(state);
-      setPassword('');
-      setCloudMessage(`Signed in${state.email ? ` as ${state.email}` : ''}. Cloud publishing is ready.`);
+      const apiBaseUrl=resolveCloudApiBaseUrl(window.localStorage);
+      const result=await generateIntegrationApiToken(apiBaseUrl);
+      setIssuedToken(result.token);
+      setConnected(true);
+      setCloudMessage('Connected. Your new API token is stored securely on this computer. Copy it now if you also want to configure an ERP/Salesforce callout.');
     } catch (error) {
-      setCloudMessage(error instanceof Error ? error.message : 'Cloud sign-in failed.');
+      setCloudMessage(error instanceof Error ? error.message : 'Unable to generate API token.');
     } finally {
-      setAuthBusy(false);
+      setBusy(false);
     }
   }
 
-  async function signOut() {
-    if (authBusy) return;
-    setAuthBusy(true);
-    setCloudMessage(null);
+  async function copyToken() {
+    if(!issuedToken) return;
+    await navigator.clipboard.writeText(issuedToken);
+    setCopied(true);
+    window.setTimeout(()=>setCopied(false),1600);
+  }
+
+  async function revokeToken() {
+    if(busy) return;
+    setBusy(true);
     try {
-      await signOutFromCloud();
-      setCloudAuth({signedIn:false});
-      setCloudMessage('Signed out from cloud publishing.');
-    } catch (error) {
-      setCloudMessage(error instanceof Error ? error.message : 'Unable to sign out.');
+      const apiBaseUrl=resolveCloudApiBaseUrl(window.localStorage);
+      await revokeIntegrationApiToken(apiBaseUrl);
+      setConnected(false);
+      setIssuedToken(null);
+      setCloudMessage('API token revoked. Desktop and any ERP using that token will need a new token.');
+    } catch(error) {
+      setCloudMessage(error instanceof Error ? error.message : 'Unable to revoke API token.');
     } finally {
-      setAuthBusy(false);
+      setBusy(false);
     }
   }
 
@@ -79,20 +89,27 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
 
       <div className="cloud-api-setting">
         <span>
-          <strong><Cloud size={15}/>Cloud publishing</strong>
-          <small>Sign in once. The desktop app refreshes short-lived tokens automatically; users never need Secret Manager or gcloud.</small>
+          <strong><Cloud size={15}/>Cloud connection</strong>
+          <small>Generate one reusable pdfDocGen API token after Google verification. Desktop stores it in the operating-system credential store; the same token can be used by ERP/Salesforce callouts.</small>
         </span>
 
-        {cloudAuth.signedIn ? <>
-          <div className="compact-info-row"><span>Status</span><strong>Connected{cloudAuth.email ? ` · ${cloudAuth.email}` : ''}</strong></div>
-          <button className="secondary" type="button" disabled={authBusy} onClick={() => void signOut()}><LogOut size={15}/>Sign out</button>
-        </> : <>
-          <label><span>Email</span><input aria-label="Cloud account email" type="email" autoComplete="username" placeholder="name@example.com" value={email} onChange={(event)=>{setEmail(event.target.value);setCloudMessage(null);}}/></label>
-          <label><span>Password</span><input aria-label="Cloud account password" type="password" autoComplete="current-password" placeholder="Password" value={password} onChange={(event)=>{setPassword(event.target.value);setCloudMessage(null);}} onKeyDown={(event)=>{if(event.key==='Enter') void signIn();}}/></label>
-          <button className="primary" type="button" disabled={authBusy || !email.trim() || !password} onClick={() => void signIn()}><LogIn size={15}/>{authBusy ? 'Signing in…' : 'Sign in'}</button>
-        </>}
+        <div className="compact-info-row">
+          <span>Status</span>
+          <strong>{connected ? '● Connected' : '○ Not connected'}</strong>
+        </div>
 
-        <small>Production desktop builds keep the refresh credential in the operating system credential store. Browser dev mode keeps it only for the current session.</small>
+        {!connected ? <button className="primary" type="button" disabled={busy} onClick={() => void generateToken()}>
+          <KeyRound size={15}/>{busy ? 'Waiting for Google…' : 'Generate Token'}
+        </button> : <div className="button-row">
+          <button className="secondary" type="button" disabled={busy} onClick={() => void generateToken()}><RotateCcw size={15}/>Generate New Token</button>
+          <button className="secondary" type="button" disabled={busy} onClick={() => void revokeToken()}><Unplug size={15}/>Revoke Token</button>
+        </div>}
+
+        {issuedToken ? <div className="cloud-token-once">
+          <small>This token is shown for this generation flow so you can configure ERP/Salesforce. Keep it secret.</small>
+          <code>{issuedToken}</code>
+          <button className="secondary" type="button" onClick={() => void copyToken()}>{copied ? <Check size={14}/> : <Copy size={14}/>} {copied ? 'Copied' : 'Copy Token'}</button>
+        </div> : null}
       </div>
 
       <div className="cloud-api-setting">
@@ -102,7 +119,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
 
       {cloudMessage ? <div><span><strong>Cloud status</strong><small className="cloud-api-message">{cloudMessage}</small></span></div> : null}
       <div><span><strong>Storage</strong><small>Templates and workspace data remain local-first.</small></span><span className="status-pill">Local-first</span></div>
-      <div><span><strong>Desktop runtime</strong><small>Tauri remains on the current v1 runtime during AUTH-UX-1.</small></span><span className="status-pill">Preserved</span></div>
+      <div><span><strong>Desktop credential storage</strong><small>The reusable API token is stored in the operating-system credential manager, not localStorage.</small></span><span className="status-pill">Secure</span></div>
     </section>
   </div>;
 }
