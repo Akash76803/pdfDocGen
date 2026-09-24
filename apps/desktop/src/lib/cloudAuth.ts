@@ -1,6 +1,7 @@
 import { invoke } from '@tauri-apps/api/tauri';
 
 const DEV_REFRESH_TOKEN_KEY = 'document-builder.cloud-auth-refresh-token.dev-session.v1';
+const DEV_API_TOKEN_KEY = 'document-builder.cloud-api-token.dev-session.v1';
 const AUTH_EVENT = 'document-builder:cloud-auth-changed';
 
 type IdentitySignInResponse = {
@@ -160,6 +161,78 @@ export async function signOutFromCloud(): Promise<void> {
   cachedExpiresAt = 0;
   cachedEmail = undefined;
   emitAuthChanged();
+}
+
+
+
+export type IssuedIntegrationToken = {
+  token: string;
+  tokenId: string;
+  label: string;
+  createdAt: string;
+  warning?: string;
+};
+
+async function storeApiToken(token:string):Promise<void> {
+  if (isTauriRuntime()) {
+    await invoke('cloud_auth_store_api_token',{apiToken:token});
+    return;
+  }
+  window.sessionStorage.setItem(DEV_API_TOKEN_KEY,token);
+}
+
+export async function getIntegrationApiToken():Promise<string|null> {
+  if (isTauriRuntime()) return await invoke<string|null>('cloud_auth_read_api_token');
+  return window.sessionStorage.getItem(DEV_API_TOKEN_KEY);
+}
+
+export async function clearIntegrationApiToken():Promise<void> {
+  if (isTauriRuntime()) {
+    await invoke('cloud_auth_clear_api_token');
+  } else {
+    window.sessionStorage.removeItem(DEV_API_TOKEN_KEY);
+  }
+  emitAuthChanged();
+}
+
+export async function generateIntegrationApiToken(apiBaseUrl:string,label='Desktop + ERP integration'):Promise<IssuedIntegrationToken> {
+  const identityToken=await getCloudAccessToken();
+  if(!identityToken) throw new Error('Verify your account first before generating an API token.');
+  const response=await fetch(`${apiBaseUrl.replace(/\/+$/,'')}/api/v1/auth/tokens`,{
+    method:'POST',
+    headers:{
+      'content-type':'application/json',
+      'x-pdfdocgen-authorization':`Bearer ${identityToken}`,
+    },
+    body:JSON.stringify({label}),
+  });
+  if(!response.ok) {
+    let message=`API token generation failed (${response.status}).`;
+    try {
+      const body=await response.json() as {error?:{message?:string}};
+      if(body.error?.message) message=body.error.message;
+    } catch {}
+    throw new Error(message);
+  }
+  const issued=await response.json() as IssuedIntegrationToken;
+  if(!issued.token?.startsWith('pdfdg_')) throw new Error('API returned an invalid integration token.');
+  await storeApiToken(issued.token);
+  emitAuthChanged();
+  return issued;
+}
+
+export async function revokeIntegrationApiToken(apiBaseUrl:string):Promise<void> {
+  const token=await getIntegrationApiToken();
+  if(!token) {
+    await clearIntegrationApiToken();
+    return;
+  }
+  const response=await fetch(`${apiBaseUrl.replace(/\/+$/,'')}/api/v1/auth/tokens/current`,{
+    method:'DELETE',
+    headers:{'x-pdfdocgen-authorization':`Bearer ${token}`},
+  });
+  if(!response.ok && response.status!==404) throw new Error(`Unable to revoke API token (${response.status}).`);
+  await clearIntegrationApiToken();
 }
 
 export const CLOUD_AUTH_EVENT = AUTH_EVENT;
