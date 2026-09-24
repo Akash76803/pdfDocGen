@@ -1,5 +1,6 @@
 import { createPublicKey, timingSafeEqual, verify as verifySignature } from 'node:crypto';
 import type { IncomingMessage } from 'node:http';
+import { parseApiToken, verifyApiTokenSecret, type ApiTokenStore } from './api-token-store.js';
 
 export type ApiPrincipal = {
   subject: string;
@@ -170,6 +171,27 @@ export function createIdentityPlatformAuthenticator(options: IdentityPlatformAut
         ...(claims.email ? { email:claims.email } : {}),
         roles,
         authType:'oidc' as const,
+      };
+    },
+  };
+}
+
+
+export function createIssuedApiTokenAuthenticator(store: ApiTokenStore): ApiAuthenticator {
+  return {
+    async authenticate(req) {
+      const raw=readBearerToken(req);
+      const parsed=parseApiToken(raw);
+      if(!parsed) throw new ApiAuthenticationError();
+      const record=await store.get(parsed.tokenId);
+      if(!record || record.revokedAt || !verifyApiTokenSecret(parsed.secret,record.secretHash)) throw new ApiAuthenticationError();
+      void store.touch(record.id,new Date().toISOString()).catch(()=>undefined);
+      return {
+        subject:record.ownerSubject,
+        clientId:record.id,
+        ...(record.ownerEmail ? {email:record.ownerEmail}:{}),
+        roles:['publisher','generator'],
+        authType:'api-key' as const,
       };
     },
   };
