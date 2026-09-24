@@ -12,6 +12,7 @@ import {
 } from '@document-tool/generation-core';
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
 import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
+import { createApiTokenRecord, type ApiTokenStore } from './api-token-store.js';
 import { attachRequestObservability, emitApiOperationLog, type ApiLogger } from './observability.js';
 import type { ApiRateLimiter } from './rate-limit.js';
 import { canonicalRequestFingerprint, readIdempotencyKey, type ApiIdempotencyStore, type IdempotencyOperation } from './idempotency.js';
@@ -37,6 +38,7 @@ export type ApiDependencies = {
   authenticator?: ApiAuthenticator;
   rateLimiter?: ApiRateLimiter;
   idempotencyStore?: ApiIdempotencyStore;
+  apiTokenStore?: ApiTokenStore;
   logger?: ApiLogger;
 };
 
@@ -274,6 +276,7 @@ function errorStatus(code: string) {
     : code === 'INVALID_JSON' || code === 'INVALID_REQUEST' || code === 'INVALID_TEMPLATE_PAYLOAD' || code === 'INVALID_TEMPLATE_ID' ? 400
     : code === 'TEMPLATE_NOT_FOUND' ? 404
     : code === 'TEMPLATE_VERSION_CONFLICT' ? 409
+    : code === 'API_TOKEN_NOT_FOUND' ? 404
     : code === 'CLOUD_PUBLISH_REQUIRED' ? 409
     : code === 'CLOUD_ASSET_NOT_FOUND' ? 404
     : code === 'CLOUD_TEMPLATE_INTEGRITY_FAILED' || code === 'CLOUD_ASSET_INTEGRITY_FAILED' ? 500
@@ -312,6 +315,38 @@ export function createApiHandler(deps: ApiDependencies) {
         res.setHeader('retry-after', String(decision.retryAfterSeconds));
         return sendJson(res, 429, { error:{ code:'RATE_LIMIT_EXCEEDED', message:'Too many requests. Retry after the indicated delay.', details:{ retryAfterSeconds:decision.retryAfterSeconds } } } satisfies ApiError);
       }
+    }
+
+
+    if (method === 'POST' && url.pathname === '/api/v1/auth/tokens') {
+      if (!deps.apiTokenStore) return sendJson(res,503,{error:{code:'API_TOKEN_STORE_UNAVAILABLE',message:'API token storage is not configured.'}} satisfies ApiError);
+      if (!principal || principal.authType !== 'oidc') return sendJson(res,403,{error:{code:'FORBIDDEN',message:'Google-verified identity is required to generate an API token.'}} satisfies ApiError);
+      try {
+        const payload=await readJson(req,bodyLimitConfig);
+        const label=payload && typeof payload==='object' && !Array.isArray(payload) && typeof (payload as {label?:unknown}).label==='string'
+          ? (payload as {label:string}).label.trim().slice(0,80)
+          : 'Desktop + ERP integration';
+        const {issued,record}=createApiTokenRecord(principal,label || 'Desktop + ERP integration');
+        await deps.apiTokenStore.create(record);
+        return sendJson(res,201,{
+          status:'created',
+          token:issued.token,
+          tokenId:issued.tokenId,
+          label:issued.label,
+          createdAt:issued.createdAt,
+          warning:'Copy this token now. The server stores only a hash and cannot show the token again.',
+        });
+      } catch (error) {
+        const message=error instanceof Error?error.message:'Unable to create API token.';
+        return sendJson(res,500,{error:{code:'API_TOKEN_CREATE_FAILED',message}} satisfies ApiError);
+      }
+    }
+
+    if (method === 'DELETE' && url.pathname === '/api/v1/auth/tokens/current') {
+      if (!deps.apiTokenStore) return sendJson(res,503,{error:{code:'API_TOKEN_STORE_UNAVAILABLE',message:'API token storage is not configured.'}} satisfies ApiError);
+      if (!principal?.clientId || principal.authType !== 'api-key') return sendJson(res,403,{error:{code:'FORBIDDEN',message:'An issued API token is required to revoke the current token.'}} satisfies ApiError);
+      const revoked=await deps.apiTokenStore.revoke(principal.clientId,principal.subject);
+      return sendJson(res,revoked?200:404,revoked?{status:'revoked',tokenId:principal.clientId}:{error:{code:'API_TOKEN_NOT_FOUND',message:'Token was not found.'}});
     }
 
     const publishMatch = TEMPLATE_PUBLISH_ROUTE.exec(url.pathname);
