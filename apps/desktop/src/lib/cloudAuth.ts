@@ -208,8 +208,7 @@ export async function clearIntegrationApiToken():Promise<void> {
 }
 
 export async function generateIntegrationApiToken(apiBaseUrl:string,label='Desktop + ERP integration'):Promise<IssuedIntegrationToken> {
-  const identityToken=await getCloudAccessToken();
-  if(!identityToken) throw new Error('Verify your account first before generating an API token.');
+  const identityToken=await verifyWithGoogle();
   const response=await fetch(`${apiBaseUrl.replace(/\/+$/,'')}/api/v1/auth/tokens`,{
     method:'POST',
     headers:{
