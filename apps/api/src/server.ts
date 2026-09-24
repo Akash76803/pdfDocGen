@@ -25,8 +25,8 @@ if (authConfig.mode === 'static-bearer') {
 } else if (authConfig.mode === 'identity-platform') {
   authenticator = createIdentityPlatformAuthenticator({
     projectId: authConfig.identityProjectId!,
-    allowedEmails: authConfig.identityAllowedEmails,
-    requireEmailVerified: authConfig.identityRequireEmailVerified,
+    allowedEmails: authConfig.identityAllowedEmails ?? [],
+    requireEmailVerified: authConfig.identityRequireEmailVerified ?? true,
     roles:['publisher'],
   });
 } else if (authConfig.mode === 'hybrid') {
@@ -37,8 +37,8 @@ if (authConfig.mode === 'static-bearer') {
     }),
     createIdentityPlatformAuthenticator({
       projectId: authConfig.identityProjectId!,
-      allowedEmails: authConfig.identityAllowedEmails,
-      requireEmailVerified: authConfig.identityRequireEmailVerified,
+      allowedEmails: authConfig.identityAllowedEmails ?? [],
+      requireEmailVerified: authConfig.identityRequireEmailVerified ?? true,
       roles:['publisher'],
     }),
   ]);
