@@ -1041,9 +1041,9 @@ async function decodePreparedImage(source:string):Promise<PreparedImagePayload|u
       if(typeof createImageBitmap==='function'){
         const bitmap=await createImageBitmap(blob);const width=bitmap.width,height=bitmap.height;let dataUrl='';
         if(typeof OffscreenCanvas!=='undefined'){
-          const canvas=new OffscreenCanvas(width,height);const g=canvas.getContext('2d');if(g){g.drawImage(bitmap,0,0);const jpg=await canvas.convertToBlob({type:'image/jpeg',quality:.94});dataUrl=await blobToDataUrl(jpg);}
+          const canvas=new OffscreenCanvas(width,height);const g=canvas.getContext('2d');if(g){g.fillStyle='#ffffff';g.fillRect(0,0,width,height);g.drawImage(bitmap,0,0);const jpg=await canvas.convertToBlob({type:'image/jpeg',quality:.94});dataUrl=await blobToDataUrl(jpg);}
         }else if(typeof document!=='undefined'){
-          const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const g=canvas.getContext('2d');if(g){g.drawImage(bitmap,0,0);dataUrl=canvas.toDataURL('image/jpeg',.94);}
+          const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const g=canvas.getContext('2d');if(g){g.fillStyle='#ffffff';g.fillRect(0,0,width,height);g.drawImage(bitmap,0,0);dataUrl=canvas.toDataURL('image/jpeg',.94);}
         }
         bitmap.close?.();if(dataUrl)return{bytes:decodeDataUrl(dataUrl),width,height};
       }
@@ -1051,7 +1051,7 @@ async function decodePreparedImage(source:string):Promise<PreparedImagePayload|u
         const objectUrl=URL.createObjectURL(blob);
         try{
           const image=await loadHtmlImage(objectUrl);const width=image.naturalWidth||image.width,height=image.naturalHeight||image.height;
-          if(width>0&&height>0){const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const g=canvas.getContext('2d');if(g){g.drawImage(image,0,0);const dataUrl=canvas.toDataURL('image/jpeg',.94);return{bytes:decodeDataUrl(dataUrl),width,height};}}
+          if(width>0&&height>0){const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;const g=canvas.getContext('2d');if(g){g.fillStyle='#ffffff';g.fillRect(0,0,width,height);g.drawImage(image,0,0);const dataUrl=canvas.toDataURL('image/jpeg',.94);return{bytes:decodeDataUrl(dataUrl),width,height};}}
         }finally{URL.revokeObjectURL(objectUrl);}
       }
     }
