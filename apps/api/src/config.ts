@@ -48,8 +48,8 @@ export type ApiAuthConfig = {
   mode: ApiAuthMode;
   staticBearerToken?: string;
   identityProjectId?: string;
-  identityAllowedEmails: string[];
-  identityRequireEmailVerified: boolean;
+  identityAllowedEmails?: string[];
+  identityRequireEmailVerified?: boolean;
 };
 
 export type ApiRepositoryConfig = {
