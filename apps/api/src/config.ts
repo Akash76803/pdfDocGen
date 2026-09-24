@@ -42,7 +42,7 @@ export type ApiRateLimitConfig = {
 };
 
 export type ApiTemplateRepositoryMode = 'filesystem' | 'cloud';
-export type ApiAuthMode = 'disabled' | 'static-bearer' | 'identity-platform' | 'hybrid';
+export type ApiAuthMode = 'disabled' | 'static-bearer' | 'identity-platform' | 'hybrid' | 'token-hybrid';
 
 export type ApiAuthConfig = {
   mode: ApiAuthMode;
@@ -50,6 +50,7 @@ export type ApiAuthConfig = {
   identityProjectId?: string;
   identityAllowedEmails?: string[];
   identityRequireEmailVerified?: boolean;
+  googleClientId?: string;
 };
 
 export type ApiRepositoryConfig = {
@@ -123,8 +124,8 @@ export function resolveApiRepositoryConfig(env: NodeJS.ProcessEnv = process.env)
 export function resolveApiAuthConfig(env: NodeJS.ProcessEnv = process.env): ApiAuthConfig {
   const rawMode = env.API_AUTH_MODE?.trim().toLowerCase();
   const mode: ApiAuthMode = !rawMode ? DEFAULT_API_AUTH_MODE
-    : rawMode === 'disabled' || rawMode === 'static-bearer' || rawMode === 'identity-platform' || rawMode === 'hybrid' ? rawMode
-    : (()=>{ throw Object.assign(new Error('API_AUTH_MODE must be "disabled", "static-bearer", "identity-platform", or "hybrid".'), { code:'INVALID_API_AUTH_MODE', details:{ value:env.API_AUTH_MODE } }); })();
+    : rawMode === 'disabled' || rawMode === 'static-bearer' || rawMode === 'identity-platform' || rawMode === 'hybrid' || rawMode === 'token-hybrid' ? rawMode
+    : (()=>{ throw Object.assign(new Error('API_AUTH_MODE must be "disabled", "static-bearer", "identity-platform", "hybrid", or "token-hybrid".'), { code:'INVALID_API_AUTH_MODE', details:{ value:env.API_AUTH_MODE } }); })();
 
   const identityAllowedEmails = (env.API_AUTH_IDENTITY_ALLOWED_EMAILS ?? '')
     .split(',')
@@ -135,11 +136,16 @@ export function resolveApiAuthConfig(env: NodeJS.ProcessEnv = process.env): ApiA
   if (mode === 'disabled') return { mode, identityAllowedEmails, identityRequireEmailVerified };
 
   const staticBearerToken = env.API_AUTH_STATIC_BEARER_TOKEN?.trim();
-  if ((mode === 'static-bearer' || mode === 'hybrid') && !staticBearerToken) {
+  if ((mode === 'static-bearer' || mode === 'hybrid' || mode === 'token-hybrid') && !staticBearerToken) {
     throw Object.assign(
       new Error('API_AUTH_STATIC_BEARER_TOKEN is required when API_AUTH_MODE uses static bearer authentication.'),
       { code:'MISSING_API_AUTH_TOKEN' },
     );
+  }
+
+  const googleClientId = env.API_AUTH_GOOGLE_CLIENT_ID?.trim();
+  if (mode === 'token-hybrid' && !googleClientId) {
+    throw Object.assign(new Error('API_AUTH_GOOGLE_CLIENT_ID is required when API_AUTH_MODE is "token-hybrid".'), { code:'MISSING_GOOGLE_CLIENT_ID' });
   }
 
   const identityProjectId = env.API_AUTH_IDENTITY_PROJECT_ID?.trim();
@@ -154,6 +160,7 @@ export function resolveApiAuthConfig(env: NodeJS.ProcessEnv = process.env): ApiA
     mode,
     ...(staticBearerToken ? { staticBearerToken } : {}),
     ...(identityProjectId ? { identityProjectId } : {}),
+    ...(googleClientId ? { googleClientId } : {}),
     identityAllowedEmails,
     identityRequireEmailVerified,
   };
