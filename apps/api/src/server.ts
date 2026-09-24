@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { HeadlessDocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler } from './app.js';
-import { createCompositeAuthenticator, createIdentityPlatformAuthenticator, createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
+import { createCompositeAuthenticator, createIdentityPlatformAuthenticator, createIssuedApiTokenAuthenticator, createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
 import { assertSecureCloudAuthConfig, resolveApiAuthConfig, resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRateLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
 import { createTemplateRepositoryComposition } from './repository-composition.js';
@@ -11,6 +11,7 @@ import { createGcpCloudTemplateRepository } from './gcp-cloud-storage.js';
 import { createMonitoringLogger } from './observability.js';
 import { createInMemoryApiRateLimiter } from './rate-limit.js';
 import { createGcpApiIdempotencyStore } from './gcp-idempotency-store.js';
+import { createFirestoreApiTokenStore } from './gcp-api-token-store.js';
 
 const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
@@ -33,8 +34,9 @@ if (authConfig.mode === 'static-bearer') {
   authenticator = createCompositeAuthenticator([
     createStaticBearerAuthenticator({
       token: authConfig.staticBearerToken!,
-      principal:{ subject:'salesforce-integration', roles:['generator'], authType:'api-key' },
+      principal:{ subject:'salesforce-bootstrap', roles:['generator'], authType:'api-key' },
     }),
+    ...(apiTokenStore ? [createIssuedApiTokenAuthenticator(apiTokenStore)] : []),
     createIdentityPlatformAuthenticator({
       projectId: authConfig.identityProjectId!,
       allowedEmails: authConfig.identityAllowedEmails ?? [],
@@ -45,6 +47,9 @@ if (authConfig.mode === 'static-bearer') {
 }
 const { host, port } = serverConfig;
 const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
+const apiTokenStore = gcpStorageConfig
+  ? createFirestoreApiTokenStore(gcpStorageConfig.projectId,gcpStorageConfig.firestoreDatabaseId)
+  : undefined;
 
 const composition = createTemplateRepositoryComposition({
   mode: repositoryConfig.mode,
@@ -64,6 +69,7 @@ const handler = createApiHandler({
   authenticator,
   rateLimiter,
   idempotencyStore,
+  apiTokenStore,
   logger:createMonitoringLogger(),
 });
 
