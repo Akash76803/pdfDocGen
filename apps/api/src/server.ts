@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import { HeadlessDocumentGenerationService } from '@document-tool/generation-core';
 import { createApiHandler } from './app.js';
-import { createStaticBearerAuthenticator } from './auth.js';
+import { createCompositeAuthenticator, createIdentityPlatformAuthenticator, createStaticBearerAuthenticator, type ApiAuthenticator } from './auth.js';
 import { assertSecureCloudAuthConfig, resolveApiAuthConfig, resolveApiBodyLimitConfig, resolveApiGenerationLimitConfig, resolveApiRateLimitConfig, resolveApiRepositoryConfig, resolveApiServerConfig } from './config.js';
 import { resolveBundledTemplateDirectory, resolveSharedTemplateDirectory } from './local-template-directory.js';
 import { createTemplateRepositoryComposition } from './repository-composition.js';
@@ -19,9 +19,30 @@ const generationLimitConfig = resolveApiGenerationLimitConfig();
 const rateLimitConfig = resolveApiRateLimitConfig();
 const authConfig = resolveApiAuthConfig();
 assertSecureCloudAuthConfig(serverConfig, authConfig);
-const authenticator = authConfig.mode === 'static-bearer'
-  ? createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! })
-  : undefined;
+let authenticator: ApiAuthenticator | undefined;
+if (authConfig.mode === 'static-bearer') {
+  authenticator = createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! });
+} else if (authConfig.mode === 'identity-platform') {
+  authenticator = createIdentityPlatformAuthenticator({
+    projectId: authConfig.identityProjectId!,
+    allowedEmails: authConfig.identityAllowedEmails,
+    requireEmailVerified: authConfig.identityRequireEmailVerified,
+    roles:['publisher'],
+  });
+} else if (authConfig.mode === 'hybrid') {
+  authenticator = createCompositeAuthenticator([
+    createStaticBearerAuthenticator({
+      token: authConfig.staticBearerToken!,
+      principal:{ subject:'salesforce-integration', roles:['generator'], authType:'api-key' },
+    }),
+    createIdentityPlatformAuthenticator({
+      projectId: authConfig.identityProjectId!,
+      allowedEmails: authConfig.identityAllowedEmails,
+      requireEmailVerified: authConfig.identityRequireEmailVerified,
+      roles:['publisher'],
+    }),
+  ]);
+}
 const { host, port } = serverConfig;
 const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
 
