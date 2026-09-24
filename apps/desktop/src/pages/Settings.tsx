@@ -69,7 +69,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
       const apiBaseUrl = resolveCloudApiBaseUrl(window.localStorage);
       console.log('[Settings] Calling generateIntegrationApiToken with apiBaseUrl:', apiBaseUrl);
       const result = await generateIntegrationApiToken(apiBaseUrl);
-      console.log('[Settings] generateIntegrationApiToken success:', result);
+      console.log('[Settings] integration API token issued and stored successfully.');
       setIssuedToken(result.token);
       setConnected(true);
       setCloudMessage('Connected. Your new API token is stored securely on this computer. Copy it now if you also want to configure an ERP/Salesforce callout.');
