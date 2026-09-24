@@ -20,6 +20,10 @@ const generationLimitConfig = resolveApiGenerationLimitConfig();
 const rateLimitConfig = resolveApiRateLimitConfig();
 const authConfig = resolveApiAuthConfig();
 assertSecureCloudAuthConfig(serverConfig, authConfig);
+const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
+const apiTokenStore = gcpStorageConfig
+  ? createFirestoreApiTokenStore(gcpStorageConfig.projectId,gcpStorageConfig.firestoreDatabaseId)
+  : undefined;
 let authenticator: ApiAuthenticator | undefined;
 if (authConfig.mode === 'static-bearer') {
   authenticator = createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! });
@@ -59,10 +63,6 @@ if (authConfig.mode === 'static-bearer') {
   ]);
 }
 const { host, port } = serverConfig;
-const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
-const apiTokenStore = gcpStorageConfig
-  ? createFirestoreApiTokenStore(gcpStorageConfig.projectId,gcpStorageConfig.firestoreDatabaseId)
-  : undefined;
 
 const composition = createTemplateRepositoryComposition({
   mode: repositoryConfig.mode,
