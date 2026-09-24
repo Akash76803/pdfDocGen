@@ -90,7 +90,7 @@ export async function publishTemplateToCloud(
   try {
     response = await fetchImpl(`${apiBaseUrl}/api/v1/templates/${encodeURIComponent(entry.id)}/publish`, {
       method: 'PUT',
-      headers: { 'content-type': 'application/json', ...(accessToken ? { authorization:`Bearer ${accessToken}` } : {}) },
+      headers: { 'content-type': 'application/json', ...(accessToken ? { 'x-pdfdocgen-authorization':`Bearer ${accessToken}` } : {}) },
       body: JSON.stringify(request),
     });
   } catch (error) {
