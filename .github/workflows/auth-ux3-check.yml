@@ -30,5 +30,14 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+      - run: npm ci
+      - run: npm run build
       - run: rustc --version
       - run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
