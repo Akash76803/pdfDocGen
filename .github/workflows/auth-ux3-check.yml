@@ -28,6 +28,10 @@ jobs:
   tauri-windows:
     runs-on: windows-latest
     timeout-minutes: 45
+    env:
+      # These values are public desktop settings, never the OAuth client secret.
+      VITE_GOOGLE_OAUTH_CLIENT_ID: 933068485086-ptvjm6oadb4a0s7gpi4df35i8kv1bbn8.apps.googleusercontent.com
+      VITE_CLOUD_API_BASE_URL: https://pdf-doc-gen-gateway-bwn8vuu6.uc.gateway.dev
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -41,3 +45,10 @@ jobs:
       - run: npm run build
       - run: rustc --version
       - run: cargo check --locked --manifest-path apps/desktop/src-tauri/Cargo.toml
+      - run: npm run tauri build -w @document-builder/desktop
+      - uses: actions/upload-artifact@v4
+        with:
+          name: document-tool-auth-ux3-windows-installer
+          path: apps/desktop/src-tauri/target/release/bundle/nsis/*setup.exe
+          if-no-files-found: error
+          retention-days: 7
