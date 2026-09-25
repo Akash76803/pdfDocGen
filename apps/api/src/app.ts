@@ -13,6 +13,8 @@ import {
 import type { PublishTemplateRequest, PublishTemplateResponse } from '@document-tool/contracts';
 import { ApiAuthenticationError, ApiAuthorizationError, authenticateRequest, requireCapability, type ApiAuthenticator, type AuthenticatedIncomingMessage } from './auth.js';
 import { createApiTokenRecord, type ApiTokenStore } from './api-token-store.js';
+import { GoogleOAuthExchangeError, validateGoogleAuthorizationGrant, type GoogleAuthorizationGrant } from './google-oauth-exchange.js';
+import type { ApiPrincipal } from './auth.js';
 import { attachRequestObservability, emitApiOperationLog, type ApiLogger } from './observability.js';
 import type { ApiRateLimiter } from './rate-limit.js';
 import { canonicalRequestFingerprint, readIdempotencyKey, type ApiIdempotencyStore, type IdempotencyOperation } from './idempotency.js';
@@ -39,6 +41,7 @@ export type ApiDependencies = {
   rateLimiter?: ApiRateLimiter;
   idempotencyStore?: ApiIdempotencyStore;
   apiTokenStore?: ApiTokenStore;
+  googleOAuthExchange?: (grant: GoogleAuthorizationGrant) => Promise<ApiPrincipal>;
   logger?: ApiLogger;
 };
 
@@ -300,6 +303,46 @@ export function createApiHandler(deps: ApiDependencies) {
     const url = new URL(req.url ?? '/', 'http://localhost');
     if (method === 'OPTIONS') { res.statusCode = 204; return res.end(); }
     if (method === 'GET' && url.pathname === '/health') return sendJson(res, 200, { status:'ok', service:'document-builder-api', phase:'CLOUD-6', limits:{ requestBodyMb: bodyLimitConfig.effectiveLimitMb, absoluteMaxMb: bodyLimitConfig.absoluteMaxMb, generationTimeoutMs:generationLimitConfig.effectiveTimeoutMs, maxBatchDocuments:generationLimitConfig.effectiveMaxBatchDocuments } });
+
+    // Public bootstrap only: Google validates the one-use authorization code and PKCE;
+    // our server independently verifies the resulting Google-signed ID token.
+    if (method === 'POST' && url.pathname === '/api/v1/auth/google/exchange') {
+      if (!deps.googleOAuthExchange || !deps.apiTokenStore) {
+        return sendJson(res, 503, {error:{code:'GOOGLE_OAUTH_NOT_CONFIGURED',message:'Google token exchange is not configured.'}} satisfies ApiError);
+      }
+      res.setHeader('cache-control', 'no-store');
+      try {
+        const tinyBodyConfig = {...bodyLimitConfig, effectiveLimitBytes: 8192};
+        const payload = await readJson(req, tinyBodyConfig);
+        const grant = validateGoogleAuthorizationGrant(payload);
+        const label = payload && typeof payload === 'object' && !Array.isArray(payload) &&
+          typeof (payload as {label?:unknown}).label === 'string'
+          ? (payload as {label:string}).label.trim().slice(0,80)
+          : 'Desktop + ERP integration';
+        const verifiedPrincipal = await deps.googleOAuthExchange(grant);
+        if (verifiedPrincipal.authType !== 'oidc') {
+          throw new GoogleOAuthExchangeError(401, 'GOOGLE_IDENTITY_REJECTED', 'A verified Google identity is required.');
+        }
+        const {issued, record} = createApiTokenRecord(verifiedPrincipal, label || 'Desktop + ERP integration');
+        await deps.apiTokenStore.create(record);
+        return sendJson(res, 201, {
+          status:'created', token:issued.token, tokenId:issued.tokenId,
+          label:issued.label, createdAt:issued.createdAt,
+          warning:'Copy this token now. The server stores only a hash and cannot show the token again.',
+        });
+      } catch (error) {
+        if (error instanceof GoogleOAuthExchangeError) {
+          return sendJson(res, error.status, {error:{code:error.code,message:error.message}} satisfies ApiError);
+        }
+        if (error && typeof error === 'object' && 'code' in error) {
+          const code = String((error as {code:unknown}).code);
+          if (code === 'PAYLOAD_TOO_LARGE') return sendJson(res, 413, {error:{code,message:'OAuth request is too large.'}} satisfies ApiError);
+          if (code === 'INVALID_JSON') return sendJson(res, 400, {error:{code,message:'OAuth request must be valid JSON.'}} satisfies ApiError);
+        }
+        // Do not leak Google tokens, authorization codes, or upstream responses.
+        return sendJson(res, 503, {error:{code:'GOOGLE_OAUTH_EXCHANGE_FAILED',message:'Unable to complete Google verification.'}} satisfies ApiError);
+      }
+    }
 
     let principal;
     try {
