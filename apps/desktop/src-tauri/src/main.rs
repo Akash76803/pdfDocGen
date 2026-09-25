@@ -5,7 +5,6 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::{rngs::OsRng, RngCore};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
@@ -76,17 +75,19 @@ fn cloud_auth_clear_api_token() -> Result<(), String> {
   clear_secret(CLOUD_API_TOKEN_ACCOUNT)
 }
 
-#[derive(Deserialize)]
-struct GoogleTokenResponse {
-  id_token: Option<String>,
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleAuthorizationGrant {
+  code: String,
+  code_verifier: String,
+  redirect_uri: String,
 }
 
 #[tauri::command]
-async fn google_oauth_verify(
+async fn google_oauth_authorize(
   window: tauri::Window,
   client_id: String,
-  client_secret: Option<String>,
-) -> Result<String, String> {
+) -> Result<GoogleAuthorizationGrant, String> {
   let client_id = client_id.trim().to_string();
   if client_id.is_empty() {
     return Err("Google OAuth client ID is not configured.".into());
@@ -122,12 +123,6 @@ async fn google_oauth_verify(
 
   shell::open(&window.shell_scope(), auth_url.to_string(), None)
     .map_err(|error| format!("Unable to open Google verification in your browser: {error}"))?;
-
-  // Safe diagnostics — redirect_uri and PKCE lengths only, no secret values
-  eprintln!("[oauth] redirect_uri (auth): {redirect_uri}");
-  eprintln!("[oauth] code_verifier length: {}", code_verifier.len());
-  eprintln!("[oauth] code_challenge length: {}", code_challenge.len());
-  eprintln!("[oauth] client_secret provided: {}", client_secret.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false));
 
   let expected_state = state.clone();
   let code = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
@@ -175,43 +170,11 @@ async fn google_oauth_verify(
     code.ok_or_else(|| "Google did not return an authorization code.".to_string())
   }).await.map_err(|error| format!("Google verification task failed: {error}"))??;
 
-  // Safe diagnostics — confirm exact redirect_uri reused in exchange
-  eprintln!("[oauth] redirect_uri (token exchange): {redirect_uri}");
+  // The one-time code and PKCE verifier are handed to the desktop frontend;
+  // only the hosted backend exchanges them using the server-held client secret.
+  // Do not log the grant: the code and verifier are short-lived credentials.
+  Ok(GoogleAuthorizationGrant { code, code_verifier, redirect_uri })
 
-  let mut form_data = vec![
-    ("client_id", client_id.as_str()),
-    ("code", code.as_str()),
-    ("code_verifier", code_verifier.as_str()),
-    ("grant_type", "authorization_code"),
-    ("redirect_uri", redirect_uri.as_str()),
-  ];
-
-  let cleaned_secret = client_secret.as_ref().map(|s| s.trim()).unwrap_or("");
-  if !cleaned_secret.is_empty() {
-    form_data.push(("client_secret", cleaned_secret));
-  }
-
-  let response = reqwest::Client::new()
-    .post("https://oauth2.googleapis.com/token")
-    .form(&form_data)
-    .send()
-    .await
-    .map_err(|error| format!("Unable to exchange Google verification code: {error}"))?;
-
-  let status = response.status();
-  eprintln!("[oauth] token exchange HTTP status: {status}");
-
-  if !status.is_success() {
-    // Read and surface Google's exact JSON error body for diagnosis
-    let error_body = response.text().await
-      .unwrap_or_else(|_| "<unreadable>".into());
-    eprintln!("[oauth] token exchange error body: {error_body}");
-    return Err(format!("Google token exchange failed ({status}): {error_body}"));
-  }
-  let tokens: GoogleTokenResponse = response.json().await
-    .map_err(|error| format!("Google token response was invalid: {error}"))?;
-  eprintln!("[oauth] id_token present: {}", tokens.id_token.is_some());
-  tokens.id_token.ok_or_else(|| "Google verification did not return an ID token.".to_string())
 }
 
 #[tauri::command]
@@ -229,7 +192,7 @@ fn main() {
       cloud_auth_store_api_token,
       cloud_auth_read_api_token,
       cloud_auth_clear_api_token,
-      google_oauth_verify,
+      google_oauth_authorize,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
