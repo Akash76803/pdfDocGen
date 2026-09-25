@@ -33,25 +33,21 @@ function googleOAuthClientId(): string {
   return clientId;
 }
 
-function googleOAuthClientSecret(): string | undefined {
-  const secret = import.meta.env.VITE_GOOGLE_OAUTH_CLIENT_SECRET?.trim();
-  return secret || undefined;
-}
+type GoogleAuthorizationGrant = {
+  code: string;
+  codeVerifier: string;
+  redirectUri: string;
+};
 
-export async function verifyWithGoogle(): Promise<string> {
-  console.log('[cloudAuth] verifyWithGoogle started...');
+async function authorizeWithGoogle(): Promise<GoogleAuthorizationGrant> {
   if (!isTauriRuntime()) {
-    throw new Error('Google verification requires the Tauri Desktop app runtime (must be run inside the Tauri desktop window).');
+    throw new Error('Google verification requires the installed Tauri Desktop application.');
   }
   try {
-    const clientId = googleOAuthClientId();
-    const clientSecret = googleOAuthClientSecret();
-    console.log('[cloudAuth] Invoking google_oauth_verify with configured Desktop OAuth client ID, hasSecret:', Boolean(clientSecret));
-    const token = await invoke<string>('google_oauth_verify', { clientId, clientSecret });
-    console.log('[cloudAuth] google_oauth_verify returned token');
-    return token;
+    return await invoke<GoogleAuthorizationGrant>('google_oauth_authorize', {
+      clientId: googleOAuthClientId(),
+    });
   } catch (error) {
-    console.error('[cloudAuth] google_oauth_verify error:', error);
     throw new Error(error instanceof Error ? error.message : String(error));
   }
 }
@@ -236,16 +232,13 @@ export async function clearIntegrationApiToken(): Promise<void> {
 }
 
 export async function generateIntegrationApiToken(apiBaseUrl: string, label = 'Desktop + ERP integration'): Promise<IssuedIntegrationToken> {
-  console.log('[cloudAuth] generateIntegrationApiToken starting, apiBaseUrl:', apiBaseUrl);
-  const identityToken = await verifyWithGoogle();
-  console.log('[cloudAuth] Received identityToken from verifyWithGoogle, length:', identityToken?.length);
-  const response = await fetch(`${apiBaseUrl.replace(/\/+$/, '')}/api/v1/auth/tokens`, {
+  // Complete native PKCE authorization, then exchange on the hosted backend.
+  // No Google client secret or Google ID token is bundled with the desktop app.
+  const grant = await authorizeWithGoogle();
+  const response = await fetch(`${apiBaseUrl.replace(/\/+$/, '')}/api/v1/auth/google/exchange`, {
     method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      'x-pdfdocgen-authorization': `Bearer ${identityToken}`,
-    },
-    body: JSON.stringify({ label }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ ...grant, label }),
   });
   if (!response.ok) {
     let message = `API token generation failed (${response.status}).`;
