@@ -34,7 +34,7 @@ describe('backend Google authorization-code exchange', () => {
   });
 
   it('exchanges PKCE code using only the server secret and verifies Google signed identity', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+    const fetchImpl = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(
       new Response(JSON.stringify({id_token:'mock-google-id-token'}), {status:200}),
     );
     const authenticator = {
@@ -61,7 +61,7 @@ describe('backend Google authorization-code exchange', () => {
   });
 
   it('does not leak the upstream OAuth response when Google rejects the code', async () => {
-    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+    const fetchImpl = vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(
       new Response(JSON.stringify({error:'invalid_grant',secret:'SHOULD_NOT_LEAK'}), {status:400}),
     );
     const exchange = createGoogleOAuthCodeExchanger({
@@ -77,7 +77,7 @@ describe('backend Google authorization-code exchange', () => {
     const exchange = createGoogleOAuthCodeExchanger({
       clientId:'desktop-client-id', clientSecret:'server-only-secret',
       authenticator:{authenticate:async()=>{throw new ApiAuthenticationError('Google identity token audience is invalid.');}},
-      fetchImpl:vi.fn<typeof fetch>().mockResolvedValue(
+      fetchImpl:vi.fn<Parameters<typeof fetch>, ReturnType<typeof fetch>>().mockResolvedValue(
         new Response(JSON.stringify({id_token:'invalid'}),{status:200}),
       ),
     });
@@ -92,7 +92,7 @@ afterEach(async()=>{
   await Promise.all(servers.splice(0).map((server)=>new Promise<void>((resolve)=>server.close(()=>resolve()))));
 });
 
-async function startAuthApi(exchange?: (grant: typeof grant)=>Promise<ApiPrincipal>) {
+async function startAuthApi(exchange?: (value: typeof grant)=>Promise<ApiPrincipal>) {
   const apiTokenStore = new InMemoryApiTokenStore();
   const generationService:DocumentGenerationService = {generate:async()=>{throw new Error('unused');}};
   const handler = createApiHandler({
