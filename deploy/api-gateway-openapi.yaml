@@ -1,4 +1,8 @@
 swagger: "2.0"
+host: "pdf-doc-gen-api-1y5zaulqb93zz.apigateway.pdf-gen-509308.cloud.goog"
+x-google-endpoints:
+  - name: "pdf-doc-gen-api-1y5zaulqb93zz.apigateway.pdf-gen-509308.cloud.goog"
+    allowCors: true
 info:
   title: pdfDocGen Salesforce Gateway
   description: Secured public API surface for Salesforce-to-pdfDocGen document generation.
@@ -23,6 +27,38 @@ paths:
       responses:
         "200":
           description: API health response
+
+  # Public OAuth bootstrap: Google authorization code is only exchanged by Cloud Run.
+  /api/v1/auth/google/exchange:
+    post:
+      operationId: exchangeGoogleAuthorizationCode
+      parameters:
+        - in: body
+          name: body
+          required: true
+          schema:
+            type: object
+            required: [code, codeVerifier, redirectUri]
+            properties:
+              code:
+                type: string
+              codeVerifier:
+                type: string
+              redirectUri:
+                type: string
+              label:
+                type: string
+      responses:
+        "201":
+          description: Server-verified integration token created
+        "400":
+          description: Invalid one-time authorization grant
+        "401":
+          description: Google verification rejected
+        "429":
+          description: Request rate limited
+        "503":
+          description: OAuth exchange not configured or unavailable
 
   /api/v1/auth/tokens:
     post:
