@@ -22,6 +22,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
   const [busy, setBusy] = useState(false);
   const [issuedToken, setIssuedToken] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [storedTokenCopied, setStoredTokenCopied] = useState(false);
   const [ipcStatus, setIpcStatus] = useState<string>('Testing IPC…');
 
   useEffect(() => {
@@ -64,6 +65,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
     }
     setBusy(true);
     setCopied(false);
+    setStoredTokenCopied(false);
     setCloudMessage('Opening Google verification in your browser…');
     try {
       const apiBaseUrl = resolveCloudApiBaseUrl(window.localStorage);
@@ -88,6 +90,32 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
     window.setTimeout(()=>setCopied(false),1600);
   }
 
+  async function copyStoredToken() {
+    if (busy) return;
+    const confirmed = window.confirm(
+      'Copy the existing API token to your clipboard? Treat it like a password: paste it only into a trusted ERP/Salesforce credential setup, then clear your clipboard.'
+    );
+    if (!confirmed) return;
+    setBusy(true);
+    setStoredTokenCopied(false);
+    try {
+      // Read only after explicit confirmation. Never render or log the stored token.
+      const token = await getIntegrationApiToken();
+      if (!token) {
+        setConnected(false);
+        setCloudMessage('No saved API token was found. Generate a token to connect this desktop.');
+        return;
+      }
+      await navigator.clipboard.writeText(token);
+      setStoredTokenCopied(true);
+      setCloudMessage('Existing API token copied. Paste it only into a trusted ERP/Salesforce credential field, then clear your clipboard.');
+    } catch {
+      setCloudMessage('Unable to copy the stored API token. Check desktop credential-store and clipboard permissions, then retry.');
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function revokeToken() {
     if(busy) return;
     setBusy(true);
@@ -96,6 +124,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
       await revokeIntegrationApiToken(apiBaseUrl);
       setConnected(false);
       setIssuedToken(null);
+      setStoredTokenCopied(false);
       setCloudMessage('API token revoked. Desktop and any ERP using that token will need a new token.');
     } catch(error) {
       setCloudMessage(error instanceof Error ? error.message : 'Unable to revoke API token.');
@@ -126,6 +155,7 @@ export function Settings({ theme, onThemeChange }: { theme: 'light' | 'dark'; on
         {!connected ? <button className="primary" type="button" disabled={busy} onClick={() => void generateToken()}>
           <KeyRound size={15}/>{busy ? 'Waiting for Google…' : 'Generate Token'}
         </button> : <div className="button-row">
+          <button className="secondary" type="button" disabled={busy} onClick={() => void copyStoredToken()}><Copy size={15}/>{storedTokenCopied ? 'Copied Existing Token' : 'Copy Existing Token'}</button>
           <button className="secondary" type="button" disabled={busy} onClick={() => void generateToken()}><RotateCcw size={15}/>Generate New Token</button>
           <button className="secondary" type="button" disabled={busy} onClick={() => void revokeToken()}><Unplug size={15}/>Revoke Token</button>
         </div>}
