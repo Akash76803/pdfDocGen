@@ -324,6 +324,12 @@ Settings → Generate Token
 
 The same `pdfdg_*` token can be used by Desktop publish/generation and configured separately in Salesforce/ERP credentials. The server stores only the token hash and metadata.
 
+### Copy an existing token for ERP/Salesforce
+
+When Settings shows **Connected**, choose **Copy Existing Token**. Confirm the security prompt; the desktop reads the already saved `pdfdg_*` token from the operating-system credential manager and copies it directly to the clipboard. It does **not** display the secret in the UI, log it, issue a replacement token, or require another Google login. Paste it only into a trusted ERP/Salesforce credential field and clear the clipboard afterward.
+
+**Generate New Token** issues an additional token; it is not a way to view the old one and does not automatically revoke the existing server token. To invalidate a token, use **Revoke Token** for the currently stored credential. Replacing a credential in an ERP requires updating that system separately.
+
 ### Security notes
 
 - Google OAuth client secret is not used by the desktop PKCE flow.
