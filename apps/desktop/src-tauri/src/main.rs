@@ -85,6 +85,7 @@ struct GoogleTokenResponse {
 async fn google_oauth_verify(
   window: tauri::Window,
   client_id: String,
+  client_secret: Option<String>,
 ) -> Result<String, String> {
   let client_id = client_id.trim().to_string();
   if client_id.is_empty() {
@@ -126,6 +127,7 @@ async fn google_oauth_verify(
   eprintln!("[oauth] redirect_uri (auth): {redirect_uri}");
   eprintln!("[oauth] code_verifier length: {}", code_verifier.len());
   eprintln!("[oauth] code_challenge length: {}", code_challenge.len());
+  eprintln!("[oauth] client_secret provided: {}", client_secret.as_ref().map(|s| !s.trim().is_empty()).unwrap_or(false));
 
   let expected_state = state.clone();
   let code = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
@@ -176,13 +178,18 @@ async fn google_oauth_verify(
   // Safe diagnostics — confirm exact redirect_uri reused in exchange
   eprintln!("[oauth] redirect_uri (token exchange): {redirect_uri}");
 
-  let form_data = [
+  let mut form_data = vec![
     ("client_id", client_id.as_str()),
     ("code", code.as_str()),
     ("code_verifier", code_verifier.as_str()),
     ("grant_type", "authorization_code"),
     ("redirect_uri", redirect_uri.as_str()),
   ];
+
+  let cleaned_secret = client_secret.as_ref().map(|s| s.trim()).unwrap_or("");
+  if !cleaned_secret.is_empty() {
+    form_data.push(("client_secret", cleaned_secret));
+  }
 
   let response = reqwest::Client::new()
     .post("https://oauth2.googleapis.com/token")
