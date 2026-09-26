@@ -3,6 +3,7 @@ on:
   push:
     branches:
       - feat/ux9-layout-typography-image-frames
+      - fix/ux9-shape-image-no-crop
   pull_request:
     branches:
       - deploy/auth-ux2-cloud
