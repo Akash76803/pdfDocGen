@@ -5,6 +5,7 @@ import { type BuilderDataSource } from '../lib/dataSourceStore.ts';
 import { IMAGE_ASSET_EVENT, loadImageAsset } from '../lib/imageAssetStore.ts';
 import { dynamicRows, evaluateTableFormula, evaluateTableFormulaColumns, evaluateTableSummaryRows, formatTableValue, paginateDynamicTable, projectConditionalRuntimeTable, visibleTableColumnIndexes, type TableCell, type TableColumn, type TableDefinition, type TableRow, valueAtPath } from '../lib/tableModel.ts';
 import { resolveTemplateTokens, templateHasTokens } from '../lib/templateTokens.ts';
+import { measuredTableHeight } from './tableCanvasSizing.ts';
 
 export function TableCanvas({ table, record, source, documentSource, globalFormulaValues = {}, availableHeight, continuationAvailableHeight, availableWidth, fragmentIndex, virtualPageMode = false, onChange, onSelectionChange, onInteractionStart, onInteractionEnd, onHeightChange }: { table: TableDefinition; record: NormalizedRecord | null; source?: BuilderDataSource | null; documentSource?: BuilderDataSource | null; globalFormulaValues?: Record<string, unknown>; availableHeight?: number; continuationAvailableHeight?: number; availableWidth?: number; fragmentIndex?: number; virtualPageMode?: boolean; onChange: (table: TableDefinition) => void; onSelectionChange?: (table: TableDefinition) => void; onInteractionStart?: () => void; onInteractionEnd?: () => void; onHeightChange?: (height: number) => void }) {
   const selectCell = (cellId: string) => (onSelectionChange ?? onChange)({ ...table, selectedCellId: cellId });
@@ -46,11 +47,13 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
         // measures the empty selection area and prevents shrinking. Use the
         // intrinsic table height plus optional editor ruler instead.
         const rulerHeight = shell.querySelector('.db-column-ruler')?.getBoundingClientRect().height ?? 0;
-        const intrinsicHeight = node.getBoundingClientRect().height + rulerHeight;
-        const renderedHeight = renderTable.mode === 'custom'
-          ? intrinsicHeight
-          : Math.max(shell.scrollHeight, node.scrollHeight, intrinsicHeight);
-        const next = Math.max(32, Math.ceil(renderedHeight));
+        const next = measuredTableHeight(
+          renderTable.mode,
+          node.getBoundingClientRect().height,
+          rulerHeight,
+          shell.scrollHeight,
+          node.scrollHeight,
+        );
         if (lastPublishedHeightRef.current !== null && Math.abs(next - lastPublishedHeightRef.current) < 1) return;
         lastPublishedHeightRef.current = next;
         onHeightChangeRef.current?.(next);
