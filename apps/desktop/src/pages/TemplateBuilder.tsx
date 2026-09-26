@@ -1777,7 +1777,7 @@ function ImageBackedContent({ item, bound }: { item: BuilderElement; bound: unkn
   const boundSrc = typeof bound === 'string' && isImageSource(bound) ? bound : '';
   const manualSrc = item.imageSource && isImageSource(item.imageSource) ? item.imageSource : '';
   const src = boundSrc || assetUrl || manualSrc;
-  if (src) return <img className="bound-image" src={src} alt={item.type === 'signature' ? 'Signature' : 'Image'} style={{ objectFit: item.imageFit ?? 'contain', objectPosition: item.imageObjectPosition ?? 'center', filter: imageElementFilter(item), transform: `scale(${Math.max(100, Math.min(400, item.imageZoomPercent ?? 100)) / 100})` }}/>;
+  if (src) return <img className="bound-image" src={src} alt={item.type === 'signature' ? 'Signature' : 'Image'} style={{ objectFit: item.imageFit === 'expand' ? 'contain' : (item.imageFit ?? 'contain'), objectPosition: item.imageObjectPosition ?? 'center', filter: imageElementFilter(item), transform: `scale(${Math.max(100, Math.min(400, item.imageZoomPercent ?? 100)) / 100})` }}/>;
   if (item.type === 'signature' && item.signatureShowPlaceholder === false) return null;
   const Icon = item.type === 'signature' ? Signature : Image;
   return <><Icon size={item.type === 'signature' ? 36 : 26}/><span>{item.type === 'signature' ? 'Signature image' : 'Image'}</span></>;
