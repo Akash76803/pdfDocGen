@@ -41,11 +41,16 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
         // Measure the real rendered content, not the logical canvas element height.
         // scrollHeight is important when a newly-added Custom Table row temporarily
         // overflows its old wrapper before Body Flow receives the new height.
-        const next = Math.max(32, Math.ceil(Math.max(
-          shell.scrollHeight,
-          node.scrollHeight,
-          node.getBoundingClientRect().height,
-        )));
+        // A Custom Table lives inside the resizable selection wrapper. The
+        // wrapper can still have its *previous* height, so shell.scrollHeight
+        // measures the empty selection area and prevents shrinking. Use the
+        // intrinsic table height plus optional editor ruler instead.
+        const rulerHeight = shell.querySelector('.db-column-ruler')?.getBoundingClientRect().height ?? 0;
+        const intrinsicHeight = node.getBoundingClientRect().height + rulerHeight;
+        const renderedHeight = renderTable.mode === 'custom'
+          ? intrinsicHeight
+          : Math.max(shell.scrollHeight, node.scrollHeight, intrinsicHeight);
+        const next = Math.max(32, Math.ceil(renderedHeight));
         if (lastPublishedHeightRef.current !== null && Math.abs(next - lastPublishedHeightRef.current) < 1) return;
         lastPublishedHeightRef.current = next;
         onHeightChangeRef.current?.(next);
@@ -56,7 +61,7 @@ export function TableCanvas({ table, record, source, documentSource, globalFormu
     observer?.observe(shell);
     observer?.observe(node);
     return () => { cancelAnimationFrame(frame); observer?.disconnect(); };
-  }, [tableStructureKey]);
+  }, [tableStructureKey, renderTable.mode]);
 
   const startColumnResize = (event: ReactPointerEvent<HTMLSpanElement>, columnIndex: number) => {
     if (columnIndex < 0 || columnIndex >= renderTable.columns.length - 1) return;
