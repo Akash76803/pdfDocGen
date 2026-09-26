@@ -28,3 +28,18 @@ Desktop screenshot/exact PDF uses browser canvas rendering. Cloud/Salesforce nat
 - UI code and sizing regression tests in isolated feature branch.
 - GitHub automated npm install/typecheck/unit tests/build.
 - Pending: visual desktop QA, export/native parity, versioned template migration checks, Windows installer, user acceptance.
+
+
+## UX-9.1 — Fit Image to Shape (user-requested 2026-09-26)
+
+**User reference:** A leaf silhouette with content exactly constrained to the leaf. Deliver one action that transforms an existing Shape's image into a proportionally filled image masked by that Shape's actual boundary, rather than a second independent Image sitting on top of the Shape.
+
+**Implementation committed on this draft branch:**
+- New `Fit Image to Shape` in the Shape Properties and Shape Content inspectors. If there is no image, the action opens image upload; upload and fit are one operation. If an image source, asset or data binding already exists, the action immediately applies fit.
+- Explicit `fitImageToShapePatch` resets fit to Cover, image position to Center, zoom to 100%, background media position, automatic Shape media clipping and no inner padding for image-only masks.
+- Existing deliberately configured Text + Media preserves its text overlay and padding. Existing text-only placeholder switches to image-only.
+- Existing shape visual masks the image at the Shape silhouette; rounded masks now use the configured Shape corner radius (instead of hardcoded 18px), preserving adjustable rounded Shape boundaries.
+- Existing Shape move/resize preserves image as a child; original file and bindings are retained when applying fit to an existing image, and explicit new upload clears an obsolete image binding.
+- Regression tests added for default conversion, intentional text overlay preservation, and repeatability of cover/center/zoom reset.
+
+**Limits / quality gates:** This action uses the existing Shape preset paths (circle, rounded rectangle, star, arrow, badge, polygon, etc.); uploading an arbitrary leaf SVG *as a new Shape mask* is not implemented by this change. Custom user-imported path support would require an additional scoped phase. The browser/desktop rendering and exact canvas-captured PDF use the Shape masking path; Cloud/Salesforce native output uses a distinct renderer and **must not be declared identical** until separate backend mask support and E2E smoke pass. Do not merge/deploy or overwrite the proven Salesforce AUTH-UX-3 service for this draft.
