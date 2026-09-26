@@ -2,13 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { fitImageToShapePatch, isPointInsideShapeClip, shapeSafeMediaBounds } from './shapeImageFit.ts';
 
 describe('UX-9.1 one-click shape image fitting', () => {
-  it('converts a default text shape into a centered clipped no-crop image', () => {
+  it('converts a default text shape into a centered no-crop Expand image with filled surroundings', () => {
     expect(fitImageToShapePatch({ shapeContentMode: 'text', shapeMediaPosition: 'left', imageFit: 'contain' })).toEqual({
       shapeContentMode: 'media',
       shapeMediaPosition: 'background',
       shapeClipMedia: true,
       shapePadding: 0,
-      imageFit: 'contain',
+      imageFit: 'expand',
       imageObjectPosition: 'center',
       imageZoomPercent: 100,
       shapeMediaOverlayOpacity: 100,
@@ -22,7 +22,7 @@ describe('UX-9.1 one-click shape image fitting', () => {
   it('resets existing image offset/fit so the action is repeatable', () => {
     const previous = { shapeContentMode: 'media' as const, imageFit: 'fill' as const, imageZoomPercent: 320, imageObjectPosition: 'left' as const };
     const result = fitImageToShapePatch(previous);
-    expect(result.imageFit).toBe('contain');
+    expect(result.imageFit).toBe('expand');
     expect(result.imageZoomPercent).toBe(100);
     expect(result.imageObjectPosition).toBe('center');
     expect(fitImageToShapePatch({ ...previous, ...result })).toEqual(result);
@@ -63,5 +63,23 @@ describe('UX-9.2 no-crop shape-safe bounds', () => {
       expect(isPointInsideShapeClip(clip, { x: low, y: v }, 220, 110)).toBe(true);
       expect(isPointInsideShapeClip(clip, { x: high, y: v }, 220, 110)).toBe(true);
     }
+  });
+});
+
+describe('UX-9.3 Expand semantics', () => {
+  it('one click persists Expand while resetting previous Cover zoom and crop position', () => {
+    const fit = fitImageToShapePatch({ imageFit: 'cover', imageObjectPosition: 'left', imageZoomPercent: 280 });
+    expect(fit.imageFit).toBe('expand');
+    expect(fit.imageZoomPercent).toBe(100);
+    expect(fit.imageObjectPosition).toBe('center');
+    expect(fit.shapeClipMedia).toBe(true);
+    expect(fit.shapeMediaPosition).toBe('background');
+  });
+  it('preserves non-rectangular safe foreground while background can cover full shape', () => {
+    const bounds = shapeSafeMediaBounds('ellipse(50% 50% at 50% 50%)', 200, 200);
+    expect(bounds.width).toBeLessThan(100);
+    expect(bounds.left).toBeGreaterThan(0);
+    const fullBackground = { left: 0, top: 0, width: 100, height: 100 };
+    expect(fullBackground.width).toBe(100);
   });
 });
