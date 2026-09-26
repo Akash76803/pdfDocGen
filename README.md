@@ -4,9 +4,9 @@ Standalone PDF/DOCX business-document application extracted from `Akash76803/doc
 
 ## Current phase
 
-**DB-4 — Dynamic + Custom Table Engine (DB-4.2 Row / Column Structure Editor)**
+**AUTH-UX-2 — Unified Desktop + ERP API Token (desktop OAuth / Tauri hardening and E2E validation)**
 
-The active desktop app is intentionally document-focused. The historical Card Designer, CAD and packaging source is preserved under `reference/` and is not part of the active build.
+The active desktop app is intentionally document-focused. The current cloud-auth work is tracked under AUTH-UX-2; historical builder phases remain documented below for implementation context. The historical Card Designer, CAD and packaging source is preserved under `reference/` and is not part of the active build.
 
 ## Run locally
 
@@ -254,3 +254,90 @@ The Generate workspace is now functional for one-document output. It uses the sa
 The configurable page/content border now follows the page margin box instead of the physical paper edge. See `docs/DB2_FIX4_CONTENT_BORDER_MARGIN_BOX.md`.
 
 DB-6B Fix3: API shared local template repository enabled.
+
+
+## AUTH-UX-3 — Backend Google OAuth Exchange / Desktop API Token Setup
+
+The Windows desktop app uses a Google **Desktop app** OAuth client with Authorization Code + PKCE. The desktop binary must never embed a Google OAuth client secret.
+
+### Fresh-machine setup
+
+1. Clone the repository and install Node 20 dependencies:
+
+```bash
+npm ci
+npm run typecheck
+npm test
+npm run build
+```
+
+2. Copy the desktop environment template:
+
+```text
+apps/desktop/.env.example
+→ apps/desktop/.env.local
+```
+
+3. Set the public Desktop OAuth client ID:
+
+```env
+VITE_GOOGLE_OAUTH_CLIENT_ID=YOUR_DESKTOP_APP_CLIENT_ID.apps.googleusercontent.com
+```
+
+`.env.local` is machine-local and must remain ignored by Git. Do not add `VITE_GOOGLE_OAUTH_CLIENT_SECRET`, `GOCSPX-...`, raw `pdfdg_*` tokens, or bootstrap bearer-token values to committed files.
+
+4. For local token-hybrid API startup, provide credentials securely through the server environment before launching the API. Never commit actual values or include the OAuth client secret in desktop build settings:
+
+```powershell
+$env:API_AUTH_MODE = "token-hybrid"
+$env:API_AUTH_STATIC_BEARER_TOKEN = "<local bootstrap token>"
+$env:API_AUTH_GOOGLE_CLIENT_ID = "<same Desktop OAuth client ID>"
+# API_AUTH_GOOGLE_CLIENT_SECRET must be supplied securely on the API SERVER only.
+# On Cloud Run, bind it from Google Secret Manager (not from a VITE_* variable).
+node apps/api/start-local.js
+```
+
+5. Run the native desktop shell:
+
+```bash
+npm run tauri:dev
+```
+
+For a production Windows installer:
+
+```bash
+cd apps/desktop
+npx tauri build
+```
+
+The NSIS installer is generated under `apps/desktop/src-tauri/target/release/bundle/nsis/`.
+
+### Desktop token flow
+
+```text
+Settings → Generate Token
+→ system-browser Google verification
+→ loopback callback on 127.0.0.1
+→ short-lived authorization code + PKCE verifier
+→ HTTPS POST /api/v1/auth/google/exchange
+→ Cloud Run exchanges code using server-only OAuth client secret
+→ Cloud Run validates signed Google ID token
+→ one-time pdfdg_* integration token
+→ secure OS credential storage
+```
+
+The same `pdfdg_*` token can be used by Desktop publish/generation and configured separately in Salesforce/ERP credentials. See [AUTH-UX-3 staged deployment and secret setup](docs/AUTH-UX3-BACKEND-OAUTH-DEPLOY.md). The server stores only the token hash and metadata.
+
+### Copy an existing token for ERP/Salesforce
+
+When Settings shows **Connected**, choose **Copy Existing Token**. Confirm the security prompt; the desktop reads the already saved `pdfdg_*` token from the operating-system credential manager and copies it directly to the clipboard. It does **not** display the secret in the UI, log it, issue a replacement token, or require another Google login. Paste it only into a trusted ERP/Salesforce credential field and clear the clipboard afterward.
+
+**Generate New Token** issues an additional token; it is not a way to view the old one and does not automatically revoke the existing server token. To invalidate a token, use **Revoke Token** for the currently stored credential. Replacing a credential in an ERP requires updating that system separately.
+
+### Security notes
+
+- The Desktop never receives the Google OAuth client secret. Only Cloud Run uses a Secret Manager-bound secret for Google's code exchange.
+- Never log authorization codes, ID/access/refresh tokens, or `pdfdg_*` values.
+- Keep committed local-start scripts reproducible by reading secrets from environment variables rather than hardcoding them.
+- Keep `Cargo.lock` committed for reproducible Rust/Tauri builds.
+- The Tauri filesystem features `fs-create-dir` and `fs-remove-file` are intentional because the desktop allowlist enables `createDir` and `removeFile`.

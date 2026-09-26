@@ -5,11 +5,11 @@
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use rand::{rngs::OsRng, RngCore};
-use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use tauri::api::shell;
+use tauri::Manager;
 use url::Url;
 
 const CLOUD_AUTH_SERVICE: &str = "pdfDocGen";
@@ -75,13 +75,19 @@ fn cloud_auth_clear_api_token() -> Result<(), String> {
   clear_secret(CLOUD_API_TOKEN_ACCOUNT)
 }
 
-#[derive(Deserialize)]
-struct GoogleTokenResponse {
-  id_token: Option<String>,
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct GoogleAuthorizationGrant {
+  code: String,
+  code_verifier: String,
+  redirect_uri: String,
 }
 
 #[tauri::command]
-async fn google_oauth_verify(window: tauri::Window, client_id: String) -> Result<String, String> {
+async fn google_oauth_authorize(
+  window: tauri::Window,
+  client_id: String,
+) -> Result<GoogleAuthorizationGrant, String> {
   let client_id = client_id.trim().to_string();
   if client_id.is_empty() {
     return Err("Google OAuth client ID is not configured.".into());
@@ -143,6 +149,9 @@ async fn google_oauth_verify(window: tauri::Window, client_id: String) -> Result
       }
     }
 
+    eprintln!("[oauth] code present: {}", code.is_some());
+    eprintln!("[oauth] state matched: {}", returned_state.as_deref() == Some(expected_state.as_str()));
+
     let success = oauth_error.is_none() && returned_state.as_deref() == Some(expected_state.as_str()) && code.is_some();
     let html = if success {
       "<html><body style='font-family:sans-serif;padding:32px'><h2>pdfDocGen connected</h2><p>Google verification completed. You can close this window and return to the desktop app.</p></body></html>"
@@ -161,37 +170,29 @@ async fn google_oauth_verify(window: tauri::Window, client_id: String) -> Result
     code.ok_or_else(|| "Google did not return an authorization code.".to_string())
   }).await.map_err(|error| format!("Google verification task failed: {error}"))??;
 
-  let response = reqwest::Client::new()
-    .post("https://oauth2.googleapis.com/token")
-    .form(&[
-      ("client_id", client_id.as_str()),
-      ("code", code.as_str()),
-      ("code_verifier", code_verifier.as_str()),
-      ("grant_type", "authorization_code"),
-      ("redirect_uri", redirect_uri.as_str()),
-    ])
-    .send()
-    .await
-    .map_err(|error| format!("Unable to exchange Google verification code: {error}"))?;
+  // The one-time code and PKCE verifier are handed to the desktop frontend;
+  // only the hosted backend exchanges them using the server-held client secret.
+  // Do not log the grant: the code and verifier are short-lived credentials.
+  Ok(GoogleAuthorizationGrant { code, code_verifier, redirect_uri })
 
-  if !response.status().is_success() {
-    return Err(format!("Google token exchange failed ({}).", response.status()));
-  }
-  let tokens: GoogleTokenResponse = response.json().await
-    .map_err(|error| format!("Google token response was invalid: {error}"))?;
-  tokens.id_token.ok_or_else(|| "Google verification did not return an ID token.".to_string())
+}
+
+#[tauri::command]
+fn tauri_ipc_smoke() -> String {
+  "TAURI_IPC_OK".into()
 }
 
 fn main() {
   tauri::Builder::default()
     .invoke_handler(tauri::generate_handler![
+      tauri_ipc_smoke,
       cloud_auth_store_refresh_token,
       cloud_auth_read_refresh_token,
       cloud_auth_clear_refresh_token,
       cloud_auth_store_api_token,
       cloud_auth_read_api_token,
       cloud_auth_clear_api_token,
-      google_oauth_verify,
+      google_oauth_authorize,
     ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");

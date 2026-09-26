@@ -12,6 +12,8 @@ import { createMonitoringLogger } from './observability.js';
 import { createInMemoryApiRateLimiter } from './rate-limit.js';
 import { createGcpApiIdempotencyStore } from './gcp-idempotency-store.js';
 import { createFirestoreApiTokenStore } from './gcp-api-token-store.js';
+import { InMemoryApiTokenStore } from './api-token-store.js';
+import { createGoogleOAuthCodeExchanger } from './google-oauth-exchange.js';
 
 const serverConfig = resolveApiServerConfig();
 const repositoryConfig = resolveApiRepositoryConfig();
@@ -23,7 +25,7 @@ assertSecureCloudAuthConfig(serverConfig, authConfig);
 const gcpStorageConfig = repositoryConfig.mode === 'cloud' ? resolveGcpStorageConfig() : undefined;
 const apiTokenStore = gcpStorageConfig
   ? createFirestoreApiTokenStore(gcpStorageConfig.projectId,gcpStorageConfig.firestoreDatabaseId)
-  : undefined;
+  : new InMemoryApiTokenStore();
 let authenticator: ApiAuthenticator | undefined;
 if (authConfig.mode === 'static-bearer') {
   authenticator = createStaticBearerAuthenticator({ token: authConfig.staticBearerToken! });
@@ -62,6 +64,19 @@ if (authConfig.mode === 'static-bearer') {
     }),
   ]);
 }
+// The OAuth client secret lives only in Cloud Run (Secret Manager), never in Vite or a Windows installer.
+const googleOAuthExchange = authConfig.mode === 'token-hybrid' && process.env.API_AUTH_GOOGLE_CLIENT_SECRET?.trim()
+  ? createGoogleOAuthCodeExchanger({
+      clientId: authConfig.googleClientId!,
+      clientSecret: process.env.API_AUTH_GOOGLE_CLIENT_SECRET,
+      authenticator: createGoogleOidcAuthenticator({
+        clientId: authConfig.googleClientId!,
+        allowedEmails: authConfig.identityAllowedEmails ?? [],
+        roles: ['publisher'],
+      }),
+    })
+  : undefined;
+
 const { host, port } = serverConfig;
 
 const composition = createTemplateRepositoryComposition({
@@ -83,6 +98,7 @@ const handler = createApiHandler({
   rateLimiter,
   idempotencyStore,
   apiTokenStore,
+  ...(googleOAuthExchange ? { googleOAuthExchange } : {}),
   logger:createMonitoringLogger(),
 });
 
