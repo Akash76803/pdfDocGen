@@ -8,7 +8,7 @@ export type ShapeImageFitFields = {
   shapeMediaPosition?: 'left' | 'right' | 'top' | 'bottom' | 'background' | 'center';
   shapeClipMedia?: boolean;
   shapePadding?: number;
-  imageFit?: 'contain' | 'cover' | 'fill';
+  imageFit?: 'contain' | 'cover' | 'fill' | 'expand';
   imageObjectPosition?: 'center' | 'top' | 'bottom' | 'left' | 'right';
   imageZoomPercent?: number;
   shapeMediaOverlayOpacity?: number;
@@ -22,7 +22,7 @@ export function fitImageToShapePatch(
     shapeMediaPosition: 'background',
     shapeClipMedia: true,
     shapePadding: selected.shapeContentMode === 'text-media' ? selected.shapePadding : 0,
-    imageFit: 'contain',
+    imageFit: 'expand',
     imageObjectPosition: 'center',
     imageZoomPercent: 100,
     shapeMediaOverlayOpacity: 100,
