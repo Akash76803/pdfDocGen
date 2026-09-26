@@ -534,3 +534,9 @@
 :root[data-theme="dark"] .table-column-manager-item.active .table-column-manager-select{background:#172554;border-color:#3b82f6}
 :root[data-theme="dark"] .table-column-manager-select small{color:#94a3b8}
 :root[data-theme="dark"] .table-column-manager-select em{background:#1e293b;color:#cbd5e1}
+
+/* UX-9.1: compact one-click Shape image fitting control. */
+.shape-fit-image-action{display:grid;gap:5px;margin:0 0 9px;padding:9px;border:1px solid #cbd5e1;border-radius:9px;background:#f8fafc}
+.shape-fit-image-action small{font-size:10px;line-height:1.4;color:#475569}
+:root[data-theme="dark"] .shape-fit-image-action{background:#1e293b;border-color:#475569}
+:root[data-theme="dark"] .shape-fit-image-action small{color:#cbd5e1}
