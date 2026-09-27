@@ -4,6 +4,51 @@ import type { TemplateLibraryEntry } from './templateLibrary.ts';
 import { loadImageAsset } from './imageAssetStore.ts';
 
 const TEMPLATE_FOLDER = 'templates';
+const TEMPLATE_BACKUP_FOLDER = 'backups';
+const MAX_TEMPLATE_BACKUPS = 10;
+
+/**
+ * Disk backups are saved before replacing a template, under the same Tauri
+ * app-data root as the template library. Backup failures must abort the
+ * overwrite: otherwise the last recoverable edit could be lost.
+ */
+async function backupExistingTemplate(directory: string, templateId: string, newContent: string): Promise<void> {
+  const currentPath = await join(directory, `${templateId}.json`);
+  let current: string;
+  try {
+    current = await readTextFile(currentPath);
+  } catch (error) {
+    // Missing template on first save is expected. Never treat other read
+    // failures (including permissions) as evidence that overwriting is safe.
+    const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
+    const message = String(error);
+    if (code === 'NotFound' || code === 'ENOENT' || /(?:os error 2|not found|does not exist)/i.test(message)) return;
+    throw error;
+  }
+  if (current === newContent) return;
+  // Don't back up invalid JSON as if it were a valid restore point, but don't
+  // silently overwrite a potentially recoverable corrupted user template.
+  let existing: unknown;
+  try { existing = JSON.parse(current); } catch { throw new Error('Existing template cannot be read as JSON; overwrite stopped to protect it.'); }
+  if (!isTemplateEntry(existing)) throw new Error('Existing template has an unexpected format; overwrite stopped to protect it.');
+
+  const backupDir = await join(directory, TEMPLATE_BACKUP_FOLDER, templateId);
+  await createDir(backupDir, { recursive: true });
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  const backupPath = await join(backupDir, `${timestamp}-${crypto.randomUUID()}.json`);
+  await writeTextFile(backupPath, current);
+
+  // Best effort retention; pruning must never affect the live template. Names
+  // start with sortable ISO timestamps, newest first.
+  try {
+    const previous = (await readDir(backupDir, { recursive: false }))
+      .filter((file) => file.name?.toLowerCase().endsWith('.json'))
+      .sort((a, b) => (b.name ?? '').localeCompare(a.name ?? ''));
+    for (const expired of previous.slice(MAX_TEMPLATE_BACKUPS)) {
+      try { await removeFile(expired.path); } catch { /* a backup remains safe if pruning fails */ }
+    }
+  } catch { /* preserving extra backups is safer than failing an already-backed-up save */ }
+}
 const LOCAL_API_BASE_URL = 'http://127.0.0.1:8787';
 
 function isTauriRuntime(): boolean {
@@ -114,7 +159,9 @@ export async function persistTemplateFile(entry: TemplateLibraryEntry): Promise<
     return;
   }
   const filePath = await join(directory, `${entry.id}.json`);
-  await writeTextFile(filePath, JSON.stringify(await selfContainedTemplateEntry(entry), null, 2));
+  const content = JSON.stringify(await selfContainedTemplateEntry(entry), null, 2);
+  await backupExistingTemplate(directory, entry.id, content);
+  await writeTextFile(filePath, content);
 }
 
 export async function deleteTemplateFile(id: string): Promise<void> {
