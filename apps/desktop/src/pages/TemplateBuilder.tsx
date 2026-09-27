@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
-import type { NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
+import type { NormalizedRecord } from '@document-tool/contracts';
 import QRCode from 'react-qr-code';
 import {
   AlignCenter, AlignLeft, AlignRight, ArrowLeft, Barcode, ChevronLeft, ChevronRight, Circle,
