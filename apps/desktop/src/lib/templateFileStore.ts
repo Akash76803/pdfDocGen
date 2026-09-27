@@ -152,7 +152,22 @@ export async function getLocalTemplateDirectory(): Promise<string | null> {
   return templateDirectory();
 }
 
-export async function persistTemplateFile(entry: TemplateLibraryEntry): Promise<void> {
+// Save operations for the same template run sequentially. The UI starts disk
+// mirroring without awaiting it; concurrent saves must not race and replace a
+// newer version with an older one.
+const inFlightTemplateSaves = new Map<string, Promise<void>>();
+
+export function persistTemplateFile(entry: TemplateLibraryEntry): Promise<void> {
+  const previous = inFlightTemplateSaves.get(entry.id) ?? Promise.resolve();
+  const pending = previous.catch(() => undefined).then(() => writeTemplateFile(entry));
+  inFlightTemplateSaves.set(entry.id, pending);
+  void pending.finally(() => {
+    if (inFlightTemplateSaves.get(entry.id) === pending) inFlightTemplateSaves.delete(entry.id);
+  }).catch(() => undefined);
+  return pending;
+}
+
+async function writeTemplateFile(entry: TemplateLibraryEntry): Promise<void> {
   const directory = await templateDirectory();
   if (!directory) {
     await syncTemplateToLocalApi(entry);
