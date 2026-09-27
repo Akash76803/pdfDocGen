@@ -20,7 +20,7 @@ vi.mock('@tauri-apps/api/fs', () => ({
   writeTextFile: vi.fn(async (path: string, content: string) => { disk.files.set(path, content); }),
   readDir: vi.fn(async (path: string) => [...disk.files.keys()]
     .filter((name) => name.startsWith(path + '/') && !name.slice(path.length + 1).includes('/'))
-    .map((file) => ({ name: file.split('/').at(-1), path: file }))),
+    .map((file) => ({ name: file.split('/').slice(-1)[0], path: file }))),
   removeFile: vi.fn(async (path: string) => { disk.files.delete(path); }),
 }));
 vi.mock('./imageAssetStore.ts', () => ({ loadImageAsset: vi.fn() }));
@@ -85,7 +85,8 @@ describe('automatic local template backups', () => {
   it('refuses to overwrite if existing backup cannot be written', async () => {
     await persistTemplateFile(entry(1));
     const old = disk.files.get(live);
-    vi.mocked(writeTextFile).mockImplementationOnce(async (path, content) => {
+    vi.mocked(writeTextFile).mockImplementationOnce(async (file, content) => {
+      const path = typeof file === 'string' ? file : file.path;
       if (path.startsWith(backupDirectory)) throw new Error('disk full');
       disk.files.set(path, content);
     });
