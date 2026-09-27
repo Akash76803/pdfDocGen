@@ -29,6 +29,7 @@ import { appendGenerationHistory, clearGenerationProgress, clearGenerationReques
 import { buildCurrentDocumentJsonBody, buildTemplateInputContract, type TemplateInputContractResult, type TemplateJsonBodyResult } from '../lib/templateJsonBody.ts';
 import { evaluateBuilderConditionalRendering, filterConditionallyVisible, normalizeConditionalRendering, requiresValue, type BuilderConditionalRendering, type BuilderConditionOperator } from '../lib/conditionalRendering.ts';
 import { fitImageToShapePatch, shapeSafeMediaBounds } from '../lib/shapeImageFit.ts';
+import { documentPreviewOptions, groupedDocumentRecords, resolveDocumentIdentityKeys, resolveTemplateDataSource, type TemplateDataConfiguration } from '../lib/templateDataConfiguration.ts';
 
 type ToolType = 'text' | 'image' | 'table' | 'shape' | 'qr' | 'barcode' | 'signature' | 'divider' | 'formula';
 type InspectorTab = 'properties' | 'content' | 'binding' | 'rows' | 'formatting' | 'conditions' | 'header' | 'footer';
@@ -168,6 +169,7 @@ type SavedTemplate = {
   documentType?: TemplateDocumentType;
   status?: 'Draft' | 'Saved';
   watermark?: WatermarkSettings;
+  templateData?: TemplateDataConfiguration | null;
 };
 
 const STORAGE_KEY = TEMPLATE_STORAGE_KEY;
@@ -190,6 +192,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [leftOpen, setLeftOpen] = useState(true);
   const [rightOpen, setRightOpen] = useState(true);
   const [name, setName] = useState('Untitled Document');
+  const [templateData, setTemplateData] = useState<TemplateDataConfiguration | null>(null);
   const initialPage: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings: defaultPageSettings(), elements: [] };
   const [pages, setPages] = useState<BuilderPage[]>([initialPage]);
   const [activePageId, setActivePageId] = useState(initialPage.id);
@@ -295,7 +298,11 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
   const [activeInsertRegion, setActiveInsertRegion] = useState<PageRegion>('body');
   const source = activeSource(dataState);
   const record = activeRecord(dataState);
-  const formulaAggregateRows = source ? documentFormulaAggregateRows(source, record, pages.flatMap((page) => page.elements)) : [];
+  const sourceTemplateData = source && templateData && (
+    templateData.sourceId === source.id || (templateData.sourceName && templateData.sourceName === source.name)
+  ) ? templateData : null;
+  const identityElements = pages.flatMap((page) => page.elements);
+  const formulaAggregateRows = source ? documentFormulaAggregateRows(source, record, identityElements, sourceTemplateData) : [];
   const formulaTokenFields: TemplateTokenField[] = formulaElements.map((item) => ({ name: item.formulaName!.trim(), label: item.formulaName!.trim() }));
   const dynamicTokenFields: TemplateTokenField[] = [...(source?.fields ?? []), ...formulaTokenFields.filter((formula) => !(source?.fields ?? []).some((field) => field.name.toLocaleLowerCase() === formula.name.toLocaleLowerCase()))];
   const resolveCurrentBuilderField = (field: string) => valueForBuilderField(record, source?.fields ?? [], formulaElements, field, formulaAggregateRows);
@@ -324,7 +331,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     if (tab === 'content' && !(['shape','qr','barcode','signature'] as ToolType[]).includes(selected?.type as ToolType)) setTab('properties');
     if (tab === 'rows' && selected?.type !== 'table') setTab('properties');
   }, [selected, tab]);
-  const globalDocumentPicker = source ? buildDocumentPreviewPicker(source, record, dataState.activeRecordIndex, activePage?.elements ?? []) : null;
+  const globalDocumentPicker = source ? buildDocumentPreviewPicker(source, record, dataState.activeRecordIndex, identityElements, sourceTemplateData) : null;
   const selectPreviewRecord = (index: number) => {
     const next = { ...dataState, activeRecordIndex: index };
     setDataState(next);
@@ -399,6 +406,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       const starterElements = buildStarterElements(builderAction.starter, settings);
       const page: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings, elements: starterElements };
       setName(builderAction.name);
+      setTemplateData(null);
       setDocumentType(builderAction.documentType);
       setPages([page]);
       setActivePageId(page.id);
@@ -414,6 +422,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
       const saved = JSON.parse(raw) as SavedTemplate;
       if ((Array.isArray(saved.pages) && saved.pages.length) || Array.isArray(saved.elements)) {
         setName(saved.name || 'Untitled Document');
+        setTemplateData(saved.templateData ?? null);
         setDocumentType(saved.documentType ?? 'Document');
         if (Array.isArray(saved.pages) && saved.pages.length) {
           const normalizedPages = saved.pages.map((page) => ({ ...page, settings: normalizePageSettings(page.settings), elements: (page.elements ?? []).map((element) => ({ ...element, region: element.region ?? 'body', fontFamily: element.fontFamily ?? 'Arial', fontWeight: element.fontWeight ?? 400, italic: element.italic ?? false, underline: element.underline ?? false, lineHeight: element.lineHeight ?? 1.25, layoutMode: element.layoutMode ?? 'floating', flowRowId: element.flowRowId ?? (element.layoutMode === 'flow' ? `legacy-row-${element.id}` : undefined), flowWidthPercent: element.flowWidthPercent ?? (element.layoutMode === 'flow' ? 100 : undefined), flowGapBeforeMm: element.flowGapBeforeMm ?? 0, flowGapAfterMm: element.flowGapAfterMm ?? 4, flowColumnGapMm: element.flowColumnGapMm ?? 4, flowAlign: element.flowAlign ?? 'left', flowDistribution: element.flowDistribution ?? 'packed', flowWidth: element.flowWidth ?? 'full' })) }));
@@ -453,6 +462,17 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     window.addEventListener('storage', refresh);
     return () => { window.removeEventListener(DATA_EVENT, refresh); window.removeEventListener('storage', refresh); };
   }, []);
+
+  useEffect(() => {
+    if (!templateHydrated || !templateData?.sourceId || dataState.sources.length === 0) return;
+    const configured = resolveTemplateDataSource(dataState.sources, templateData);
+    if (!configured) return;
+    if (dataState.activeSourceId !== configured.id) {
+      const next = { ...dataState, activeSourceId: configured.id, activeRecordIndex: 0 };
+      setDataState(next);
+      saveDataSelection(next);
+    }
+  }, [templateHydrated, templateData?.sourceId, templateData?.sourceName, dataState.activeSourceId, dataState.sources]);
 
   useEffect(() => {
     const onGenerationRequest = () => setGenerationRequestVersion((value) => value + 1);
@@ -877,6 +897,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     const page: BuilderPage = { id: crypto.randomUUID(), name: 'Page 1', settings, elements: buildStarterElements(request.starter, settings) };
     recordHistory();
     setName(request.name);
+    setTemplateData(null);
     setDocumentType(request.documentType);
     setPages([page]);
     setActivePageId(page.id);
@@ -895,7 +916,7 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
     }));
     const globalWatermark = normalizedPages[0]?.settings.watermark ?? defaultPageSettings().watermark;
     const pagesWithGlobalWatermark = normalizedPages.map((page) => ({ ...page, settings: { ...page.settings, watermark: { ...globalWatermark } } }));
-    const payload: SavedTemplate = { name, pages: pagesWithGlobalWatermark, activePageId, documentType, status: 'Saved', watermark: { ...globalWatermark }, updatedAt: savedAt.toISOString() };
+    const payload: SavedTemplate = { name, pages: pagesWithGlobalWatermark, activePageId, documentType, status: 'Saved', watermark: { ...globalWatermark }, templateData, updatedAt: savedAt.toISOString() };
     saveTemplateToLibrary(window.localStorage, payload);
     setPages(pagesWithGlobalWatermark);
     setStatus('Saved locally');
@@ -1222,6 +1243,40 @@ export function TemplateBuilder({ onNavigate }: { onNavigate: (route: AppRoute) 
           <span>{status}{lastSavedAt ? ` • Last saved ${new Date(lastSavedAt).toLocaleString()}` : ''} • {pageSettings.preset} {pageSettings.orientation.toLowerCase()} • {pages.length} builder page{pages.length === 1 ? '' : 's'}{documentOutputPageCount > 1 ? ` • ${documentOutputPageCount} output pages` : ''}</span>
         </div>
         <div className="builder-actions">
+          <details className="toolbar-menu template-data-settings">
+            <summary className="secondary">Template data</summary>
+            <div className="toolbar-menu-popover" style={{ minWidth: 290, padding: 12 }}>
+              <label>Primary data source
+                <select aria-label="Template primary data source" value={source?.id ?? ''} onChange={(event) => {
+                  const selectedSource = dataState.sources.find((entry) => entry.id === event.target.value);
+                  const previousKey = templateData?.documentIdField;
+                  setTemplateData(selectedSource ? {
+                    sourceId: selectedSource.id,
+                    sourceName: selectedSource.name,
+                    documentIdField: selectedSource.fields.some((field) => field.name === previousKey) ? previousKey ?? null : null,
+                  } : null);
+                  const next = { ...dataState, activeSourceId: selectedSource?.id ?? null, activeRecordIndex: 0 };
+                  setDataState(next);
+                  saveDataSelection(next);
+                  setStatus('Unsaved changes');
+                }}>
+                  {dataState.sources.length === 0 ? <option value="">Import CSV, Excel or JSON first</option> : null}
+                  {dataState.sources.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                </select>
+              </label>
+              <label>Document ID column
+                <select aria-label="Template document ID column" disabled={!source} value={sourceTemplateData?.documentIdField ?? ''} onChange={(event) => {
+                  if (!source) return;
+                  setTemplateData({ sourceId: source.id, sourceName: source.name, documentIdField: event.target.value || null });
+                  setStatus('Unsaved changes');
+                }}>
+                  <option value="">Choose Document ID</option>
+                  {(source?.fields ?? []).map((field) => <option key={field.name} value={field.name}>{field.label || field.name}</option>)}
+                </select>
+              </label>
+              <small>Save the template to remember this source and Document ID column. Imported records remain in your data library, not the template.</small>
+            </div>
+          </details>
           {source ? <div className="global-preview-picker"><span>{globalDocumentPicker ? 'Preview document' : 'Preview record'}</span><RecordPicker count={source.records.length} value={globalDocumentPicker?.value ?? dataState.activeRecordIndex} options={globalDocumentPicker?.options} disabled={source.records.length === 0} compactLabel={globalDocumentPicker ? 'Document' : 'Record'} searchable searchPlaceholder={globalDocumentPicker ? 'Search document ID…' : 'Search record…'} onChange={selectPreviewRecord}/></div> : null}
           <div className="toolbar-history" aria-label="History actions">
             <button className="toolbar-icon-button" title="Undo (Ctrl+Z)" onClick={undo} disabled={undoStackRef.current.length === 0}><Undo2 size={16}/><span className="sr-only">Undo</span></button>
@@ -2012,31 +2067,28 @@ function PageProperties({ settings, pageName, pages, activePageId, virtualPageCo
   </div>;
 }
 
-function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, activeRecordIndex: number, pageElements: BuilderElement[]) {
-  const identityTable = pageElements.find((item) => {
-    if (item.type !== 'table' || item.table?.mode !== 'dynamic' || item.table.binding?.sourceId !== source.id) return false;
-    const parentKeys = item.table.binding.parentKeys?.filter(Boolean) ?? (item.table.binding.parentKey ? [item.table.binding.parentKey] : []);
-    return parentKeys.length > 0;
-  });
-  const identityKeys = identityTable?.table?.binding?.parentKeys?.filter(Boolean)
-    ?? (identityTable?.table?.binding?.parentKey ? [identityTable.table.binding.parentKey] : []);
-  if (identityKeys.length === 0) return null;
+function buildDocumentPreviewPicker(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, activeRecordIndex: number, pageElements: BuilderElement[], templateData: TemplateDataConfiguration | null = null) {
+  const keys = resolveDocumentIdentityKeys(templateData, source, legacyDocumentIdentityKeys(source, pageElements));
+  if (keys.length === 0) return null;
+  const options = documentPreviewOptions(source, keys);
+  if (options.length === 0) return null;
+  const currentIdentity = record ? keys.map((key) => displayValue(valueForField(record, key)).trim()).join('\u241f') : '';
+  const selected = currentIdentity
+    ? options.find((option) => {
+      const row = source.records[option.value];
+      return row && keys.map((key) => displayValue(valueForField(row, key)).trim()).join('\u241f') === currentIdentity;
+    }) : null;
+  return { options, value: selected?.value ?? activeRecordIndex };
+}
 
-  const seen = new Map<string, { value: number; label: string }>();
-  source.records.forEach((sourceRecord, index) => {
-    const values = identityKeys.map((key) => displayValue(valueForField(sourceRecord, key)).trim());
-    const composite = values.join('\u241F');
-    if (!composite || values.every((value) => !value) || seen.has(composite)) return;
-    const fieldLabels = identityKeys.map((key) => source.fields.find((field) => field.name === key)?.label || key);
-    const label = identityKeys.length === 1
-      ? `${fieldLabels[0]}: ${values[0]}`
-      : `${fieldLabels.join(' + ')}: ${values.join(' · ')}`;
-    seen.set(composite, { value: index, label });
-  });
-  const currentValues = record ? identityKeys.map((key) => displayValue(valueForField(record, key)).trim()) : [];
-  const currentComposite = currentValues.join('\u241F');
-  const selectedOption = currentComposite ? seen.get(currentComposite) : undefined;
-  return { options: Array.from(seen.values()), value: selectedOption?.value ?? activeRecordIndex };
+function legacyDocumentIdentityKeys(source: NonNullable<ReturnType<typeof activeSource>>, elements: BuilderElement[]): string[] {
+  const table = elements.find((item) =>
+    item.type === 'table' && item.table?.mode === 'dynamic'
+    && item.table.binding?.sourceId === source.id
+    && ((item.table.binding.parentKeys?.filter(Boolean).length ?? 0) > 0 || Boolean(item.table.binding.parentKey)),
+  );
+  return table?.table?.binding?.parentKeys?.filter(Boolean)
+    ?? (table?.table?.binding?.parentKey ? [table.table.binding.parentKey] : []);
 }
 
 function Inspector({ tab, onInspectorTab, selected, source, record, formulaElements, formulaAggregateRows, dynamicTokenFields, dataState, pageSettings, pageName, pages, activePageId, virtualPageCount, activePreviewPageIndex, onFocusPreviewPage, onPageSettings, onPageName, onAddPage, onDuplicatePage, onDeletePage, onMovePage, onSelectPage, onUpdate, onDelete, onDuplicate, onArrange, onMoveFlow, onFlowRowAction, relativeElements, onSetInsertRegion, onEditTableConfiguration }: {
@@ -3239,19 +3291,10 @@ function formulaTokenFieldsForElements(formulas: BuilderElement[]): TemplateToke
   });
 }
 
-function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[]): NormalizedRecord[] {
+function documentFormulaAggregateRows(source: NonNullable<ReturnType<typeof activeSource>>, record: ReturnType<typeof activeRecord>, elements: BuilderElement[], templateData: TemplateDataConfiguration | null = null): NormalizedRecord[] {
   const rows = source.records.filter((item): item is NormalizedRecord => !!item && typeof item === 'object');
-  if (!record || typeof record !== 'object') return rows;
-  const identityTable = elements.find((item) => {
-    if (item.type !== 'table' || item.table?.mode !== 'dynamic' || item.table.binding?.sourceId !== source.id) return false;
-    const parentKeys = item.table.binding.parentKeys?.filter(Boolean) ?? (item.table.binding.parentKey ? [item.table.binding.parentKey] : []);
-    return parentKeys.length > 0;
-  });
-  const parentKeys = identityTable?.table?.binding?.parentKeys?.filter(Boolean)
-    ?? (identityTable?.table?.binding?.parentKey ? [identityTable.table.binding.parentKey] : []);
-  if (parentKeys.length === 0) return rows;
-  const same = (left: unknown, right: unknown) => displayValue(left as NormalizedValue | undefined).trim() === displayValue(right as NormalizedValue | undefined).trim();
-  return rows.filter((row) => parentKeys.every((key) => same(valueForField(row, key), valueForField(record, key))));
+  const keys = resolveDocumentIdentityKeys(templateData, source, legacyDocumentIdentityKeys(source, elements));
+  return groupedDocumentRecords(rows, record, keys);
 }
 
 function formulaAggregateNumericValue(value: unknown): number | null {
