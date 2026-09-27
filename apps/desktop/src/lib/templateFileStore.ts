@@ -6,6 +6,7 @@ import { loadImageAsset } from './imageAssetStore.ts';
 const TEMPLATE_FOLDER = 'templates';
 const TEMPLATE_BACKUP_FOLDER = 'backups';
 const MAX_TEMPLATE_BACKUPS = 10;
+const lastBackupTimestamp = new Map<string, number>();
 
 /**
  * Disk backups are saved before replacing a template, under the same Tauri
@@ -34,7 +35,11 @@ async function backupExistingTemplate(directory: string, templateId: string, new
 
   const backupDir = await join(directory, TEMPLATE_BACKUP_FOLDER, templateId);
   await createDir(backupDir, { recursive: true });
-  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  // Rapid successive saves can land in the same millisecond. Keep names
+  // monotonically sortable so retention always removes the oldest revision.
+  const timestampValue = Math.max(Date.now(), (lastBackupTimestamp.get(templateId) ?? 0) + 1);
+  lastBackupTimestamp.set(templateId, timestampValue);
+  const timestamp = new Date(timestampValue).toISOString().replace(/[:.]/g, '-');
   const backupPath = await join(backupDir, `${timestamp}-${crypto.randomUUID()}.json`);
   await writeTextFile(backupPath, current);
 
