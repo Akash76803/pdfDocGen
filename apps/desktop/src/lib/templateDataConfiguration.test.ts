@@ -14,8 +14,8 @@ const source: BuilderDataSource = {
   importedAt: '2026-09-27T00:00:00Z',
   warnings: [],
   fields: [
-    { name: 'invoiceNo', label: 'Invoice Number' },
-    { name: 'amount', label: 'Amount' },
+    { name: 'invoiceNo', label: 'Invoice Number', type: 'string', required: false },
+    { name: 'amount', label: 'Amount', type: 'number', required: false },
   ],
   records: [
     { invoiceNo: 'INV-001', amount: 10 },
