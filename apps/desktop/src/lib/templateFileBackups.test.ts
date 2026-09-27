@@ -88,7 +88,7 @@ describe('automatic local template backups', () => {
     vi.mocked(writeTextFile).mockImplementationOnce(async (file, content) => {
       const path = typeof file === 'string' ? file : String(file.path ?? '');
       if (path.startsWith(backupDirectory)) throw new Error('disk full');
-      disk.files.set(path, content);
+      disk.files.set(path, typeof content === 'string' ? content : '');
     });
     await expect(persistTemplateFile(entry(2))).rejects.toThrow('disk full');
     expect(disk.files.get(live)).toBe(old);
