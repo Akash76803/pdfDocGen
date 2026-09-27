@@ -23,7 +23,7 @@ async function backupExistingTemplate(directory: string, templateId: string, new
     // failures (including permissions) as evidence that overwriting is safe.
     const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
     const message = String(error);
-    if (code === 'NotFound' || code === 'ENOENT' || /(?:os error 2|not found|does not exist)/i.test(message)) return;
+    if (code === 'NotFound' || code === 'ENOENT' || /(?:os error 2|not\s*found|does not exist)/i.test(message)) return;
     throw error;
   }
   if (current === newContent) return;
