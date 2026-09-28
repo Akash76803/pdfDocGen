@@ -32,9 +32,17 @@ export function Templates({ onNavigate }: { onNavigate: (route: AppRoute) => voi
   const [copiedTemplateId, setCopiedTemplateId] = useState<string | null>(null);
   const [publishingTemplateId, setPublishingTemplateId] = useState<string | null>(null);
   const [publishNotice, setPublishNotice] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
+  const [localLoadError, setLocalLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    void syncTemplateLibraryFromLocalFiles(window.localStorage).then(setTemplates).catch(() => undefined);
+    // Never silently treat a denied filesystem read as an empty template library.
+    // Existing browser-cached templates remain intact if local loading fails.
+    void syncTemplateLibraryFromLocalFiles(window.localStorage)
+      .then((entries) => { setTemplates(entries); setLocalLoadError(null); })
+      .catch((error: unknown) => {
+        console.error('Unable to load saved local template files:', error);
+        setLocalLoadError('Saved template files could not be loaded. Your templates have not been deleted. Check the desktop filesystem permissions and restart the application.');
+      });
     const refresh = () => setTemplates(migrateLegacyTemplateToLibrary(window.localStorage));
     window.addEventListener('storage', refresh);
     window.addEventListener('focus', refresh);
@@ -130,6 +138,7 @@ export function Templates({ onNavigate }: { onNavigate: (route: AppRoute) => voi
   return <div className="page">
     {newTemplateOpen && <NewTemplateModal onCancel={() => setNewTemplateOpen(false)} onCreate={createFromSetup} />}
     <PageHeader eyebrow="Library" title="Templates" description="Reusable local-first layouts that can be published independently to the hosted Document API." actions={<button className="primary" onClick={createNew}><Plus size={17}/>New template</button>} />
+    {localLoadError ? <div className="template-publish-notice error" role="alert"><FileText size={16}/><span>{localLoadError}</span><button type="button" onClick={() => setLocalLoadError(null)}>Dismiss</button></div> : null}
     {publishNotice ? <div className={`template-publish-notice ${publishNotice.tone}`} role={publishNotice.tone === 'error' ? 'alert' : 'status'}>{publishNotice.tone === 'success' ? <Check size={16}/> : <CloudUpload size={16}/>}<span>{publishNotice.text}</span><button type="button" onClick={() => setPublishNotice(null)}>Dismiss</button></div> : null}
     <div className="toolbar"><label className="search"><Search size={17}/><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search templates" /></label><select aria-label="Template type" value={type} onChange={(event) => setType(event.target.value)}><option>All document types</option><option>Invoice</option><option>Quotation</option><option>Report</option><option>Certificate</option><option>Agreement</option><option>Letter</option><option>Document</option></select><select aria-label="Template status" value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}><option>Active</option><option>All</option><option>Draft</option><option>Saved</option><option>Published</option><option>Archived</option></select></div>
     <section className="panel template-library-panel">

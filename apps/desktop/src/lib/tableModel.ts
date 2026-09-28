@@ -1,6 +1,7 @@
 import type { FieldDefinition, NormalizedRecord, NormalizedValue } from '@document-tool/contracts';
 import type { BuilderDataSource } from './dataSourceStore.ts';
 import { evaluateBuilderConditionalRendering, normalizeConditionalRendering, type BuilderConditionalRendering } from './conditionalRendering.ts';
+import { resolveTemplateTokens, templateHasTokens } from './templateTokens.ts';
 
 export type TableMode = 'dynamic' | 'custom';
 export type TableCellType = 'text' | 'image' | 'qr' | 'barcode';
@@ -1679,8 +1680,11 @@ function rowEstimatedHeight(row: TableRow): number {
   for (const cell of row.cells) {
     const fontSize = Math.max(6, cell.style.fontSize || 11);
     const padding = Math.max(0, cell.style.padding ?? 0);
-    // CSS .db-table td uses line-height:1.25 and a 1px-ish collapsed border.
-    estimated = Math.max(estimated, Math.ceil(fontSize * 1.25 + padding * 2 + 2));
+    // CSS uses border-collapse:collapse: adjacent cells share a single border.
+    // Counting two border pixels adds a false pixel to EACH short invoice row
+    // (59 compact rows then reserve ~59px of blank space). Match the runtime
+    // row-height estimator below and the actual shared 1px table border.
+    estimated = Math.max(estimated, Math.ceil(fontSize * 1.25 + padding * 2 + 1));
   }
   return estimated;
 }
@@ -1705,8 +1709,22 @@ function runtimeBodyHeight(table: TableDefinition, runtimeValue: unknown, tableW
       const cellWidthPx = Math.max(24, tableWidthPx * widthPercent / 100);
       const fontSize = Math.max(6, cell.style.fontSize || 11);
       const padding = Math.max(0, cell.style.padding ?? 0);
-      const raw = cell.binding ? valueAtPath(runtimeValue, cell.binding) : cell.content;
-      const text = compactValueText(raw);
+      // Estimate the text the browser ACTUALLY renders (see TableCanvas.CellValue).
+      // Never count the literal {{Field Name}} token: a narrow numeric column
+      // displaying "4.05" must not be measured as a wrapped "{{Total unit Weight}}"
+      // on every invoice line. Formula cells need their evaluated numeric result too.
+      const mode = cell.valueMode ?? (cell.binding ? 'binding' : 'custom');
+      const column = table.columns[Math.max(0, visualColumn - span)];
+      const raw = mode === 'formula'
+        ? evaluateTableFormula(cell.formula, runtimeValue)
+        : mode === 'binding' && cell.binding && !templateHasTokens(cell.content)
+          ? valueAtPath(runtimeValue, cell.binding)
+          : resolveTemplateTokens(cell.content, (field) => valueAtPath(runtimeValue, field));
+      const text = cell.type === 'image' ? '' : formatTableValue(
+        raw,
+        cell.dataType ?? column?.dataType ?? 'text',
+        { ...(column?.format ?? {}), ...(cell.format ?? {}) },
+      );
       // Browser text width varies by font. 0.56em is a conservative average for
       // invoice/body text and keeps the last complete row out of the Footer.
       const usableWidth = Math.max(8, cellWidthPx - padding * 2 - 2);

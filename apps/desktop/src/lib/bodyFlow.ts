@@ -278,7 +278,11 @@ export function materializeBodyFlowPages<T extends BodyFlowElement>(
   settings: PageSettings,
   resolvePageSpan?: (element: T, pageIndex: number, y: number, availableHeightPx: number, continuationHeightPx: number) => BodyFlowPageSpan | undefined,
 ): { projected: T[]; placements: Map<string, BodyFlowPagePlacement>; pageCount: number } {
-  const projected = layoutBodyFlow(elements, settings);
+  // Formula fields are data-only: they render no canvas element and must not
+  // reserve their persisted (often 44px + 4mm) Flow row between visible blocks.
+  // Filtering before layout is essential: projecting first would leave a phantom
+  // row in the design flow even if the materialized row list later skips it.
+  const projected = layoutBodyFlow(elements.filter((element) => element.type !== 'formula'), settings);
   const bounds = contentBoundsPx(settings);
   const bottom = bounds.y + bounds.height;
   const flow = projected.filter((e) => (e.region ?? 'body') === 'body' && (e.layoutMode ?? 'floating') === 'flow');
