@@ -13,7 +13,13 @@ function fixture() {
       cell.style.fontSize = 11;
       cell.style.padding = 5;
       if (row.kind === 'header') cell.content = fields[index]!;
-      else { cell.binding = fields[index]!; cell.valueMode = 'binding'; }
+      else if (index === 6 || index === 7) {
+        // Exactly like the customer's Tax template: numeric cells contain mixed
+        // placeholder text rather than a direct binding.
+        cell.binding = undefined;
+        cell.valueMode = 'custom';
+        cell.content = index === 6 ? '{{Unit Weight}}' : '{{Total unit Weight}}';
+      } else { cell.binding = fields[index]!; cell.valueMode = 'binding'; }
     });
   }
   const rows: TablePaginationRuntimeRow[] = Array.from({ length: 59 }, (_, index) => ({
@@ -21,7 +27,7 @@ function fixture() {
     value: {
       Description: 'PART ' + String(index).padStart(3, '0'),
       HSN: '73201020', 'Product Code': 'P' + String(index),
-      Quantity: 2, Basic: 10, Taxable: 20, 'Unit Wt': 3, Total: 6,
+      Quantity: 2, Basic: 10, Taxable: 20, 'Unit Wt': 3, Total: 6, 'Unit Weight': 3, 'Total unit Weight': 6,
     },
   }));
   return { table, rows };
@@ -37,6 +43,12 @@ describe('Tax-like pagination regression: compact rows and future footer', () =>
     expect(pages[0]!.usedHeightPx).toBe(25 + 59 * 25);
   });
 
+  it('resolves narrow-column numeric tokens rather than reserving two lines for every literal placeholder', () => {
+    const { table, rows } = fixture();
+    const actual = paginateDynamicTable(table, rows, 2000, 2000, 1009, widths);
+    expect(actual[0]!.usedHeightPx).toBe(25 + 59 * 25);
+  });
+
   it('keeps all 59 records ordered and places the following HSN summary above a future footer', () => {
     const { table, rows } = fixture();
     const settings = defaultPageSettings();
@@ -46,6 +58,7 @@ describe('Tax-like pagination regression: compact rows and future footer', () =>
     const flow = [
       { id: 'top', type: 'text', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'top', x: 0, y: 0, width: 1000, height: 340, flowGapAfterMm: 4 },
       { id: 'items', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'items', x: 0, y: 0, width: 1009, height: 1065, flowGapAfterMm: 4 },
+      { id: 'formula', type: 'formula', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'formula', x: 0, y: 0, width: 220, height: 44, flowGapAfterMm: 4 },
       { id: 'hsn', type: 'table', region: 'body' as const, layoutMode: 'flow' as const, flowRowId: 'hsn', x: 0, y: 0, width: 550, height: 85, flowGapAfterMm: 4 },
     ];
     const planned = materializeBodyFlowPages(flow, settings, (element, _pageIndex, _y, available, continuation) => {
@@ -57,9 +70,15 @@ describe('Tax-like pagination regression: compact rows and future footer', () =>
     });
     const items = planned.placements.get('items')!;
     const hsn = planned.placements.get('hsn')!;
+    expect(planned.placements.has('formula')).toBe(false);
     expect(items.endPageIndex).toBeGreaterThan(items.pageIndex);
     expect(hsn.pageIndex).toBeGreaterThanOrEqual(items.endPageIndex);
-    if (hsn.pageIndex === items.endPageIndex) expect(hsn.y).toBeGreaterThanOrEqual(items.endY);
+    if (hsn.pageIndex === items.endPageIndex) {
+      expect(hsn.y).toBeGreaterThanOrEqual(items.endY);
+      // Exactly one configured 4mm row gap, not a hidden 44px formula row
+      // followed by another 4mm gap.
+      expect(hsn.y - items.endY).toBeLessThan(18);
+    }
     expect(hsn.endY).toBeLessThanOrEqual(bounds.y + bounds.height);
   });
 });
