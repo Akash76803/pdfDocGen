@@ -1679,8 +1679,11 @@ function rowEstimatedHeight(row: TableRow): number {
   for (const cell of row.cells) {
     const fontSize = Math.max(6, cell.style.fontSize || 11);
     const padding = Math.max(0, cell.style.padding ?? 0);
-    // CSS .db-table td uses line-height:1.25 and a 1px-ish collapsed border.
-    estimated = Math.max(estimated, Math.ceil(fontSize * 1.25 + padding * 2 + 2));
+    // CSS uses border-collapse:collapse: adjacent cells share a single border.
+    // Counting two border pixels adds a false pixel to EACH short invoice row
+    // (59 compact rows then reserve ~59px of blank space). Match the runtime
+    // row-height estimator below and the actual shared 1px table border.
+    estimated = Math.max(estimated, Math.ceil(fontSize * 1.25 + padding * 2 + 1));
   }
   return estimated;
 }
